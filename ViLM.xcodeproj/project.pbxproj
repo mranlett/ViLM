@@ -8,10 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		E9905C222F350284006C5910 /* LibraryCore in Frameworks */ = {isa = PBXBuildFile; productRef = E9905C212F350284006C5910 /* LibraryCore */; };
+		E9B441E22F36CB4F00687CCF /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = E9B441E12F36CB4500687CCF /* .gitignore */; };
 		E9D469662F3430B400D52C46 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = E9D469652F3430B400D52C46 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E9B441E12F36CB4500687CCF /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		E9D469542F3425C300D52C46 /* ViLM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ViLM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9FE9C362F34FD6C00E07C3F /* LibraryCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = LibraryCore; path = ../LibraryCore; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -61,6 +63,7 @@
 		E9D4694B2F3425C300D52C46 = {
 			isa = PBXGroup;
 			children = (
+				E9B441E12F36CB4500687CCF /* .gitignore */,
 				E9D469562F3425C300D52C46 /* ViLM */,
 				E9D469552F3425C300D52C46 /* Products */,
 				E9FE9C362F34FD6C00E07C3F /* LibraryCore */,
@@ -145,6 +148,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E9B441E22F36CB4F00687CCF /* .gitignore in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
