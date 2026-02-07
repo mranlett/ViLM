@@ -34,7 +34,7 @@ This project is intentionally split into a **UI app** and a **shared core librar
 ---
 
 ## Project structure
-
+```
 ViLM/
 ├─ ViLM.xcodeproj/ # Xcode project
 ├─ ViLM/ # SwiftUI app target
@@ -59,7 +59,7 @@ ViLM/
 │
 ├─ LICENSE
 └─ README.md
-
+```
 
 ---
 
