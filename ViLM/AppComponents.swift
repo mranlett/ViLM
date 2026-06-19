@@ -201,7 +201,9 @@ struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(in: proposal.width ?? 0, subviews: subviews, spacing: spacing)
+        // Use replacingUnspecifiedDimensions to handle infinity or nil safely
+        let width = proposal.replacingUnspecifiedDimensions().width
+        let result = FlowResult(in: width, subviews: subviews, spacing: spacing)
         return result.size
     }
 
@@ -239,7 +241,9 @@ struct FlowLayout: Layout {
                 totalWidth = max(totalWidth, currentX)
             }
 
-            self.size = CGSize(width: totalWidth, height: currentY + lineHeight)
+            // Prevent ScrollView bounce loops by returning maxWidth if available
+            let finalWidth = maxWidth > 0 ? maxWidth : totalWidth
+            self.size = CGSize(width: finalWidth, height: currentY + lineHeight)
         }
     }
 }
