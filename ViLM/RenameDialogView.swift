@@ -1,6 +1,10 @@
 import SwiftUI
 import LibraryCore
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 struct RenameDialogView: View {
     let oldFileName: String
@@ -18,8 +22,12 @@ struct RenameDialogView: View {
                     Text(oldFileName).lineLimit(1)
                     Spacer()
                     Button {
+                        #if os(macOS)
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(oldFileName, forType: .string)
+                        #else
+                        UIPasteboard.general.string = oldFileName
+                        #endif
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
