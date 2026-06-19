@@ -77,6 +77,7 @@ struct FrameExtractView: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Color.black
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .overlay(ProgressView().controlSize(.small))
             }
         }
