@@ -98,4 +98,11 @@ extension Asset {
             .map { String($0.dropFirst(4)) }
             .sorted()
     }
+
+    /// Returns only the tags that start with "studio:" (removing the prefix for display)
+    public var studios: [String] {
+        tags.filter { $0.hasPrefix("studio:") }
+            .map { String($0.dropFirst(7)) }
+            .sorted()
+    }
 }

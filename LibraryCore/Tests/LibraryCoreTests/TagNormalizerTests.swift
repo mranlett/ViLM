@@ -25,4 +25,14 @@ final class TagNormalizerTests: XCTestCase {
         
         XCTAssertEqual(asset.tags, ["actor:Vince Palmer", "tag:Running"])
     }
+    
+    func testAssetStudios() {
+        let asset = Asset(
+            relativePath: "test.mp4",
+            fileName: "test.mp4",
+            tags: ["studio:halfpipe", "actor:luna"]
+        )
+        
+        XCTAssertEqual(asset.studios, ["Halfpipe"])
+    }
 }

@@ -169,11 +169,15 @@ struct ContactSheetThumbnailView: View {
 struct TagBubble: View {
     let label: String
     let color: Color
+    var onEdit: (() -> Void)? = nil
     var onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
             Text(label)
+                .onTapGesture {
+                    onEdit?()
+                }
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.caption)

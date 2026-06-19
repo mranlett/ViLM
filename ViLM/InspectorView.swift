@@ -16,6 +16,7 @@ struct InspectorView: View {
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
     @State private var activeCategory = "tag"
+    @State private var editingTagValue: String? = nil
 
     // Playback / selection
     @State private var scrubTime: Double = 0
@@ -163,6 +164,8 @@ struct InspectorView: View {
 
                 Divider()
 
+                tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
+                Divider()
                 tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
                 Divider()
                 tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
@@ -402,6 +405,8 @@ struct InspectorView: View {
                 Spacer()
                 Button {
                     activeCategory = category
+                    newTagValue = ""
+                    editingTagValue = nil
                     isShowingTagEntry = true
                 } label: {
                     Image(systemName: "plus.circle")
@@ -415,7 +420,12 @@ struct InspectorView: View {
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(items, id: \.self) { item in
-                        TagBubble(label: item, color: color) {
+                        TagBubble(label: item, color: color, onEdit: {
+                            activeCategory = category
+                            newTagValue = item
+                            editingTagValue = item
+                            isShowingTagEntry = true
+                        }) {
                             deleteTag(category: category, value: item)
                         }
                     }
@@ -463,7 +473,8 @@ struct InspectorView: View {
 
     private var tagEntryPopover: some View {
         VStack(spacing: 12) {
-            Text("Add \(activeCategory.capitalized)").font(.headline)
+            Text(editingTagValue == nil ? "Add \(activeCategory.capitalized)" : "Edit \(activeCategory.capitalized)")
+                .font(.headline)
             TextField("Name...", text: $newTagValue)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { saveTag() }
@@ -511,12 +522,20 @@ struct InspectorView: View {
         var updated = asset
         let normalizedValue = TagNormalizer.normalize(tagValue: newTagValue)
         let tagToSave = "\(activeCategory):\(normalizedValue)"
+        
+        if let editingTag = editingTagValue {
+            let oldTag = "\(activeCategory):\(editingTag)"
+            updated.tags.removeAll { $0 == oldTag }
+            editingTagValue = nil
+        }
+        
         if !updated.tags.contains(tagToSave) {
             updated.tags.append(tagToSave)
-            updateAsset(updated, at: url)
-            newTagValue = ""
-            isShowingTagEntry = false
         }
+        
+        updateAsset(updated, at: url)
+        newTagValue = ""
+        isShowingTagEntry = false
     }
 
     private func deleteTag(category: String, value: String) {
