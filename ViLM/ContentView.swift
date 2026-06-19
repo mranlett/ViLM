@@ -11,6 +11,7 @@ enum SidebarItem: Hashable {
     case allAssets
     case actor(String)
     case tag(String)
+    case studio(String)
 }
 
 struct ContentView: View {

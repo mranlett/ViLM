@@ -20,6 +20,12 @@ struct SidebarView: View {
         return Array(Set(actionTags)).sorted()
     }
     
+    var allUniqueStudios: [String] {
+        let allTags = assets.flatMap { $0.tags }
+        let studioTags = allTags.filter { $0.hasPrefix("studio:") }.map { String($0.dropFirst(7)) }
+        return Array(Set(studioTags)).sorted()
+    }
+    
     // Stats for progress tracking
     private var reviewProgress: Double {
         guard !assets.isEmpty else { return 0 }
@@ -63,6 +69,12 @@ struct SidebarView: View {
             Section("Tags") {
                 ForEach(allUniqueTags, id: \.self) { tag in
                     Label(tag, systemImage: "tag").tag(SidebarItem.tag(tag))
+                }
+            }
+            
+            Section("Studios") {
+                ForEach(allUniqueStudios, id: \.self) { studio in
+                    Label(studio, systemImage: "building.2").tag(SidebarItem.studio(studio))
                 }
             }
         }

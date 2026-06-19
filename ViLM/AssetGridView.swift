@@ -26,6 +26,8 @@ struct AssetsGridView: View {
                 matchesCategory = asset.tags.contains("actor:\(name)")
             case .tag(let name):
                 matchesCategory = asset.tags.contains("tag:\(name)")
+            case .studio(let name):
+                matchesCategory = asset.tags.contains("studio:\(name)")
             }
             
             if searchText.isEmpty {
@@ -42,6 +44,7 @@ struct AssetsGridView: View {
         case .allAssets, .none: return "All Assets"
         case .actor(let name): return name
         case .tag(let name): return name
+        case .studio(let name): return name
         }
     }
     
