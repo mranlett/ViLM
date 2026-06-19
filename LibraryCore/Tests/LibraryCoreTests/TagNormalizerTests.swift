@@ -35,4 +35,29 @@ final class TagNormalizerTests: XCTestCase {
         
         XCTAssertEqual(asset.studios, ["Halfpipe"])
     }
+    
+    func testSuggestedFileNameFromTags() {
+        var asset = Asset(
+            relativePath: "my_video.mp4",
+            fileName: "my_video.mp4",
+            tags: ["actor:Luna", "actor:Vince", "tag:Running", "studio:Halfpipe"]
+        )
+        XCTAssertEqual(asset.suggestedFileNameFromTags, "Luna, Vince - Running - Halfpipe.mp4")
+        
+        // No studios
+        asset.tags = ["actor:Luna", "tag:Running Fast"]
+        XCTAssertEqual(asset.suggestedFileNameFromTags, "Luna - Running Fast.mp4")
+        
+        // No tags at all
+        asset.tags = []
+        XCTAssertNil(asset.suggestedFileNameFromTags)
+        
+        // No extension
+        asset = Asset(
+            relativePath: "my_video",
+            fileName: "my_video",
+            tags: ["actor:Luna"]
+        )
+        XCTAssertEqual(asset.suggestedFileNameFromTags, "Luna")
+    }
 }

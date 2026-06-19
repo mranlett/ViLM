@@ -3,8 +3,8 @@ import GRDB
 
 public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
     public let id: UUID
-    public let relativePath: String
-    public let fileName: String
+    public var relativePath: String
+    public var fileName: String
     public var status: ReviewStatus
     public let createdAt: Date
     public var tags: [String]
@@ -104,5 +104,27 @@ extension Asset {
         tags.filter { $0.hasPrefix("studio:") }
             .map { String($0.dropFirst(7)) }
             .sorted()
+    }
+
+    /// Computes the suggested filename format based on applied tags
+    public var suggestedFileNameFromTags: String? {
+        let actorsPart = actors.joined(separator: ", ")
+        let actionsPart = actions.joined(separator: ", ")
+        let studiosPart = studios.joined(separator: ", ")
+        
+        var components: [String] = []
+        if !actorsPart.isEmpty { components.append(actorsPart) }
+        if !actionsPart.isEmpty { components.append(actionsPart) }
+        if !studiosPart.isEmpty { components.append(studiosPart) }
+        
+        if components.isEmpty { return nil }
+        
+        let baseName = components.joined(separator: " - ")
+        let ext = (fileName as NSString).pathExtension
+        if ext.isEmpty {
+            return baseName
+        } else {
+            return "\(baseName).\(ext)"
+        }
     }
 }

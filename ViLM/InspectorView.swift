@@ -17,6 +17,8 @@ struct InspectorView: View {
     @State private var newTagValue = ""
     @State private var activeCategory = "tag"
     @State private var editingTagValue: String? = nil
+    @State private var isShowingRenameDialog = false
+    @State private var suggestedRenameValue = ""
 
     // Playback / selection
     @State private var scrubTime: Double = 0
@@ -70,6 +72,19 @@ struct InspectorView: View {
                 Text(asset.fileName)
                     .font(.headline)
                     .lineLimit(2)
+
+                HStack {
+                    Text("Metadata").font(.headline)
+                    Spacer()
+                    if asset.suggestedFileNameFromTags != nil {
+                        Button("Rename File") {
+                            suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
+                            isShowingRenameDialog = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.top, 4)
 
                 Divider()
 
@@ -194,6 +209,16 @@ struct InspectorView: View {
         .frame(minWidth: 300)
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
+        }
+        .sheet(isPresented: $isShowingRenameDialog) {
+            RenameDialogView(
+                oldFileName: asset.fileName,
+                newFileName: $suggestedRenameValue,
+                onCancel: { isShowingRenameDialog = false },
+                onConfirm: {
+                    performRename()
+                }
+            )
         }
         .onAppear {
             #if os(macOS)
@@ -555,6 +580,19 @@ struct InspectorView: View {
             }
         } catch {
             print("Update failed: \(error)")
+        }
+    }
+
+    private func performRename() {
+        guard let url = libraryURL, let store = try? LibraryStore(at: url) else { return }
+        let renamer = FileRenamerService(store: store)
+        var updated = asset
+        do {
+            try renamer.rename(asset: &updated, newFileName: suggestedRenameValue, libraryURL: url)
+            updateAsset(updated, at: url)
+            isShowingRenameDialog = false
+        } catch {
+            print("Failed to rename: \(error)")
         }
     }
 
