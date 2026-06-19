@@ -14,11 +14,15 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.2"),
     ],
     targets: [
-            .target(
-                name: "LibraryCore",
-                dependencies: [
-                    .product(name: "GRDB", package: "GRDB.swift"),
-                ]
-            )
-        ]
+        .target(
+            name: "LibraryCore",
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ]
+        ),
+        .testTarget(
+            name: "LibraryCoreTests",
+            dependencies: ["LibraryCore"]
+        )
+    ]
 )

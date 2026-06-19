@@ -424,6 +424,15 @@ struct InspectorView: View {
         }
     }
 
+    private var suggestedTags: [String] {
+        let allSuggestions = TagSuggester.suggestions(for: asset.fileName)
+        let appliedTagValues = Set(asset.tags.map {
+            let parts = $0.split(separator: ":", maxSplits: 1)
+            return parts.count == 2 ? String(parts[1]) : $0
+        })
+        return allSuggestions.filter { !appliedTagValues.contains($0) }
+    }
+
     private var tagEntryPopover: some View {
         VStack(spacing: 12) {
             Text("Add \(activeCategory.capitalized)").font(.headline)
@@ -433,9 +442,33 @@ struct InspectorView: View {
 
             Button("Save") { saveTag() }
                 .buttonStyle(.borderedProminent)
+                
+            let suggestions = suggestedTags
+            if !suggestions.isEmpty {
+                Divider()
+                Text("Suggestions")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button {
+                                newTagValue = suggestion
+                                saveTag()
+                            } label: {
+                                Text(suggestion)
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            }
         }
         .padding()
-        .frame(width: 200)
+        .frame(minWidth: 200, maxWidth: 300)
     }
 
     private func toggleStatus() {
