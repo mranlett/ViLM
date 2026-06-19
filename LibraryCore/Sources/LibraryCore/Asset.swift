@@ -27,7 +27,7 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.fileName = fileName
         self.status = status
         self.createdAt = createdAt
-        self.tags = tags
+        self.tags = tags.map { TagNormalizer.normalize(fullTag: $0) }
     }
     
     public init(from decoder: Decoder) throws {
@@ -43,15 +43,15 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         
         // Enhanced tag decoding
+        var decodedTags: [String] = []
         if let tagsArray = try? container.decode([String].self, forKey: .tags) {
-            self.tags = tagsArray
+            decodedTags = tagsArray
         } else if let tagsString = try? container.decode(String.self, forKey: .tags),
                   let data = tagsString.data(using: .utf8) {
             // Attempt to decode JSON string from SQLite text column
-            self.tags = (try? JSONDecoder().decode([String].self, from: data)) ?? []
-        } else {
-            self.tags = []
+            decodedTags = (try? JSONDecoder().decode([String].self, from: data)) ?? []
         }
+        self.tags = decodedTags.map { TagNormalizer.normalize(fullTag: $0) }
     }
     
     enum CodingKeys: String, CodingKey {

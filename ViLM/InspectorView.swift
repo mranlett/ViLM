@@ -424,13 +424,41 @@ struct InspectorView: View {
         }
     }
 
+    private var allLibraryTagValues: Set<String> {
+        var tags = Set<String>()
+        for a in assets {
+            for t in a.tags {
+                let parts = t.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    tags.insert(String(parts[1]))
+                } else {
+                    tags.insert(t)
+                }
+            }
+        }
+        return tags
+    }
+
     private var suggestedTags: [String] {
-        let allSuggestions = TagSuggester.suggestions(for: asset.fileName)
+        let baseSuggestions = TagSuggester.suggestions(for: asset.fileName)
+        var expandedSuggestions = Set(baseSuggestions.map { TagNormalizer.normalize(tagValue: $0) })
+        
+        let libraryTags = allLibraryTagValues
+        for suggestion in baseSuggestions {
+            let capitalizedSuggestion = TagNormalizer.normalize(tagValue: suggestion)
+            for existingTag in libraryTags {
+                if existingTag.localizedCaseInsensitiveContains(capitalizedSuggestion) {
+                    expandedSuggestions.insert(existingTag)
+                }
+            }
+        }
+        
         let appliedTagValues = Set(asset.tags.map {
             let parts = $0.split(separator: ":", maxSplits: 1)
             return parts.count == 2 ? String(parts[1]) : $0
         })
-        return allSuggestions.filter { !appliedTagValues.contains($0) }
+        
+        return expandedSuggestions.filter { !appliedTagValues.contains($0) }.sorted()
     }
 
     private var tagEntryPopover: some View {
@@ -481,7 +509,8 @@ struct InspectorView: View {
     private func saveTag() {
         guard !newTagValue.isEmpty, let url = libraryURL else { return }
         var updated = asset
-        let tagToSave = "\(activeCategory):\(newTagValue)"
+        let normalizedValue = TagNormalizer.normalize(tagValue: newTagValue)
+        let tagToSave = "\(activeCategory):\(normalizedValue)"
         if !updated.tags.contains(tagToSave) {
             updated.tags.append(tagToSave)
             updateAsset(updated, at: url)
