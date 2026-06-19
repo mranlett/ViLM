@@ -9,8 +9,16 @@ final class VideoPlaybackController {
     let player = AVPlayer()
 
     private var statusObservation: NSKeyValueObservation?
+    private var muteObservation: NSKeyValueObservation?
     private var pendingSeekSeconds: Double?
     private var pendingAutoplay: Bool = true
+
+    init() {
+        player.isMuted = UserDefaults.standard.bool(forKey: "playerIsMuted")
+        muteObservation = player.observe(\.isMuted, options: [.new]) { player, _ in
+            UserDefaults.standard.set(player.isMuted, forKey: "playerIsMuted")
+        }
+    }
 
     func load(url: URL, startSeconds: Double, autoplay: Bool = true) {
         pendingSeekSeconds = startSeconds

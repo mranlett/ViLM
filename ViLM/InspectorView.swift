@@ -7,11 +7,42 @@ import AppKit
 #endif
 
 struct InspectorView: View {
-    let asset: Asset
+    let selectedAssetIDs: Set<Asset.ID>
     @Binding var assets: [Asset]
-    @Binding var selectedAsset: Asset?
+    @Binding var selectedAssetBinding: Set<Asset.ID>
     @Binding var gridRefreshID: UUID
     let libraryURL: URL?
+    @Binding var missingAssetIDs: Set<Asset.ID>
+
+    var body: some View {
+        if selectedAssetIDs.count > 1 {
+            BatchInspectorView(
+                selectedAssetIDs: selectedAssetIDs,
+                assets: $assets,
+                libraryURL: libraryURL
+            )
+        } else if let assetID = selectedAssetIDs.first, let asset = assets.first(where: { $0.id == assetID }) {
+            SingleInspectorView(
+                asset: asset,
+                assets: $assets,
+                selectedAssetBinding: $selectedAssetBinding,
+                gridRefreshID: $gridRefreshID,
+                libraryURL: libraryURL,
+                missingAssetIDs: $missingAssetIDs
+            )
+        } else {
+            ContentUnavailableView("Selection Lost", systemImage: "questionmark")
+        }
+    }
+}
+
+struct SingleInspectorView: View {
+    let asset: Asset
+    @Binding var assets: [Asset]
+    @Binding var selectedAssetBinding: Set<Asset.ID>
+    @Binding var gridRefreshID: UUID
+    let libraryURL: URL?
+    @Binding var missingAssetIDs: Set<Asset.ID>
 
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
@@ -60,7 +91,9 @@ struct InspectorView: View {
                     #endif
 
                     if let url = videoURL() {
-                        playback.load(url: url, startSeconds: t, autoplay: true)
+                        if !missingAssetIDs.contains(asset.id) {
+                            playback.load(url: url, startSeconds: t, autoplay: true)
+                        }
                     }
                 }
                 .id(asset.id)
@@ -76,7 +109,13 @@ struct InspectorView: View {
                 HStack {
                     Text("Metadata").font(.headline)
                     Spacer()
-                    if asset.suggestedFileNameFromTags != nil {
+                    if missingAssetIDs.contains(asset.id) {
+                        Button("Remove Missing File") {
+                            removeMissingAsset()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    } else if asset.suggestedFileNameFromTags != nil {
                         Button("Rename File") {
                             suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
                             isShowingRenameDialog = true
@@ -576,10 +615,22 @@ struct InspectorView: View {
             try store.updateAsset(updated)
             if let index = assets.firstIndex(where: { $0.id == updated.id }) {
                 assets[index] = updated
-                selectedAsset = updated
             }
         } catch {
             print("Update failed: \(error)")
+        }
+    }
+    
+    private func removeMissingAsset() {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            try store.deleteAsset(asset)
+            assets.removeAll { $0.id == asset.id }
+            selectedAssetBinding.remove(asset.id)
+            missingAssetIDs.remove(asset.id)
+        } catch {
+            print("Failed to remove missing asset: \(error)")
         }
     }
 

@@ -60,6 +60,12 @@ public class LibraryStore {
             try Asset.fetchAll(db)
         }
     }
+    
+    public func deleteAsset(_ asset: Asset) throws {
+        try dbQueue.write { db in
+            try asset.delete(db)
+        }
+    }
 
     public func saveAsset(_ asset: Asset) throws {
         try dbQueue.write { db in

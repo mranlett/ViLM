@@ -3,9 +3,10 @@ import LibraryCore
 
 struct AssetsGridView: View {
     let assets: [Asset]
-    let sidebarSelection: SidebarItem?
+    let sidebarSelection: Set<SidebarItem>
     @Binding var searchText: String
-    @Binding var selectedAsset: Asset?
+    @Binding var selectedAssetIDs: Set<Asset.ID>
+    let missingAssetIDs: Set<Asset.ID>
     @State private var gridStyle: GridStyle = .singleFrame
     let libraryURL: URL?
     let refreshID: UUID
@@ -18,16 +19,13 @@ struct AssetsGridView: View {
     // MARK: - Filter Logic
     private var filteredAssets: [Asset] {
         assets.filter { asset in
-            let matchesCategory: Bool
-            switch sidebarSelection {
-            case .allAssets, .none:
-                matchesCategory = true
-            case .actor(let name):
-                matchesCategory = asset.tags.contains("actor:\(name)")
-            case .tag(let name):
-                matchesCategory = asset.tags.contains("tag:\(name)")
-            case .studio(let name):
-                matchesCategory = asset.tags.contains("studio:\(name)")
+            let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
+                switch item {
+                case .allAssets: return true
+                case .actor(let name): return asset.tags.contains("actor:\(name)")
+                case .tag(let name): return asset.tags.contains("tag:\(name)")
+                case .studio(let name): return asset.tags.contains("studio:\(name)")
+                }
             }
             
             if searchText.isEmpty {
@@ -40,8 +38,10 @@ struct AssetsGridView: View {
     
     // MARK: - Title Logic
     private var sidebarSelectionTitle: String {
-        switch sidebarSelection {
-        case .allAssets, .none: return "All Assets"
+        if sidebarSelection.count > 1 { return "Multiple Filters" }
+        guard let first = sidebarSelection.first else { return "All Assets" }
+        switch first {
+        case .allAssets: return "All Assets"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -63,11 +63,21 @@ struct AssetsGridView: View {
                         }
                         .buttonStyle(.plain)
                         .simultaneousGesture(TapGesture().onEnded {
-                            selectedAsset = asset
+                            selectedAssetIDs = [asset.id]
                         })
 #else
                         gridItem(for: asset)
-                            .onTapGesture { selectedAsset = asset }
+                            .onTapGesture {
+                                if NSEvent.modifierFlags.contains(.command) {
+                                    if selectedAssetIDs.contains(asset.id) {
+                                        selectedAssetIDs.remove(asset.id)
+                                    } else {
+                                        selectedAssetIDs.insert(asset.id)
+                                    }
+                                } else {
+                                    selectedAssetIDs = [asset.id]
+                                }
+                            }
 #endif
                     }
                     
@@ -111,7 +121,7 @@ struct AssetsGridView: View {
                 .foregroundStyle(.primary)
         }
         .padding(4)
-        .background(selectedAsset?.id == asset.id ? Color.blue.opacity(0.15) : Color.clear)
+        .background(selectedAssetIDs.contains(asset.id) ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(8)
         .contentShape(Rectangle())
     }
@@ -127,7 +137,12 @@ struct AssetsGridView: View {
     
     private func statusOverlay(for asset: Asset) -> some View {
         Group {
-            if asset.status == .reviewed {
+            if missingAssetIDs.contains(asset.id) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                    .background(Color.black.opacity(0.4).clipShape(Circle()))
+                    .padding(8)
+            } else if asset.status == .reviewed {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundColor(.green)
                     .background(Color.black.opacity(0.4).clipShape(Circle()))

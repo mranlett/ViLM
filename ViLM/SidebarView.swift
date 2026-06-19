@@ -2,9 +2,10 @@ import SwiftUI
 import LibraryCore
 
 struct SidebarView: View {
-    @Binding var selection: SidebarItem?
+    @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
     let onOpenLibrary: () -> Void
+    let onValidate: () -> Void
     
     // MARK: - Computed Properties
     
@@ -44,6 +45,10 @@ struct SidebarView: View {
             Section("Library") {
                 Button(action: onOpenLibrary) {
                     Label("Open Library", systemImage: "folder.badge.plus")
+                }
+                
+                Button(action: onValidate) {
+                    Label("Validate Library", systemImage: "checkmark.shield")
                 }
                 
                 HStack {

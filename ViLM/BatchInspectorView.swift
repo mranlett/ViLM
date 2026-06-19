@@ -1,0 +1,224 @@
+import SwiftUI
+import LibraryCore
+
+struct BatchInspectorView: View {
+    let selectedAssetIDs: Set<Asset.ID>
+    @Binding var assets: [Asset]
+    let libraryURL: URL?
+    
+    @State private var isShowingTagEntry = false
+    @State private var newTagValue = ""
+    @State private var activeCategory = "tag"
+    
+    private var selectedAssets: [Asset] {
+        assets.filter { selectedAssetIDs.contains($0.id) }
+    }
+    
+    private var commonStudios: [String] {
+        commonTags(prefix: "studio:")
+    }
+    
+    private var commonActors: [String] {
+        commonTags(prefix: "actor:")
+    }
+    
+    private var commonActions: [String] {
+        commonTags(prefix: "tag:")
+    }
+    
+    private func commonTags(prefix: String) -> [String] {
+        guard !selectedAssets.isEmpty else { return [] }
+        var common = Set(selectedAssets[0].tags.filter { $0.hasPrefix(prefix) })
+        for asset in selectedAssets.dropFirst() {
+            common.formIntersection(asset.tags.filter { $0.hasPrefix(prefix) })
+        }
+        return common.map { String($0.dropFirst(prefix.count)) }.sorted()
+    }
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Batch Edit Mode")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text("\(selectedAssetIDs.count) assets selected")
+                    .foregroundColor(.secondary)
+                
+                Divider()
+                
+                Button(action: toggleStatus) {
+                    Label("Toggle Reviewed Status for All", systemImage: "checkmark.seal.fill")
+                }
+                .buttonStyle(.bordered)
+                
+                Divider()
+                
+                Text("Shared Tags")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                
+                tagSection(title: "Studios", items: commonStudios, category: "studio", color: .purple)
+                Divider()
+                tagSection(title: "Actors", items: commonActors, category: "actor", color: .blue)
+                Divider()
+                tagSection(title: "Tags", items: commonActions, category: "tag", color: .green)
+                
+                Color.clear.frame(height: 40)
+            }
+            .padding()
+        }
+        .frame(minWidth: 300)
+        .popover(isPresented: $isShowingTagEntry) {
+            tagEntryPopover
+        }
+    }
+    
+    private func tagSection(title: String, items: [String], category: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.subheadline).fontWeight(.bold)
+                Spacer()
+                Button {
+                    activeCategory = category
+                    newTagValue = ""
+                    isShowingTagEntry = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(color)
+            }
+            
+            if items.isEmpty {
+                Text("None").font(.caption).foregroundColor(.secondary)
+            } else {
+                FlowLayout(spacing: 8) {
+                    ForEach(items, id: \.self) { item in
+                        TagBubble(label: item, color: color, onEdit: {
+                            // no edit in batch mode
+                        }) {
+                            deleteTag(category: category, value: item)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private var allLibraryTagValues: Set<String> {
+        var tags = Set<String>()
+        for a in assets {
+            for t in a.tags {
+                let parts = t.split(separator: ":", maxSplits: 1)
+                if parts.count == 2 {
+                    tags.insert(String(parts[1]))
+                } else {
+                    tags.insert(t)
+                }
+            }
+        }
+        return tags
+    }
+    
+    private var tagEntryPopover: some View {
+        VStack(spacing: 12) {
+            Text("Add to All \(activeCategory.capitalized)")
+                .font(.headline)
+            TextField("Name...", text: $newTagValue)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { saveTag() }
+                
+            Button("Save") { saveTag() }
+                .buttonStyle(.borderedProminent)
+                
+            let suggestions = allLibraryTagValues.sorted()
+            if !suggestions.isEmpty {
+                Divider()
+                Text("Suggestions")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button {
+                                newTagValue = suggestion
+                                saveTag()
+                            } label: {
+                                Text(suggestion)
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 200, maxWidth: 300)
+    }
+    
+    private func toggleStatus() {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            let allReviewed = selectedAssets.allSatisfy { $0.status == .reviewed }
+            let newStatus: Asset.ReviewStatus = allReviewed ? .unreviewed : .reviewed
+            
+            for var asset in selectedAssets {
+                asset.status = newStatus
+                try store.updateAsset(asset)
+                if let index = assets.firstIndex(where: { $0.id == asset.id }) {
+                    assets[index] = asset
+                }
+            }
+        } catch {
+            print("Batch update failed: \(error)")
+        }
+    }
+    
+    private func saveTag() {
+        guard !newTagValue.isEmpty, let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            let normalizedValue = TagNormalizer.normalize(tagValue: newTagValue)
+            let tagToSave = "\(activeCategory):\(normalizedValue)"
+            
+            for var asset in selectedAssets {
+                if !asset.tags.contains(tagToSave) {
+                    asset.tags.append(tagToSave)
+                    try store.updateAsset(asset)
+                    if let index = assets.firstIndex(where: { $0.id == asset.id }) {
+                        assets[index] = asset
+                    }
+                }
+            }
+        } catch {
+            print("Batch tag failed: \(error)")
+        }
+        newTagValue = ""
+        isShowingTagEntry = false
+    }
+    
+    private func deleteTag(category: String, value: String) {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            let tagToDelete = "\(category):\(value)"
+            
+            for var asset in selectedAssets {
+                if asset.tags.contains(tagToDelete) {
+                    asset.tags.removeAll { $0 == tagToDelete }
+                    try store.updateAsset(asset)
+                    if let index = assets.firstIndex(where: { $0.id == asset.id }) {
+                        assets[index] = asset
+                    }
+                }
+            }
+        } catch {
+            print("Batch tag delete failed: \(error)")
+        }
+    }
+}

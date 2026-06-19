@@ -17,10 +17,11 @@ enum SidebarItem: Hashable {
 struct ContentView: View {
     @State private var assets: [Asset] = []
     @State private var selectedLibraryURL: URL?
-    @State private var selectedAsset: Asset?
-    @State private var sidebarSelection: SidebarItem? = .allAssets
+    @State private var selectedAssetIDs: Set<Asset.ID> = []
+    @State private var sidebarSelection: Set<SidebarItem> = [.allAssets]
     @State private var searchText = ""
     @State private var gridRefreshID = UUID()
+    @State private var missingAssetIDs: Set<Asset.ID> = []
     
     // iOS picker presentation
 #if os(iOS)
@@ -35,43 +36,44 @@ struct ContentView: View {
     
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $sidebarSelection, assets: assets, onOpenLibrary: openLibrary)
+            SidebarView(
+                selection: $sidebarSelection,
+                assets: assets,
+                onOpenLibrary: openLibrary,
+                onValidate: validateLibrary
+            )
         } content: {
             AssetsGridView(
                 assets: assets,
                 sidebarSelection: sidebarSelection,
                 searchText: $searchText,
-                selectedAsset: $selectedAsset,
+                selectedAssetIDs: $selectedAssetIDs,
+                missingAssetIDs: missingAssetIDs,
                 libraryURL: selectedLibraryURL,
                 refreshID: gridRefreshID
             )
 #if os(iOS)
             .navigationDestination(for: UUID.self) { id in
-                if let asset = assets.first(where: { $0.id == id }) {
-                    InspectorView(
-                        asset: asset,
-                        assets: $assets,
-                        selectedAsset: $selectedAsset,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "Not Found",
-                        systemImage: "questionmark.folder",
-                        description: Text("That asset is no longer available.")
-                    )
-                }
+                // If you tap an individual asset, ensure it's selected
+                InspectorView(
+                    selectedAssetIDs: [id],
+                    assets: $assets,
+                    selectedAssetBinding: $selectedAssetIDs,
+                    gridRefreshID: $gridRefreshID,
+                    libraryURL: selectedLibraryURL,
+                    missingAssetIDs: $missingAssetIDs
+                )
             }
 #endif
         } detail: {
-            if let asset = selectedAsset {
+            if !selectedAssetIDs.isEmpty {
                 InspectorView(
-                    asset: asset,
+                    selectedAssetIDs: selectedAssetIDs,
                     assets: $assets,
-                    selectedAsset: $selectedAsset,
+                    selectedAssetBinding: $selectedAssetIDs,
                     gridRefreshID: $gridRefreshID,
-                    libraryURL: selectedLibraryURL
+                    libraryURL: selectedLibraryURL,
+                    missingAssetIDs: $missingAssetIDs
                 )
             } else {
                 ContentUnavailableView(
@@ -117,6 +119,24 @@ struct ContentView: View {
         }
     }
 #endif
+    
+    // MARK: - Validation Logic
+    
+    private func validateLibrary() {
+        guard let url = selectedLibraryURL else { return }
+        Task {
+            var missing: Set<Asset.ID> = []
+            for asset in assets {
+                let fileURL = url.appendingPathComponent(asset.relativePath)
+                if !FileManager.default.fileExists(atPath: fileURL.path) {
+                    missing.insert(asset.id)
+                }
+            }
+            await MainActor.run {
+                self.missingAssetIDs = missing
+            }
+        }
+    }
     
     // ✅ Keep security scope open as long as this library is selected
     private func beginSecurityScope(for url: URL) {
@@ -197,7 +217,7 @@ struct ContentView: View {
             let store = try LibraryStore(at: url)
             self.selectedLibraryURL = url
             self.assets = try store.fetchAllAssets()
-            self.sidebarSelection = .allAssets
+            self.sidebarSelection = [.allAssets]
             
         } catch {
             print("Bookmark resolution failed: \(error)")
@@ -230,7 +250,7 @@ struct ContentView: View {
                     await MainActor.run {
                         self.selectedLibraryURL = url
                         self.assets = initialAssets
-                        self.sidebarSelection = .allAssets
+                        self.sidebarSelection = [.allAssets]
                         
 #if os(macOS)
                         if let bookmarkData = try? url.bookmarkData(
@@ -251,18 +271,25 @@ struct ContentView: View {
 #endif
                     }
                     
-                    // Generate images (MVP: sequential; parallelize later if desired)
-                    for asset in initialAssets {
-                        try await service.generateContactSheet(for: asset, libraryURL: url)
-                        try await service.generateSingleThumbnail(for: asset, libraryURL: url)
-                    }
-                    
-                    // FINAL REFRESH: ensures the UI sees the new files on disk
-                    let finalAssets = try store.fetchAllAssets()
-                    await MainActor.run {
-                        self.assets = finalAssets
-                        self.gridRefreshID = UUID()
-                        print("✅ UI Refreshed with generated images.")
+                    // Generate images in background task to not block UI updates
+                    Task {
+                        for asset in initialAssets {
+                            try? await service.generateContactSheet(for: asset, libraryURL: url)
+                            try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
+                            
+                            // Incremental refresh
+                            await MainActor.run {
+                                self.gridRefreshID = UUID()
+                            }
+                        }
+                        
+                        // FINAL REFRESH: ensures the UI sees the new files on disk
+                        let finalAssets = (try? store.fetchAllAssets()) ?? initialAssets
+                        await MainActor.run {
+                            self.assets = finalAssets
+                            self.gridRefreshID = UUID()
+                            print("✅ UI Refreshed with generated images.")
+                        }
                     }
                 } catch {
                     print("Scan failed: \(error)")
