@@ -185,7 +185,7 @@ struct InspectorView: View {
                 Divider()
                 tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
 
-                Spacer(minLength: 40)
+                Color.clear.frame(height: 40)
 
                 // Keep this button for macOS (scrubber semantics). On iOS, grid tap already does the job.
                 #if os(macOS)
