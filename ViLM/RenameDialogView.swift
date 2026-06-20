@@ -19,7 +19,7 @@ struct RenameDialogView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Old File Name:").font(.subheadline).foregroundColor(.secondary)
                 HStack {
-                    Text(oldFileName).lineLimit(1)
+                    Text(oldFileName)
                     Spacer()
                     Button {
                         #if os(macOS)
@@ -41,8 +41,9 @@ struct RenameDialogView: View {
             
             VStack(alignment: .leading, spacing: 8) {
                 Text("New File Name:").font(.subheadline).foregroundColor(.secondary)
-                TextField("New name...", text: $newFileName)
+                TextField("New name...", text: $newFileName, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...5)
             }
             
             HStack {

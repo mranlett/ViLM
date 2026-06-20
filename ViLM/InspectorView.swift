@@ -104,7 +104,7 @@ struct SingleInspectorView: View {
 
                 Text(asset.fileName)
                     .font(.headline)
-                    .lineLimit(2)
+                    .lineLimit(nil)
 
                 HStack {
                     Text("Metadata").font(.headline)
