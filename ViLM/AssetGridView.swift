@@ -11,6 +11,7 @@ struct AssetsGridView: View {
     @State private var isEditMode: Bool = false
     let libraryURL: URL?
     let refreshID: UUID
+    @State private var isShowingFilterBuilder = false
     
     enum GridStyle {
         case singleFrame
@@ -52,7 +53,24 @@ struct AssetsGridView: View {
     // MARK: - Body
     var body: some View {
         ScrollView {
-            if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
+            if sidebarSelection.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(Array(sidebarSelection).sorted(by: { sidebarSelectionTitle(for: $0) < sidebarSelectionTitle(for: $1) }), id: \.self) { item in
+                            if item != .allAssets {
+                                TagBubble(label: sidebarSelectionTitle(for: item), color: color(for: item), onDelete: {
+                                    sidebarSelection.remove(item)
+                                    if sidebarSelection.isEmpty {
+                                        sidebarSelection = [.allAssets]
+                                    }
+                                })
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.top)
+            } else if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
                 ProfileGraphHeaderView(
                     filteredAssets: filteredAssets,
                     sidebarSelection: $sidebarSelection,
@@ -113,7 +131,12 @@ struct AssetsGridView: View {
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search filenames...")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                gridStylePicker
+                HStack {
+                    Button(action: { isShowingFilterBuilder = true }) {
+                        Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    gridStylePicker
+                }
             }
 #if os(iOS)
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -134,10 +157,30 @@ struct AssetsGridView: View {
             }
 #endif
         }
+        .sheet(isPresented: $isShowingFilterBuilder) {
+            FilterBuilderView(assets: assets, sidebarSelection: $sidebarSelection)
+        }
     }
     
     // MARK: - Sub-Expressions (Helpers to fix compiler error)
     
+    private func sidebarSelectionTitle(for item: SidebarItem) -> String {
+        switch item {
+        case .allAssets: return "All"
+        case .actor(let name): return name
+        case .tag(let name): return name
+        case .studio(let name): return name
+        }
+    }
+    
+    private func color(for item: SidebarItem) -> Color {
+        switch item {
+        case .allAssets: return .gray
+        case .actor: return .blue
+        case .tag: return .green
+        case .studio: return .purple
+        }
+    }
     @ViewBuilder
     private var emptyStateView: some View {
         let title = searchText.isEmpty ? "No Assets Found" : "No Results for \"\(searchText)\""
