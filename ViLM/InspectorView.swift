@@ -46,6 +46,8 @@ struct SingleInspectorView: View {
     @Binding var gridRefreshID: UUID
     let libraryURL: URL?
     @Binding var missingAssetIDs: Set<Asset.ID>
+    
+    @Environment(\.dismiss) private var dismiss
 
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
@@ -528,6 +530,8 @@ struct SingleInspectorView: View {
                             default: pivotItem = .tag(item)
                             }
                             sidebarSelection = [pivotItem]
+                            selectedAssetBinding.removeAll()
+                            dismiss()
                         }, onEdit: {
                             activeCategory = category
                             newTagValue = item
