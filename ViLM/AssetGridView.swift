@@ -3,7 +3,7 @@ import LibraryCore
 
 struct AssetsGridView: View {
     let assets: [Asset]
-    let sidebarSelection: Set<SidebarItem>
+    @Binding var sidebarSelection: Set<SidebarItem>
     @Binding var searchText: String
     @Binding var selectedAssetIDs: Set<Asset.ID>
     let missingAssetIDs: Set<Asset.ID>
@@ -52,6 +52,16 @@ struct AssetsGridView: View {
     // MARK: - Body
     var body: some View {
         ScrollView {
+            if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
+                ProfileGraphHeaderView(
+                    filteredAssets: filteredAssets,
+                    sidebarSelection: $sidebarSelection,
+                    currentSelection: first,
+                    libraryURL: libraryURL
+                )
+                .padding(.top)
+            }
+            
             if filteredAssets.isEmpty {
                 emptyStateView // Use the helper view here
                     .padding(.top, 100)

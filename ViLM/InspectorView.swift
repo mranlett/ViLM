@@ -214,9 +214,42 @@ struct SingleInspectorView: View {
                     Label("Added: \(asset.createdAt.formatted(date: .abbreviated, time: .omitted))", systemImage: "calendar")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                }
 
-                Divider()
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("External Link").font(.subheadline).foregroundColor(.secondary)
+                        HStack {
+                            TextField("https://...", text: Binding(
+                                get: { asset.externalLink ?? "" },
+                                set: { newValue in
+                                    var updatedAsset = asset
+                                    updatedAsset.externalLink = newValue.isEmpty ? nil : newValue
+                                    if let url = libraryURL {
+                                        updateAsset(updatedAsset, at: url)
+                                    }
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+
+                            if let linkString = asset.externalLink, let url = URL(string: linkString) {
+                                Button {
+                                    #if os(macOS)
+                                    NSWorkspace.shared.open(url)
+                                    #else
+                                    UIApplication.shared.open(url)
+                                    #endif
+                                } label: {
+                                    Image(systemName: "safari")
+                                }
+                                .buttonStyle(.bordered)
+                                .help("Open Link")
+                            }
+                        }
+                    }
+
+                    Divider()
+                }
 
                 tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
                 Divider()

@@ -8,6 +8,7 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
     public var status: ReviewStatus
     public let createdAt: Date
     public var tags: [String]
+    public var externalLink: String?
     
     public static let databaseTableName = "assets"
 
@@ -21,13 +22,15 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
                 fileName: String,
                 status: ReviewStatus = .unreviewed,
                 createdAt: Date = Date(),
-                tags: [String] = []) {
+                tags: [String] = [],
+                externalLink: String? = nil) {
         self.id = id
         self.relativePath = relativePath
         self.fileName = fileName
         self.status = status
         self.createdAt = createdAt
         self.tags = tags.map { TagNormalizer.normalize(fullTag: $0) }
+        self.externalLink = externalLink
     }
     
     public init(from decoder: Decoder) throws {
@@ -41,6 +44,7 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.fileName = try container.decode(String.self, forKey: .fileName)
         self.status = try container.decode(ReviewStatus.self, forKey: .status)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.externalLink = try container.decodeIfPresent(String.self, forKey: .externalLink)
         
         // Enhanced tag decoding
         var decodedTags: [String] = []
@@ -61,6 +65,7 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         case status
         case createdAt = "created_at"
         case tags
+        case externalLink = "external_link"
     }
 }
 
@@ -72,6 +77,7 @@ extension Asset {
         container["file_name"] = fileName
         container["status"] = status.rawValue
         container["created_at"] = createdAt
+        container["external_link"] = externalLink
         
         // Encode tags array to JSON String for SQLite storage
         if let jsonData = try? JSONEncoder().encode(tags),

@@ -45,6 +45,18 @@ public class LibraryStore {
             }
         }
         
+        migrator.registerMigration("v3") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "external_link", .text)
+            }
+            try db.create(table: "entity_profiles") { t in
+                t.column("id", .text).primaryKey()
+                t.column("bio", .text)
+                t.column("photo_url", .text)
+                t.column("home_page", .text)
+            }
+        }
+        
         try migrator.migrate(dbQueue)
     }
     
@@ -58,6 +70,18 @@ public class LibraryStore {
         try dbQueue.read { db in
             // This maps the SQLite rows back into your Swift Asset structs automatically
             try Asset.fetchAll(db)
+        }
+    }
+    
+    public func fetchEntityProfile(for id: String) throws -> EntityProfile? {
+        try dbQueue.read { db in
+            try EntityProfile.fetchOne(db, key: id)
+        }
+    }
+    
+    public func saveEntityProfile(_ profile: EntityProfile) throws {
+        try dbQueue.write { db in
+            try profile.save(db)
         }
     }
     

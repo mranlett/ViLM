@@ -45,7 +45,7 @@ struct ContentView: View {
         } content: {
             AssetsGridView(
                 assets: assets,
-                sidebarSelection: sidebarSelection,
+                sidebarSelection: $sidebarSelection,
                 searchText: $searchText,
                 selectedAssetIDs: $selectedAssetIDs,
                 missingAssetIDs: missingAssetIDs,
