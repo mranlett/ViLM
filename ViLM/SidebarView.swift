@@ -6,6 +6,7 @@ struct SidebarView: View {
     let assets: [Asset]
     let onOpenLibrary: () -> Void
     let onValidate: () -> Void
+    let onApplyFilters: () -> Void
     
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true
@@ -169,6 +170,20 @@ struct SidebarView: View {
     // MARK: - Progress Footer
     private var progressFooter: some View {
         VStack(spacing: 8) {
+#if os(iOS)
+            Button(action: onApplyFilters) {
+                Text("Apply Filters & View Assets")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.accentColor)
+                    .cornerRadius(10)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+#endif
+            
             Divider()
             HStack {
                 Text("Review Progress")

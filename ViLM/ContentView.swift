@@ -26,6 +26,7 @@ struct ContentView: View {
     // iOS picker presentation
 #if os(iOS)
     @State private var isShowingLibraryPicker = false
+    @State private var showContentOnIOS = false
 #endif
     
     // ✅ Keep security scope open for the active library
@@ -40,8 +41,26 @@ struct ContentView: View {
                 selection: $sidebarSelection,
                 assets: assets,
                 onOpenLibrary: openLibrary,
-                onValidate: validateLibrary
+                onValidate: validateLibrary,
+                onApplyFilters: {
+#if os(iOS)
+                    showContentOnIOS = true
+#endif
+                }
             )
+#if os(iOS)
+            .navigationDestination(isPresented: $showContentOnIOS) {
+                AssetsGridView(
+                    assets: assets,
+                    sidebarSelection: $sidebarSelection,
+                    searchText: $searchText,
+                    selectedAssetIDs: $selectedAssetIDs,
+                    missingAssetIDs: missingAssetIDs,
+                    libraryURL: selectedLibraryURL,
+                    refreshID: gridRefreshID
+                )
+            }
+#endif
         } content: {
             AssetsGridView(
                 assets: assets,
