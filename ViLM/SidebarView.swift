@@ -65,6 +65,10 @@ struct SidebarView: View {
                 sidebarRow(title: "All Assets", icon: "play.rectangle.on.rectangle", isSelected: selection == [.allAssets], count: unreviewedCount > 0 ? unreviewedCount : nil) {
                     selection = [.allAssets]
                 }
+                
+                sidebarRow(title: "Actors Gallery", icon: "person.2.crop.square.stack", isSelected: selection == [.actorGallery]) {
+                    selection = [.actorGallery]
+                }
             }
             
             DisclosureGroup(isExpanded: $isActorsExpanded) {

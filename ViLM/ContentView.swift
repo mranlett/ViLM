@@ -9,6 +9,7 @@ import UIKit
 // Ensure this is outside the struct so other files can access it
 enum SidebarItem: Hashable {
     case allAssets
+    case actorGallery
     case actor(String)
     case tag(String)
     case studio(String)
@@ -50,6 +51,33 @@ struct ContentView: View {
             )
 #if os(iOS)
             .navigationDestination(isPresented: $showContentOnIOS) {
+                if sidebarSelection == [.actorGallery] {
+                    ActorGridView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection,
+                        libraryURL: selectedLibraryURL
+                    )
+                } else {
+                    AssetsGridView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection,
+                        searchText: $searchText,
+                        selectedAssetIDs: $selectedAssetIDs,
+                        missingAssetIDs: missingAssetIDs,
+                        libraryURL: selectedLibraryURL,
+                        refreshID: gridRefreshID
+                    )
+                }
+            }
+#endif
+        } content: {
+            if sidebarSelection == [.actorGallery] {
+                ActorGridView(
+                    assets: assets,
+                    sidebarSelection: $sidebarSelection,
+                    libraryURL: selectedLibraryURL
+                )
+            } else {
                 AssetsGridView(
                     assets: assets,
                     sidebarSelection: $sidebarSelection,
@@ -59,43 +87,32 @@ struct ContentView: View {
                     libraryURL: selectedLibraryURL,
                     refreshID: gridRefreshID
                 )
-            }
-#endif
-        } content: {
-            AssetsGridView(
-                assets: assets,
-                sidebarSelection: $sidebarSelection,
-                searchText: $searchText,
-                selectedAssetIDs: $selectedAssetIDs,
-                missingAssetIDs: missingAssetIDs,
-                libraryURL: selectedLibraryURL,
-                refreshID: gridRefreshID
-            )
 #if os(iOS)
-            .navigationDestination(for: UUID.self) { id in
-                // If you tap an individual asset, ensure it's selected
-                InspectorView(
-                    sidebarSelection: $sidebarSelection,
-                    selectedAssetIDs: [id],
-                    assets: $assets,
-                    selectedAssetBinding: $selectedAssetIDs,
-                    gridRefreshID: $gridRefreshID,
-                    libraryURL: selectedLibraryURL,
-                    missingAssetIDs: $missingAssetIDs
-                )
-            }
-            .navigationDestination(for: Set<Asset.ID>.self) { ids in
-                InspectorView(
-                    sidebarSelection: $sidebarSelection,
-                    selectedAssetIDs: ids,
-                    assets: $assets,
-                    selectedAssetBinding: $selectedAssetIDs,
-                    gridRefreshID: $gridRefreshID,
-                    libraryURL: selectedLibraryURL,
-                    missingAssetIDs: $missingAssetIDs
-                )
-            }
+                .navigationDestination(for: UUID.self) { id in
+                    // If you tap an individual asset, ensure it's selected
+                    InspectorView(
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: [id],
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
+                        libraryURL: selectedLibraryURL,
+                        missingAssetIDs: $missingAssetIDs
+                    )
+                }
+                .navigationDestination(for: Set<Asset.ID>.self) { ids in
+                    InspectorView(
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: ids,
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
+                        libraryURL: selectedLibraryURL,
+                        missingAssetIDs: $missingAssetIDs
+                    )
+                }
 #endif
+            }
         } detail: {
             if !selectedAssetIDs.isEmpty {
                 InspectorView(

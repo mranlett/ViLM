@@ -23,7 +23,7 @@ struct AssetsGridView: View {
         assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
-                case .allAssets: return true
+                case .allAssets, .actorGallery: return true
                 case .actor(let name): return asset.tags.contains("actor:\(name)")
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
@@ -44,6 +44,7 @@ struct AssetsGridView: View {
         guard let first = sidebarSelection.first else { return "All Assets" }
         switch first {
         case .allAssets: return "All Assets"
+        case .actorGallery: return "Actors Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -167,6 +168,7 @@ struct AssetsGridView: View {
     private func sidebarSelectionTitle(for item: SidebarItem) -> String {
         switch item {
         case .allAssets: return "All"
+        case .actorGallery: return "Actors Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -175,7 +177,7 @@ struct AssetsGridView: View {
     
     private func color(for item: SidebarItem) -> Color {
         switch item {
-        case .allAssets: return .gray
+        case .allAssets, .actorGallery: return .gray
         case .actor: return .blue
         case .tag: return .green
         case .studio: return .purple

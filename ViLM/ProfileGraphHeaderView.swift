@@ -143,7 +143,7 @@ struct ProfileGraphHeaderView: View {
         case .actor(let name): return "\(name)'s Profile Graph"
         case .studio(let name): return "\(name) Studio Graph"
         case .tag(let name): return "Tag Graph: \(name)"
-        case .allAssets: return ""
+        case .allAssets, .actorGallery: return ""
         }
     }
     
