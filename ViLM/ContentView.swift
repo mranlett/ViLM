@@ -56,6 +56,7 @@ struct ContentView: View {
             .navigationDestination(for: UUID.self) { id in
                 // If you tap an individual asset, ensure it's selected
                 InspectorView(
+                    sidebarSelection: $sidebarSelection,
                     selectedAssetIDs: [id],
                     assets: $assets,
                     selectedAssetBinding: $selectedAssetIDs,
@@ -66,6 +67,7 @@ struct ContentView: View {
             }
             .navigationDestination(for: Set<Asset.ID>.self) { ids in
                 InspectorView(
+                    sidebarSelection: $sidebarSelection,
                     selectedAssetIDs: ids,
                     assets: $assets,
                     selectedAssetBinding: $selectedAssetIDs,
@@ -78,6 +80,7 @@ struct ContentView: View {
         } detail: {
             if !selectedAssetIDs.isEmpty {
                 InspectorView(
+                    sidebarSelection: $sidebarSelection,
                     selectedAssetIDs: selectedAssetIDs,
                     assets: $assets,
                     selectedAssetBinding: $selectedAssetIDs,

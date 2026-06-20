@@ -170,18 +170,40 @@ struct ContactSheetThumbnailView: View {
 struct TagBubble: View {
     let label: String
     let color: Color
+    var onPivot: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
     var onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .onTapGesture {
-                    onEdit?()
+        HStack(spacing: 6) {
+            Button(action: {
+                if let pivot = onPivot {
+                    pivot()
+                } else if let edit = onEdit {
+                    edit() // Fallback if no pivot provided
                 }
+            }) {
+                Text(label)
+            }
+            .buttonStyle(.plain)
+            #if os(macOS)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            #endif
+            
+            if onPivot != nil && onEdit != nil {
+                Button(action: { onEdit?() }) {
+                    Image(systemName: "pencil")
+                        .font(.caption2)
+                        .opacity(0.6)
+                }
+                .buttonStyle(.plain)
+            }
+            
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
+                    .font(.caption2)
                     .opacity(0.6)
             }
             .buttonStyle(.plain)

@@ -7,6 +7,7 @@ import AppKit
 #endif
 
 struct InspectorView: View {
+    @Binding var sidebarSelection: Set<SidebarItem>
     let selectedAssetIDs: Set<Asset.ID>
     @Binding var assets: [Asset]
     @Binding var selectedAssetBinding: Set<Asset.ID>
@@ -23,6 +24,7 @@ struct InspectorView: View {
             )
         } else if let assetID = selectedAssetIDs.first, let asset = assets.first(where: { $0.id == assetID }) {
             SingleInspectorView(
+                sidebarSelection: $sidebarSelection,
                 asset: asset,
                 assets: $assets,
                 selectedAssetBinding: $selectedAssetBinding,
@@ -37,6 +39,7 @@ struct InspectorView: View {
 }
 
 struct SingleInspectorView: View {
+    @Binding var sidebarSelection: Set<SidebarItem>
     let asset: Asset
     @Binding var assets: [Asset]
     @Binding var selectedAssetBinding: Set<Asset.ID>
@@ -517,7 +520,15 @@ struct SingleInspectorView: View {
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(items, id: \.self) { item in
-                        TagBubble(label: item, color: color, onEdit: {
+                        TagBubble(label: item, color: color, onPivot: {
+                            var pivotItem: SidebarItem
+                            switch category {
+                            case "actor": pivotItem = .actor(item)
+                            case "studio": pivotItem = .studio(item)
+                            default: pivotItem = .tag(item)
+                            }
+                            sidebarSelection = [pivotItem]
+                        }, onEdit: {
                             activeCategory = category
                             newTagValue = item
                             editingTagValue = item
