@@ -7,6 +7,14 @@ struct SidebarView: View {
     let onOpenLibrary: () -> Void
     let onValidate: () -> Void
     
+    @State private var isActorsExpanded = true
+    @State private var isTagsExpanded = true
+    @State private var isStudiosExpanded = true
+    
+    @State private var actorAlphaFilter: Character? = nil
+    @State private var tagAlphaFilter: Character? = nil
+    @State private var studioAlphaFilter: Character? = nil
+    
     // MARK: - Computed Properties
     
     var allUniqueActors: [String] {
@@ -41,52 +49,121 @@ struct SidebarView: View {
     // MARK: - Body
     
     var body: some View {
-        List(selection: $selection) {
+        List {
             Section("Library") {
                 Button(action: onOpenLibrary) {
                     Label("Open Library", systemImage: "folder.badge.plus")
                 }
+                .buttonStyle(.plain)
                 
                 Button(action: onValidate) {
                     Label("Validate Library", systemImage: "checkmark.shield")
                 }
+                .buttonStyle(.plain)
                 
-                HStack {
-                    Label("All Assets", systemImage: "play.rectangle.on.rectangle")
-                    Spacer()
-                    if unreviewedCount > 0 {
-                        Text("\(unreviewedCount)")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .background(Capsule().fill(Color.secondary.opacity(0.2)))
+                sidebarRow(title: "All Assets", icon: "play.rectangle.on.rectangle", isSelected: selection == [.allAssets], count: unreviewedCount > 0 ? unreviewedCount : nil) {
+                    selection = [.allAssets]
+                }
+            }
+            
+            DisclosureGroup(isExpanded: $isActorsExpanded) {
+                alphaPicker(for: $actorAlphaFilter)
+                ForEach(filteredItems(allUniqueActors, by: actorAlphaFilter), id: \.self) { actor in
+                    sidebarRow(title: actor, icon: "person", isSelected: selection.contains(.actor(actor))) {
+                        toggleSelection(item: .actor(actor))
                     }
                 }
-                .tag(SidebarItem.allAssets)
-            }
+            } label: { Text("Actors").font(.headline) }
             
-            Section("Actors") {
-                ForEach(allUniqueActors, id: \.self) { actor in
-                    Label(actor, systemImage: "person").tag(SidebarItem.actor(actor))
+            DisclosureGroup(isExpanded: $isTagsExpanded) {
+                alphaPicker(for: $tagAlphaFilter)
+                ForEach(filteredItems(allUniqueTags, by: tagAlphaFilter), id: \.self) { tag in
+                    sidebarRow(title: tag, icon: "tag", isSelected: selection.contains(.tag(tag))) {
+                        toggleSelection(item: .tag(tag))
+                    }
                 }
-            }
+            } label: { Text("Tags").font(.headline) }
             
-            Section("Tags") {
-                ForEach(allUniqueTags, id: \.self) { tag in
-                    Label(tag, systemImage: "tag").tag(SidebarItem.tag(tag))
+            DisclosureGroup(isExpanded: $isStudiosExpanded) {
+                alphaPicker(for: $studioAlphaFilter)
+                ForEach(filteredItems(allUniqueStudios, by: studioAlphaFilter), id: \.self) { studio in
+                    sidebarRow(title: studio, icon: "building.2", isSelected: selection.contains(.studio(studio))) {
+                        toggleSelection(item: .studio(studio))
+                    }
                 }
-            }
-            
-            Section("Studios") {
-                ForEach(allUniqueStudios, id: \.self) { studio in
-                    Label(studio, systemImage: "building.2").tag(SidebarItem.studio(studio))
-                }
-            }
+            } label: { Text("Studios").font(.headline) }
         }
         .safeAreaInset(edge: .bottom) {
             progressFooter
         }
         .navigationTitle("ViLM")
+    }
+    
+    // MARK: - Helpers
+    
+    private func alphaPicker(for filter: Binding<Character?>) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach("ABCDEFGHIJKLMNOPQRSTUVWXYZ".map { $0 }, id: \.self) { letter in
+                    Button(action: {
+                        if filter.wrappedValue == letter {
+                            filter.wrappedValue = nil
+                        } else {
+                            filter.wrappedValue = letter
+                        }
+                    }) {
+                        Text(String(letter))
+                            .font(.caption2)
+                            .frame(width: 24, height: 24)
+                            .background(filter.wrappedValue == letter ? Color.accentColor : Color.secondary.opacity(0.2))
+                            .foregroundColor(filter.wrappedValue == letter ? .white : .primary)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+    
+    private func filteredItems(_ items: [String], by letter: Character?) -> [String] {
+        guard let letter = letter else { return items }
+        return items.filter { $0.uppercased().hasPrefix(String(letter)) }
+    }
+    
+    private func toggleSelection(item: SidebarItem) {
+        if selection.contains(item) {
+            selection.remove(item)
+            if selection.isEmpty {
+                selection = [.allAssets]
+            }
+        } else {
+            selection.remove(.allAssets)
+            selection.insert(item)
+        }
+    }
+    
+    private func sidebarRow(title: String, icon: String, isSelected: Bool, count: Int? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+                if let count = count {
+                    Text("\(count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .background(Capsule().fill(Color.secondary.opacity(0.2)))
+                }
+                if isSelected {
+                    Image(systemName: "checkmark").foregroundColor(.accentColor)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
     }
     
     // MARK: - Progress Footer
