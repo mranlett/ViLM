@@ -9,6 +9,8 @@ struct ProfileGraphHeaderView: View {
     
     @State private var entityProfile: EntityProfile?
     @State private var isShowingEditor = false
+    @State private var isShowingRenameDialog = false
+    @State private var newGlobalName = ""
     
     private var relatedStudios: [String] {
         let studios = filteredAssets.flatMap { $0.studios }
@@ -34,6 +36,15 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
+    private var currentName: String? {
+        switch currentSelection {
+        case .actor(let name): return name
+        case .studio(let name): return name
+        case .tag(let name): return name
+        default: return nil
+        }
+    }
+    
     private func uniqueEntities(from list: [String], excluding: String?) -> [String] {
         var set = Set(list)
         if let excluding = excluding {
@@ -49,6 +60,15 @@ struct ProfileGraphHeaderView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
+                
+                if let name = currentName {
+                    Button("Rename Globally") {
+                        newGlobalName = name
+                        isShowingRenameDialog = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+                
                 if isEditableEntity {
                     Button("Edit Bio") {
                         isShowingEditor = true
@@ -109,6 +129,13 @@ struct ProfileGraphHeaderView: View {
                 EntityProfileEditorView(entityId: id, profile: entityProfile, onSave: saveProfile)
             }
         }
+        .alert("Rename Globally", isPresented: $isShowingRenameDialog) {
+            TextField("New Name", text: $newGlobalName)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") { performGlobalRename() }
+        } message: {
+            Text("This will rename the entity across all videos in your library.")
+        }
     }
     
     private var titleText: String {
@@ -154,6 +181,32 @@ struct ProfileGraphHeaderView: View {
             self.entityProfile = profile
         } catch {
             print("Failed to save profile: \(error)")
+        }
+    }
+    
+    private func performGlobalRename() {
+        guard let url = libraryURL, let id = currentEntityId, !newGlobalName.isEmpty else { return }
+        
+        let parts = id.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return }
+        let category = String(parts[0])
+        let newTag = "\(category):\(newGlobalName)"
+        
+        do {
+            let store = try LibraryStore(at: url)
+            try store.renameTagGlobally(oldTag: id, newTag: newTag)
+            
+            var pivotItem: SidebarItem
+            switch category {
+            case "actor": pivotItem = .actor(newGlobalName)
+            case "studio": pivotItem = .studio(newGlobalName)
+            default: pivotItem = .tag(newGlobalName)
+            }
+            sidebarSelection = [pivotItem]
+            
+            fetchProfile()
+        } catch {
+            print("Failed to rename globally: \(error)")
         }
     }
     

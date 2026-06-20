@@ -9,6 +9,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
     public let createdAt: Date
     public var tags: [String]
     public var externalLink: String?
+    public var notes: String?
+    public var rating: Int?
     
     public static let databaseTableName = "assets"
 
@@ -23,7 +25,9 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
                 status: ReviewStatus = .unreviewed,
                 createdAt: Date = Date(),
                 tags: [String] = [],
-                externalLink: String? = nil) {
+                externalLink: String? = nil,
+                notes: String? = nil,
+                rating: Int? = nil) {
         self.id = id
         self.relativePath = relativePath
         self.fileName = fileName
@@ -31,6 +35,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.createdAt = createdAt
         self.tags = tags.map { TagNormalizer.normalize(fullTag: $0) }
         self.externalLink = externalLink
+        self.notes = notes
+        self.rating = rating
     }
     
     public init(from decoder: Decoder) throws {
@@ -45,6 +51,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.status = try container.decode(ReviewStatus.self, forKey: .status)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.externalLink = try container.decodeIfPresent(String.self, forKey: .externalLink)
+        self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         
         // Enhanced tag decoding
         var decodedTags: [String] = []
@@ -66,6 +74,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         case createdAt = "created_at"
         case tags
         case externalLink = "external_link"
+        case notes
+        case rating
     }
 }
 
@@ -78,6 +88,8 @@ extension Asset {
         container["status"] = status.rawValue
         container["created_at"] = createdAt
         container["external_link"] = externalLink
+        container["notes"] = notes
+        container["rating"] = rating
         
         // Encode tags array to JSON String for SQLite storage
         if let jsonData = try? JSONEncoder().encode(tags),

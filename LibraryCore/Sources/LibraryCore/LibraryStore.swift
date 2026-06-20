@@ -57,6 +57,13 @@ public class LibraryStore {
             }
         }
         
+        migrator.registerMigration("v4") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "notes", .text)
+                t.add(column: "rating", .integer)
+            }
+        }
+        
         try migrator.migrate(dbQueue)
     }
     
@@ -85,6 +92,28 @@ public class LibraryStore {
         }
     }
     
+    public func renameTagGlobally(oldTag: String, newTag: String) throws {
+        let normalizedOld = TagNormalizer.normalize(fullTag: oldTag)
+        let normalizedNew = TagNormalizer.normalize(fullTag: newTag)
+        
+        try dbQueue.write { db in
+            let assets = try Asset.fetchAll(db)
+            for var asset in assets {
+                if let index = asset.tags.firstIndex(of: normalizedOld) {
+                    asset.tags[index] = normalizedNew
+                    try asset.update(db)
+                }
+            }
+            
+            // Rename the entity profile if one exists
+            if let profile = try EntityProfile.fetchOne(db, key: normalizedOld) {
+                let newProfile = EntityProfile(id: normalizedNew, bio: profile.bio, photoUrl: profile.photoUrl, homePage: profile.homePage)
+                try newProfile.save(db)
+                try profile.delete(db)
+            }
+        }
+    }
+    
     public func deleteAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
             try asset.delete(db)
@@ -95,15 +124,16 @@ public class LibraryStore {
         try dbQueue.write { db in
             try db.execute(
                 sql: """
-                INSERT OR IGNORE INTO assets (id, relative_path, file_name, status, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO assets (id, relative_path, file_name, status, created_at, tags)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 arguments: [
                     asset.id.uuidString,
                     asset.relativePath,
                     asset.fileName,
                     asset.status.rawValue,
-                    Date()
+                    Date(),
+                    "[]"
                 ]
             )
         }

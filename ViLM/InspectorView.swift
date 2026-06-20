@@ -256,6 +256,9 @@ struct SingleInspectorView: View {
                     Divider()
                 }
 
+                annotationsSection
+                Divider()
+
                 tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
                 Divider()
                 tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
@@ -561,7 +564,7 @@ struct SingleInspectorView: View {
         return tags
     }
 
-    private var suggestedTags: [String] {
+    private var autoExtractedTags: [String] {
         let baseSuggestions = TagSuggester.suggestions(for: asset.fileName)
         var expandedSuggestions = Set(baseSuggestions.map { TagNormalizer.normalize(tagValue: $0) })
         
@@ -582,6 +585,24 @@ struct SingleInspectorView: View {
         
         return expandedSuggestions.filter { !appliedTagValues.contains($0) }.sorted()
     }
+    
+    private var filteredLibrarySuggestions: [String] {
+        guard !newTagValue.isEmpty else { return [] }
+        let searchTerm = newTagValue.lowercased()
+        
+        var categoryTags = Set<String>()
+        for a in assets {
+            for t in a.tags {
+                if t.hasPrefix("\(activeCategory):") {
+                    let val = String(t.dropFirst(activeCategory.count + 1))
+                    if val.lowercased().contains(searchTerm) && val.lowercased() != TagNormalizer.normalize(tagValue: newTagValue).lowercased() {
+                        categoryTags.insert(val)
+                    }
+                }
+            }
+        }
+        return categoryTags.sorted()
+    }
 
     private var tagEntryPopover: some View {
         VStack(spacing: 12) {
@@ -590,11 +611,35 @@ struct SingleInspectorView: View {
             TextField("Name...", text: $newTagValue)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { saveTag() }
+                
+            let matchingTags = filteredLibrarySuggestions
+            if !matchingTags.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(matchingTags, id: \.self) { match in
+                            Button {
+                                newTagValue = match
+                                saveTag()
+                            } label: {
+                                Text(match)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            Divider()
+                        }
+                    }
+                    .background(Color.secondary.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .frame(maxHeight: 150)
+            }
 
             Button("Save") { saveTag() }
                 .buttonStyle(.borderedProminent)
                 
-            let suggestions = suggestedTags
+            let suggestions = autoExtractedTags
             if !suggestions.isEmpty {
                 Divider()
                 Text("Suggestions")
@@ -620,6 +665,44 @@ struct SingleInspectorView: View {
         }
         .padding()
         .frame(minWidth: 200, maxWidth: 300)
+    }
+    
+    private var annotationsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Annotations").font(.subheadline).fontWeight(.bold)
+            
+            HStack {
+                Text("Rating:").font(.subheadline).foregroundColor(.secondary)
+                ForEach(1...5, id: \.self) { star in
+                    Image(systemName: star <= (asset.rating ?? 0) ? "star.fill" : "star")
+                        .foregroundColor(.yellow)
+                        .onTapGesture {
+                            var updated = asset
+                            if updated.rating == star {
+                                updated.rating = nil
+                            } else {
+                                updated.rating = star
+                            }
+                            if let url = libraryURL { updateAsset(updated, at: url) }
+                        }
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Notes").font(.subheadline).foregroundColor(.secondary)
+                TextEditor(text: Binding(
+                    get: { asset.notes ?? "" },
+                    set: { newValue in
+                        var updated = asset
+                        updated.notes = newValue.isEmpty ? nil : newValue
+                        if let url = libraryURL { updateAsset(updated, at: url) }
+                    }
+                ))
+                .frame(minHeight: 80)
+                .padding(4)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+            }
+        }
     }
 
     private func toggleStatus() {
