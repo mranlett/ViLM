@@ -64,6 +64,16 @@ struct ContentView: View {
                     missingAssetIDs: $missingAssetIDs
                 )
             }
+            .navigationDestination(for: Set<Asset.ID>.self) { ids in
+                InspectorView(
+                    selectedAssetIDs: ids,
+                    assets: $assets,
+                    selectedAssetBinding: $selectedAssetIDs,
+                    gridRefreshID: $gridRefreshID,
+                    libraryURL: selectedLibraryURL,
+                    missingAssetIDs: $missingAssetIDs
+                )
+            }
 #endif
         } detail: {
             if !selectedAssetIDs.isEmpty {

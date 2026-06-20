@@ -8,6 +8,7 @@ struct AssetsGridView: View {
     @Binding var selectedAssetIDs: Set<Asset.ID>
     let missingAssetIDs: Set<Asset.ID>
     @State private var gridStyle: GridStyle = .singleFrame
+    @State private var isEditMode: Bool = false
     let libraryURL: URL?
     let refreshID: UUID
     
@@ -58,13 +59,24 @@ struct AssetsGridView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
                     ForEach(filteredAssets) { asset in
 #if os(iOS)
-                        NavigationLink(value: asset.id) {
+                        if isEditMode {
                             gridItem(for: asset)
+                                .onTapGesture {
+                                    if selectedAssetIDs.contains(asset.id) {
+                                        selectedAssetIDs.remove(asset.id)
+                                    } else {
+                                        selectedAssetIDs.insert(asset.id)
+                                    }
+                                }
+                        } else {
+                            NavigationLink(value: asset.id) {
+                                gridItem(for: asset)
+                            }
+                            .buttonStyle(.plain)
+                            .simultaneousGesture(TapGesture().onEnded {
+                                selectedAssetIDs = [asset.id]
+                            })
                         }
-                        .buttonStyle(.plain)
-                        .simultaneousGesture(TapGesture().onEnded {
-                            selectedAssetIDs = [asset.id]
-                        })
 #else
                         gridItem(for: asset)
                             .onTapGesture {
@@ -90,7 +102,27 @@ struct AssetsGridView: View {
         .navigationSubtitle("\(filteredAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search filenames...")
         .toolbar {
-            gridStylePicker
+            ToolbarItem(placement: .primaryAction) {
+                gridStylePicker
+            }
+#if os(iOS)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(isEditMode ? "Done" : "Select") {
+                    isEditMode.toggle()
+                    if !isEditMode {
+                        selectedAssetIDs.removeAll()
+                    }
+                }
+            }
+            if isEditMode && selectedAssetIDs.count > 1 {
+                ToolbarItem(placement: .bottomBar) {
+                    NavigationLink(value: selectedAssetIDs) {
+                        Text("Batch Edit (\(selectedAssetIDs.count))")
+                            .font(.headline)
+                    }
+                }
+            }
+#endif
         }
     }
     
