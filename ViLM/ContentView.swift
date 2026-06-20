@@ -87,31 +87,6 @@ struct ContentView: View {
                     libraryURL: selectedLibraryURL,
                     refreshID: gridRefreshID
                 )
-#if os(iOS)
-                .navigationDestination(for: UUID.self) { id in
-                    // If you tap an individual asset, ensure it's selected
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: [id],
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
-                    )
-                }
-                .navigationDestination(for: Set<Asset.ID>.self) { ids in
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: ids,
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
-                    )
-                }
-#endif
             }
         } detail: {
             if !selectedAssetIDs.isEmpty {
@@ -132,6 +107,31 @@ struct ContentView: View {
                 )
             }
         }
+#if os(iOS)
+        .navigationDestination(for: UUID.self) { id in
+            // If you tap an individual asset, ensure it's selected
+            InspectorView(
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: [id],
+                assets: $assets,
+                selectedAssetBinding: $selectedAssetIDs,
+                gridRefreshID: $gridRefreshID,
+                libraryURL: selectedLibraryURL,
+                missingAssetIDs: $missingAssetIDs
+            )
+        }
+        .navigationDestination(for: Set<Asset.ID>.self) { ids in
+            InspectorView(
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: ids,
+                assets: $assets,
+                selectedAssetBinding: $selectedAssetIDs,
+                gridRefreshID: $gridRefreshID,
+                libraryURL: selectedLibraryURL,
+                missingAssetIDs: $missingAssetIDs
+            )
+        }
+#endif
         .onAppear { loadLastLibrary() }
         .onDisappear { endSecurityScope() }
         
