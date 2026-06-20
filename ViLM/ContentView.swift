@@ -51,21 +51,45 @@ struct ContentView: View {
             )
 #if os(iOS)
             .navigationDestination(isPresented: $showContentOnIOS) {
-                if sidebarSelection == [.actorGallery] {
-                    ActorGridView(
-                        assets: assets,
+                Group {
+                    if sidebarSelection == [.actorGallery] {
+                        ActorGridView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            libraryURL: selectedLibraryURL
+                        )
+                    } else {
+                        AssetsGridView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            searchText: $searchText,
+                            selectedAssetIDs: $selectedAssetIDs,
+                            missingAssetIDs: missingAssetIDs,
+                            libraryURL: selectedLibraryURL,
+                            refreshID: gridRefreshID
+                        )
+                    }
+                }
+                .navigationDestination(for: UUID.self) { id in
+                    InspectorView(
                         sidebarSelection: $sidebarSelection,
-                        libraryURL: selectedLibraryURL
-                    )
-                } else {
-                    AssetsGridView(
-                        assets: assets,
-                        sidebarSelection: $sidebarSelection,
-                        searchText: $searchText,
-                        selectedAssetIDs: $selectedAssetIDs,
-                        missingAssetIDs: missingAssetIDs,
+                        selectedAssetIDs: [id],
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
                         libraryURL: selectedLibraryURL,
-                        refreshID: gridRefreshID
+                        missingAssetIDs: $missingAssetIDs
+                    )
+                }
+                .navigationDestination(for: Set<Asset.ID>.self) { ids in
+                    InspectorView(
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: ids,
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
+                        libraryURL: selectedLibraryURL,
+                        missingAssetIDs: $missingAssetIDs
                     )
                 }
             }
