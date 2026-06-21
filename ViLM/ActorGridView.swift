@@ -34,7 +34,8 @@ struct ActorGridView: View {
                             actor: actor,
                             profile: actorProfiles["actor:\(actor)"],
                             assetsCount: assets.filter { $0.actors.contains(actor) }.count,
-                            isSelected: isSelected
+                            isSelected: isSelected,
+                            libraryURL: libraryURL
                         )
                         .onTapGesture {
                             toggleSelection(item: .actor(actor))
@@ -100,11 +101,12 @@ struct ActorGridItemView: View {
     let profile: EntityProfile?
     let assetsCount: Int
     let isSelected: Bool
+    let libraryURL: URL?
     
     var body: some View {
         VStack {
-            if let photoUrlString = profile?.photoUrl, let url = URL(string: photoUrlString) {
-                AsyncImage(url: url) { image in
+            if let photoUrlString = profile?.photoUrl {
+                ProfileImageView(libraryURL: libraryURL, entityId: "actor:\(actor)", photoUrl: photoUrlString) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
                     ProgressView()

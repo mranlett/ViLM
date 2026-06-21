@@ -2,6 +2,7 @@ import SwiftUI
 import LibraryCore
 
 struct EntityProfileEditorView: View {
+    let libraryURL: URL?
     let entityId: String
     let initialProfile: EntityProfile?
     let onSave: (EntityProfile) -> Void
@@ -11,7 +12,8 @@ struct EntityProfileEditorView: View {
     @State private var photoUrl: String = ""
     @State private var homePage: String = ""
     
-    init(entityId: String, profile: EntityProfile?, onSave: @escaping (EntityProfile) -> Void) {
+    init(libraryURL: URL?, entityId: String, profile: EntityProfile?, onSave: @escaping (EntityProfile) -> Void) {
+        self.libraryURL = libraryURL
         self.entityId = entityId
         self.initialProfile = profile
         self.onSave = onSave
@@ -30,8 +32,8 @@ struct EntityProfileEditorView: View {
                         .textInputAutocapitalization(.never)
                         #endif
                     
-                    if let url = URL(string: photoUrl), !photoUrl.isEmpty {
-                        AsyncImage(url: url) { image in
+                    if !photoUrl.isEmpty {
+                        ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl) { image in
                             image.resizable().scaledToFit().frame(maxHeight: 150)
                         } placeholder: {
                             ProgressView()

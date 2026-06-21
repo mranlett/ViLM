@@ -79,8 +79,8 @@ struct ProfileGraphHeaderView: View {
             
             if let profile = entityProfile {
                 HStack(alignment: .top, spacing: 16) {
-                    if let photoUrl = profile.photoUrl, let url = URL(string: photoUrl) {
-                        AsyncImage(url: url) { image in
+                    if let photoUrl = profile.photoUrl {
+                        ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl) { image in
                             image.resizable().scaledToFill()
                         } placeholder: {
                             ProgressView()
@@ -126,7 +126,7 @@ struct ProfileGraphHeaderView: View {
         .onChange(of: currentSelection) { _ in fetchProfile() }
         .sheet(isPresented: $isShowingEditor) {
             if let id = currentEntityId {
-                EntityProfileEditorView(entityId: id, profile: entityProfile, onSave: saveProfile)
+                EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: entityProfile, onSave: saveProfile)
             }
         }
         .alert("Rename Globally", isPresented: $isShowingRenameDialog) {

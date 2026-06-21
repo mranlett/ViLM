@@ -53,13 +53,13 @@ struct ContentView: View {
 #if os(iOS)
             .navigationDestination(isPresented: $showContentOnIOS) {
                 Group {
-                    if sidebarSelection == [.actorGallery] {
+                    if sidebarSelection.contains(.actorGallery) {
                         ActorGridView(
                             assets: assets,
                             sidebarSelection: $sidebarSelection,
                             libraryURL: selectedLibraryURL
                         )
-                    } else if sidebarSelection == [.tagGallery] {
+                    } else if sidebarSelection.contains(.tagGallery) {
                         TagGalleryView(
                             assets: assets,
                             sidebarSelection: $sidebarSelection
@@ -102,13 +102,13 @@ struct ContentView: View {
 #endif
         } content: {
             Group {
-                if sidebarSelection == [.actorGallery] {
+                if sidebarSelection.contains(.actorGallery) {
                     ActorGridView(
                         assets: assets,
                         sidebarSelection: $sidebarSelection,
                         libraryURL: selectedLibraryURL
                     )
-                } else if sidebarSelection == [.tagGallery] {
+                } else if sidebarSelection.contains(.tagGallery) {
                     TagGalleryView(
                         assets: assets,
                         sidebarSelection: $sidebarSelection
