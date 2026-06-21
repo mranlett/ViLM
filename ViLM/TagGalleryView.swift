@@ -28,19 +28,23 @@ struct TagGalleryView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     ForEach(filteredTags, id: \.self) { tag in
                         let isSelected = sidebarSelection.contains(.tag(tag))
-                        TagGalleryItemView(
-                            tag: tag,
-                            assetsCount: assets.filter { $0.tags.contains("tag:\(tag)") }.count,
-                            isSelected: isSelected
-                        )
-                        .onTapGesture {
+                        Button(action: {
                             toggleSelection(item: .tag(tag))
+                        }) {
+                            TagGalleryItemView(
+                                tag: tag,
+                                assetsCount: assets.filter { $0.tags.contains("tag:\(tag)") }.count,
+                                isSelected: isSelected
+                            )
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
             }
+            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Tags Gallery")
         .toolbar {
             let selectedTagsCount = sidebarSelection.filter { item in

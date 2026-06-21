@@ -108,18 +108,20 @@ struct AssetsGridView: View {
                             })
                         }
 #else
-                        gridItem(for: asset)
-                            .onTapGesture {
-                                if NSEvent.modifierFlags.contains(.command) {
-                                    if selectedAssetIDs.contains(asset.id) {
-                                        selectedAssetIDs.remove(asset.id)
-                                    } else {
-                                        selectedAssetIDs.insert(asset.id)
-                                    }
+                        Button(action: {
+                            if NSEvent.modifierFlags.contains(.command) {
+                                if selectedAssetIDs.contains(asset.id) {
+                                    selectedAssetIDs.remove(asset.id)
                                 } else {
-                                    selectedAssetIDs = [asset.id]
+                                    selectedAssetIDs.insert(asset.id)
                                 }
+                            } else {
+                                selectedAssetIDs = [asset.id]
                             }
+                        }) {
+                            gridItem(for: asset)
+                        }
+                        .buttonStyle(.plain)
 #endif
                     }
                     
@@ -127,6 +129,7 @@ struct AssetsGridView: View {
                 .padding()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id(refreshID)
         .navigationTitle(sidebarSelectionTitle)
         .navigationSubtitle("\(filteredAssets.count) items")

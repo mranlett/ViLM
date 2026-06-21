@@ -30,21 +30,24 @@ struct ActorGridView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
                     ForEach(filteredActors, id: \.self) { actor in
                         let isSelected = sidebarSelection.contains(.actor(actor))
-                        ActorGridItemView(
-                            actor: actor,
-                            profile: actorProfiles["actor:\(actor)"],
-                            assetsCount: assets.filter { $0.actors.contains(actor) }.count,
-                            isSelected: isSelected,
-                            libraryURL: libraryURL
-                        )
-                        .onTapGesture {
+                        Button(action: {
                             toggleSelection(item: .actor(actor))
+                        }) {
+                            ActorGridItemView(
+                                actor: actor,
+                                profile: actorProfiles["actor:\(actor)"],
+                                assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                isSelected: isSelected,
+                                libraryURL: libraryURL
+                            )
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Actors Gallery")
         .toolbar {
             let selectedActorsCount = sidebarSelection.filter { item in
