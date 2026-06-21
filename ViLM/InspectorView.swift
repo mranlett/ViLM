@@ -665,7 +665,11 @@ struct SingleInspectorView: View {
             }
         }
         .padding()
+        #if os(macOS)
+        .frame(width: 280, height: 350, alignment: .top)
+        #else
         .frame(minWidth: 200, maxWidth: 300)
+        #endif
     }
     
     private var annotationsSection: some View {
