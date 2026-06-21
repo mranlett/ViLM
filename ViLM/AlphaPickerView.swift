@@ -6,6 +6,19 @@ struct AlphaPickerView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                Button(action: {
+                    filter = nil
+                }) {
+                    Text("All")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .frame(height: 24)
+                        .background(filter == nil ? Color.accentColor : Color.secondary.opacity(0.2))
+                        .foregroundColor(filter == nil ? .white : .primary)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                
                 ForEach("ABCDEFGHIJKLMNOPQRSTUVWXYZ".map { $0 }, id: \.self) { letter in
                     Button(action: {
                         if filter == letter {
