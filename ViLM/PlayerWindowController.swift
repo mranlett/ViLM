@@ -51,4 +51,11 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         window?.close()
         window = nil
     }
+
+    deinit {
+        let w = window
+        Task { @MainActor in
+            w?.close()
+        }
+    }
 }

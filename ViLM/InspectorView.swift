@@ -32,6 +32,7 @@ struct InspectorView: View {
                 libraryURL: libraryURL,
                 missingAssetIDs: $missingAssetIDs
             )
+            .id(asset.id)
         } else {
             ContentUnavailableView("Selection Lost", systemImage: "questionmark")
         }
