@@ -7,6 +7,7 @@ struct ActorGridView: View {
     let libraryURL: URL?
     
     @State private var actorProfiles: [String: EntityProfile] = [:]
+    @State private var alphaFilter: Character? = nil
     
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
@@ -14,28 +15,68 @@ struct ActorGridView: View {
         return Array(Set(actorTags)).sorted()
     }
     
+    var filteredActors: [String] {
+        guard let letter = alphaFilter else { return allUniqueActors }
+        return allUniqueActors.filter { $0.uppercased().hasPrefix(String(letter)) }
+    }
+    
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
-                ForEach(allUniqueActors, id: \.self) { actor in
-                    ActorGridItemView(
-                        actor: actor,
-                        profile: actorProfiles["actor:\(actor)"],
-                        assetsCount: assets.filter { $0.actors.contains(actor) }.count
-                    )
-                    .onTapGesture {
-                        sidebarSelection = [.actor(actor)]
+            VStack(spacing: 0) {
+                AlphaPickerView(filter: $alphaFilter)
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
+                    ForEach(filteredActors, id: \.self) { actor in
+                        let isSelected = sidebarSelection.contains(.actor(actor))
+                        ActorGridItemView(
+                            actor: actor,
+                            profile: actorProfiles["actor:\(actor)"],
+                            assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                            isSelected: isSelected
+                        )
+                        .onTapGesture {
+                            toggleSelection(item: .actor(actor))
+                        }
                     }
                 }
+                .padding(.horizontal)
             }
-            .padding()
         }
         .navigationTitle("Actors Gallery")
+        .toolbar {
+            let selectedActorsCount = sidebarSelection.filter { item in
+                if case .actor = item { return true }
+                return false
+            }.count
+            
+            if selectedActorsCount > 0 {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: {
+                        sidebarSelection.remove(.actorGallery)
+                    }) {
+                        Text("View Matches")
+                            .bold()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
         .onAppear {
             fetchProfiles()
         }
         .onChange(of: assets.count) { _ in
             fetchProfiles()
+        }
+    }
+    
+    private func toggleSelection(item: SidebarItem) {
+        if sidebarSelection.contains(item) {
+            sidebarSelection.remove(item)
+        } else {
+            sidebarSelection.remove(.allAssets)
+            sidebarSelection.insert(item)
         }
     }
     
@@ -58,6 +99,7 @@ struct ActorGridItemView: View {
     let actor: String
     let profile: EntityProfile?
     let assetsCount: Int
+    let isSelected: Bool
     
     var body: some View {
         VStack {
@@ -92,7 +134,11 @@ struct ActorGridItemView: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(Color.secondary.opacity(0.05))
+        .background(isSelected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.05))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .cornerRadius(12)
         #if os(macOS)
         .onHover { isHovered in

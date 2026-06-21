@@ -69,10 +69,14 @@ struct SidebarView: View {
                 sidebarRow(title: "Actors Gallery", icon: "person.2.crop.square.stack", isSelected: selection == [.actorGallery]) {
                     selection = [.actorGallery]
                 }
+                
+                sidebarRow(title: "Tags Gallery", icon: "tag.square.fill", isSelected: selection == [.tagGallery]) {
+                    selection = [.tagGallery]
+                }
             }
             
             DisclosureGroup(isExpanded: $isActorsExpanded) {
-                alphaPicker(for: $actorAlphaFilter)
+                AlphaPickerView(filter: $actorAlphaFilter)
                 ForEach(filteredItems(allUniqueActors, by: actorAlphaFilter), id: \.self) { actor in
                     sidebarRow(title: actor, icon: "person", isSelected: selection.contains(.actor(actor))) {
                         toggleSelection(item: .actor(actor))
@@ -81,7 +85,7 @@ struct SidebarView: View {
             } label: { Text("Actors").font(.headline) }
             
             DisclosureGroup(isExpanded: $isTagsExpanded) {
-                alphaPicker(for: $tagAlphaFilter)
+                AlphaPickerView(filter: $tagAlphaFilter)
                 ForEach(filteredItems(allUniqueTags, by: tagAlphaFilter), id: \.self) { tag in
                     sidebarRow(title: tag, icon: "tag", isSelected: selection.contains(.tag(tag))) {
                         toggleSelection(item: .tag(tag))
@@ -90,7 +94,7 @@ struct SidebarView: View {
             } label: { Text("Tags").font(.headline) }
             
             DisclosureGroup(isExpanded: $isStudiosExpanded) {
-                alphaPicker(for: $studioAlphaFilter)
+                AlphaPickerView(filter: $studioAlphaFilter)
                 ForEach(filteredItems(allUniqueStudios, by: studioAlphaFilter), id: \.self) { studio in
                     sidebarRow(title: studio, icon: "building.2", isSelected: selection.contains(.studio(studio))) {
                         toggleSelection(item: .studio(studio))
@@ -106,30 +110,7 @@ struct SidebarView: View {
     
     // MARK: - Helpers
     
-    private func alphaPicker(for filter: Binding<Character?>) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach("ABCDEFGHIJKLMNOPQRSTUVWXYZ".map { $0 }, id: \.self) { letter in
-                    Button(action: {
-                        if filter.wrappedValue == letter {
-                            filter.wrappedValue = nil
-                        } else {
-                            filter.wrappedValue = letter
-                        }
-                    }) {
-                        Text(String(letter))
-                            .font(.caption2)
-                            .frame(width: 24, height: 24)
-                            .background(filter.wrappedValue == letter ? Color.accentColor : Color.secondary.opacity(0.2))
-                            .foregroundColor(filter.wrappedValue == letter ? .white : .primary)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 4)
-        }
-    }
+
     
     private func filteredItems(_ items: [String], by letter: Character?) -> [String] {
         guard let letter = letter else { return items }

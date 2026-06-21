@@ -10,6 +10,7 @@ import UIKit
 enum SidebarItem: Hashable {
     case allAssets
     case actorGallery
+    case tagGallery
     case actor(String)
     case tag(String)
     case studio(String)
@@ -58,6 +59,11 @@ struct ContentView: View {
                             sidebarSelection: $sidebarSelection,
                             libraryURL: selectedLibraryURL
                         )
+                    } else if sidebarSelection == [.tagGallery] {
+                        TagGalleryView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection
+                        )
                     } else {
                         AssetsGridView(
                             assets: assets,
@@ -97,12 +103,17 @@ struct ContentView: View {
         } content: {
             Group {
                 if sidebarSelection == [.actorGallery] {
-                ActorGridView(
-                    assets: assets,
-                    sidebarSelection: $sidebarSelection,
-                    libraryURL: selectedLibraryURL
-                )
-            } else {
+                    ActorGridView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection,
+                        libraryURL: selectedLibraryURL
+                    )
+                } else if sidebarSelection == [.tagGallery] {
+                    TagGalleryView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection
+                    )
+                } else {
                 AssetsGridView(
                     assets: assets,
                     sidebarSelection: $sidebarSelection,
