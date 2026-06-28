@@ -36,6 +36,36 @@ struct SidebarView: View {
         return Array(Set(studioTags)).sorted()
     }
     
+    var actorCounts: [String: Int] {
+        var counts = [String: Int]()
+        for asset in assets {
+            for tag in asset.tags where tag.hasPrefix("actor:") {
+                counts[String(tag.dropFirst(6)), default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    var tagCounts: [String: Int] {
+        var counts = [String: Int]()
+        for asset in assets {
+            for tag in asset.tags where tag.hasPrefix("tag:") {
+                counts[String(tag.dropFirst(4)), default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    var studioCounts: [String: Int] {
+        var counts = [String: Int]()
+        for asset in assets {
+            for tag in asset.tags where tag.hasPrefix("studio:") {
+                counts[String(tag.dropFirst(7)), default: 0] += 1
+            }
+        }
+        return counts
+    }
+    
     // Stats for progress tracking
     private var reviewProgress: Double {
         guard !assets.isEmpty else { return 0 }
@@ -78,7 +108,7 @@ struct SidebarView: View {
             DisclosureGroup(isExpanded: $isActorsExpanded) {
                 AlphaPickerView(filter: $actorAlphaFilter)
                 ForEach(filteredItems(allUniqueActors, by: actorAlphaFilter), id: \.self) { actor in
-                    sidebarRow(title: actor, icon: "person", isSelected: selection.contains(.actor(actor))) {
+                    sidebarRow(title: actor, icon: "person", isSelected: selection.contains(.actor(actor)), count: actorCounts[actor]) {
                         toggleSelection(item: .actor(actor))
                     }
                 }
@@ -87,7 +117,7 @@ struct SidebarView: View {
             DisclosureGroup(isExpanded: $isTagsExpanded) {
                 AlphaPickerView(filter: $tagAlphaFilter)
                 ForEach(filteredItems(allUniqueTags, by: tagAlphaFilter), id: \.self) { tag in
-                    sidebarRow(title: tag, icon: "tag", isSelected: selection.contains(.tag(tag))) {
+                    sidebarRow(title: tag, icon: "tag", isSelected: selection.contains(.tag(tag)), count: tagCounts[tag]) {
                         toggleSelection(item: .tag(tag))
                     }
                 }
@@ -96,7 +126,7 @@ struct SidebarView: View {
             DisclosureGroup(isExpanded: $isStudiosExpanded) {
                 AlphaPickerView(filter: $studioAlphaFilter)
                 ForEach(filteredItems(allUniqueStudios, by: studioAlphaFilter), id: \.self) { studio in
-                    sidebarRow(title: studio, icon: "building.2", isSelected: selection.contains(.studio(studio))) {
+                    sidebarRow(title: studio, icon: "building.2", isSelected: selection.contains(.studio(studio)), count: studioCounts[studio]) {
                         toggleSelection(item: .studio(studio))
                     }
                 }

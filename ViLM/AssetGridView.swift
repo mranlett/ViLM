@@ -13,6 +13,16 @@ struct AssetsGridView: View {
     let refreshID: UUID
     @State private var isShowingFilterBuilder = false
     
+    enum SortOption: String, CaseIterable {
+        case name = "Name"
+        case date = "Date Added"
+        case size = "File Size"
+    }
+    
+    @State private var sortOption: SortOption = .name
+    @State private var sortAscending: Bool = true
+    @State private var fileSizes: [Asset.ID: Int64] = [:]
+    
     enum GridStyle {
         case singleFrame
         case contactSheet
@@ -20,7 +30,7 @@ struct AssetsGridView: View {
     
     // MARK: - Filter Logic
     private var filteredAssets: [Asset] {
-        assets.filter { asset in
+        let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
                 case .allAssets, .actorGallery, .tagGallery: return true
@@ -35,6 +45,21 @@ struct AssetsGridView: View {
             } else {
                 return matchesCategory && asset.fileName.localizedCaseInsensitiveContains(searchText)
             }
+        }
+        
+        return filtered.sorted { a, b in
+            let compare: Bool
+            switch sortOption {
+            case .name:
+                compare = a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
+            case .date:
+                compare = a.createdAt < b.createdAt
+            case .size:
+                let sizeA = fileSizes[a.id] ?? 0
+                let sizeB = fileSizes[b.id] ?? 0
+                compare = sizeA < sizeB
+            }
+            return sortAscending ? compare : !compare
         }
     }
     
@@ -99,7 +124,7 @@ struct AssetsGridView: View {
                                     }
                                 }
                         } else {
-                            NavigationLink(value: asset.id) {
+                            NavigationLink(value: AppRoute.asset(asset.id)) {
                                 gridItem(for: asset)
                             }
                             .buttonStyle(.plain)
@@ -137,6 +162,20 @@ struct AssetsGridView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
+                    Menu {
+                        Picker("Sort By", selection: $sortOption) {
+                            ForEach(SortOption.allCases, id: \.self) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }
+                        Divider()
+                        Button(action: { sortAscending.toggle() }) {
+                            Label(sortAscending ? "Ascending" : "Descending", systemImage: sortAscending ? "arrow.up" : "arrow.down")
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+                    
                     Button(action: { isShowingFilterBuilder = true }) {
                         Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
                     }
@@ -152,10 +191,10 @@ struct AssetsGridView: View {
                     }
                 }
             }
-            if isEditMode && selectedAssetIDs.count > 1 {
+            if isEditMode && !selectedAssetIDs.isEmpty {
                 ToolbarItem(placement: .bottomBar) {
-                    NavigationLink(value: selectedAssetIDs) {
-                        Text("Batch Edit (\(selectedAssetIDs.count))")
+                    NavigationLink(value: AppRoute.assets(selectedAssetIDs)) {
+                        Text("Edit \(selectedAssetIDs.count) Selected")
                             .font(.headline)
                     }
                 }
@@ -164,6 +203,20 @@ struct AssetsGridView: View {
         }
         .sheet(isPresented: $isShowingFilterBuilder) {
             FilterBuilderView(assets: assets, sidebarSelection: $sidebarSelection)
+        }
+        .task(id: assets.count) {
+            guard let url = libraryURL else { return }
+            var newSizes: [Asset.ID: Int64] = [:]
+            for asset in assets {
+                let fileURL = url.appendingPathComponent(asset.relativePath)
+                if let attr = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+                   let size = attr[.size] as? Int64 {
+                    newSizes[asset.id] = size
+                }
+            }
+            await MainActor.run {
+                self.fileSizes = newSizes
+            }
         }
     }
     

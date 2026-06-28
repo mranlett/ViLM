@@ -103,17 +103,17 @@ struct ProfileGraphHeaderView: View {
             
             if !relatedStudios.isEmpty {
                 tagSection(title: "Studios", items: relatedStudios, color: .purple) { item in
-                    sidebarSelection = [.studio(item)]
+                    .studio(item)
                 }
             }
             if !relatedActors.isEmpty {
                 tagSection(title: "Co-Actors", items: relatedActors, color: .blue) { item in
-                    sidebarSelection = [.actor(item)]
+                    .actor(item)
                 }
             }
             if !relatedTags.isEmpty {
                 tagSection(title: "Tags", items: relatedTags, color: .green) { item in
-                    sidebarSelection = [.tag(item)]
+                    .tag(item)
                 }
             }
         }
@@ -210,12 +210,14 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
-    private func tagSection(title: String, items: [String], color: Color, onSelect: @escaping (String) -> Void) -> some View {
+    private func tagSection(title: String, items: [String], color: Color, itemType: @escaping (String) -> SidebarItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
             FlowLayout(spacing: 6) {
                 ForEach(items, id: \.self) { item in
-                    Button(action: { onSelect(item) }) {
+                    let sidebarItem = itemType(item)
+                    #if os(iOS)
+                    NavigationLink(value: AppRoute.sidebar(sidebarItem)) {
                         Text(item)
                             .font(.caption)
                             .padding(.horizontal, 10)
@@ -225,7 +227,17 @@ struct ProfileGraphHeaderView: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    #if os(macOS)
+                    #else
+                    Button(action: { sidebarSelection = [sidebarItem] }) {
+                        Text(item)
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(color.opacity(0.15))
+                            .foregroundColor(color)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                     .onHover { isHovered in
                         if isHovered {
                             NSCursor.pointingHand.push()

@@ -76,27 +76,39 @@ struct ContentView: View {
                         )
                     }
                 }
-                .navigationDestination(for: UUID.self) { id in
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: [id],
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
-                    )
-                }
-                .navigationDestination(for: Set<Asset.ID>.self) { ids in
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: ids,
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
-                    )
+                .navigationDestination(for: AppRoute.self) { route in
+                    switch route {
+                    case .asset(let id):
+                        InspectorView(
+                            sidebarSelection: $sidebarSelection,
+                            selectedAssetIDs: [id],
+                            assets: $assets,
+                            selectedAssetBinding: $selectedAssetIDs,
+                            gridRefreshID: $gridRefreshID,
+                            libraryURL: selectedLibraryURL,
+                            missingAssetIDs: $missingAssetIDs
+                        )
+                    case .assets(let ids):
+                        InspectorView(
+                            sidebarSelection: $sidebarSelection,
+                            selectedAssetIDs: ids,
+                            assets: $assets,
+                            selectedAssetBinding: $selectedAssetIDs,
+                            gridRefreshID: $gridRefreshID,
+                            libraryURL: selectedLibraryURL,
+                            missingAssetIDs: $missingAssetIDs
+                        )
+                    case .sidebar(let item):
+                        AssetsGridView(
+                            assets: assets,
+                            sidebarSelection: .constant([item]),
+                            searchText: $searchText,
+                            selectedAssetIDs: $selectedAssetIDs,
+                            missingAssetIDs: missingAssetIDs,
+                            libraryURL: selectedLibraryURL,
+                            refreshID: gridRefreshID
+                        )
+                    }
                 }
             }
 #endif
@@ -114,40 +126,51 @@ struct ContentView: View {
                         sidebarSelection: $sidebarSelection
                     )
                 } else {
-                AssetsGridView(
-                    assets: assets,
-                    sidebarSelection: $sidebarSelection,
-                    searchText: $searchText,
-                    selectedAssetIDs: $selectedAssetIDs,
-                    missingAssetIDs: missingAssetIDs,
-                    libraryURL: selectedLibraryURL,
-                    refreshID: gridRefreshID
-                )
-            }
+                    AssetsGridView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection,
+                        searchText: $searchText,
+                        selectedAssetIDs: $selectedAssetIDs,
+                        missingAssetIDs: missingAssetIDs,
+                        libraryURL: selectedLibraryURL,
+                        refreshID: gridRefreshID
+                    )
+                }
             }
 #if os(iOS)
-            .navigationDestination(for: UUID.self) { id in
-                // If you tap an individual asset, ensure it's selected
-                InspectorView(
-                    sidebarSelection: $sidebarSelection,
-                    selectedAssetIDs: [id],
-                    assets: $assets,
-                    selectedAssetBinding: $selectedAssetIDs,
-                    gridRefreshID: $gridRefreshID,
-                    libraryURL: selectedLibraryURL,
-                    missingAssetIDs: $missingAssetIDs
-                )
-            }
-            .navigationDestination(for: Set<Asset.ID>.self) { ids in
-                InspectorView(
-                    sidebarSelection: $sidebarSelection,
-                    selectedAssetIDs: ids,
-                    assets: $assets,
-                    selectedAssetBinding: $selectedAssetIDs,
-                    gridRefreshID: $gridRefreshID,
-                    libraryURL: selectedLibraryURL,
-                    missingAssetIDs: $missingAssetIDs
-                )
+            .navigationDestination(for: AppRoute.self) { route in
+                switch route {
+                case .asset(let id):
+                    InspectorView(
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: [id],
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
+                        libraryURL: selectedLibraryURL,
+                        missingAssetIDs: $missingAssetIDs
+                    )
+                case .assets(let ids):
+                    InspectorView(
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: ids,
+                        assets: $assets,
+                        selectedAssetBinding: $selectedAssetIDs,
+                        gridRefreshID: $gridRefreshID,
+                        libraryURL: selectedLibraryURL,
+                        missingAssetIDs: $missingAssetIDs
+                    )
+                case .sidebar(let item):
+                    AssetsGridView(
+                        assets: assets,
+                        sidebarSelection: .constant([item]),
+                        searchText: $searchText,
+                        selectedAssetIDs: $selectedAssetIDs,
+                        missingAssetIDs: missingAssetIDs,
+                        libraryURL: selectedLibraryURL,
+                        refreshID: gridRefreshID
+                    )
+                }
             }
 #endif
         } detail: {
@@ -416,4 +439,7 @@ private struct LibraryFolderPicker: UIViewControllerRepresentable {
         }
     }
 }
+#endif
+
+#if os(iOS)
 #endif
