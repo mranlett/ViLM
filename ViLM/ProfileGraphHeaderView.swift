@@ -123,7 +123,7 @@ struct ProfileGraphHeaderView: View {
         .cornerRadius(12)
         .padding(.horizontal)
         .onAppear { fetchProfile() }
-        .onChange(of: currentSelection) { _ in fetchProfile() }
+        .onChange(of: currentSelection) { fetchProfile() }
         .sheet(isPresented: $isShowingEditor) {
             if let id = currentEntityId {
                 EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: entityProfile, onSave: saveProfile)

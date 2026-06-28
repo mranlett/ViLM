@@ -132,7 +132,7 @@ struct ActorGridView: View {
         .onAppear {
             fetchProfiles()
         }
-        .onChange(of: assets.count) { _ in
+        .onChange(of: assets.count) {
             fetchProfiles()
         }
     }
