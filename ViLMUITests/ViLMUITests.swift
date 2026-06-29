@@ -1,10 +1,3 @@
-//
-//  ViLMUITests.swift
-//  ViLMUITests
-//
-//  Created by Matt Ranlett on 6/29/26.
-//
-
 import XCTest
 
 final class ViLMUITests: XCTestCase {
@@ -22,22 +15,57 @@ final class ViLMUITests: XCTestCase {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
-    @MainActor
-    func testExample() throws {
+    func testSidebarNavigation() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        // Wait for the app to load and the sidebar to be visible
+        // If the user hasn't selected a library yet, the "Open Library" button might be visible.
+        // We handle both states defensively.
+        
+        let openLibraryButton = app.buttons["Open Library"]
+        if openLibraryButton.exists {
+            // Cannot proceed with full navigation test without a library selected.
+            // But we can assert the welcome screen loads properly.
+            XCTAssertTrue(openLibraryButton.isHittable, "Open Library button should be clickable on welcome screen.")
+            return
+        }
+        
+        // Assuming a library is loaded, verify the main sidebar navigation links exist
+        let actorsGalleryLink = app.buttons["Actors Gallery"]
+        let allAssetsLink = app.buttons["All Assets"]
+        let tagsGalleryLink = app.buttons["Tags Gallery"]
+        
+        // We use buttons because NavigationLinks in Sidebar often render as buttons in XCUITest
+        // If they render as static texts, we can fall back to checking static texts.
+        
+        // Tap Actors Gallery
+        if actorsGalleryLink.exists {
+            actorsGalleryLink.tap()
+            // Verify the title changed to Actors Gallery
+            XCTAssertTrue(app.navigationBars["Actors Gallery"].exists || app.staticTexts["Actors Gallery"].exists)
+        }
+        
+        // Tap Tags Gallery
+        if tagsGalleryLink.exists {
+            tagsGalleryLink.tap()
+            XCTAssertTrue(app.navigationBars["Tags Gallery"].exists || app.staticTexts["Tags Gallery"].exists)
+        }
+        
+        // Tap All Assets
+        if allAssetsLink.exists {
+            allAssetsLink.tap()
+            XCTAssertTrue(app.navigationBars["All Assets"].exists || app.staticTexts["All Assets"].exists || app.staticTexts["All"].exists)
+        }
     }
 
-    @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+        if #available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 7.0, *) {
+            // This measures how long it takes to launch your application.
+            measure(metrics: [XCTApplicationLaunchMetric()]) {
+                XCUIApplication().launch()
+            }
         }
     }
 }

@@ -64,6 +64,14 @@ public class LibraryStore {
             }
         }
         
+        // --- NEW: Migration v5 adds video name and episode tracking ---
+        migrator.registerMigration("v5") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "video_name", .text)
+                t.add(column: "episode", .text)
+            }
+        }
+        
         try migrator.migrate(dbQueue)
     }
     
@@ -86,6 +94,18 @@ public class LibraryStore {
         }
     }
     
+    public func fetchAllEntityProfiles() throws -> [EntityProfile] {
+        try dbQueue.read { db in
+            try EntityProfile.fetchAll(db)
+        }
+    }
+
+    public func deleteEntityProfile(for id: String) throws {
+        try dbQueue.write { db in
+            try EntityProfile.deleteOne(db, key: id)
+        }
+    }
+
     public func saveEntityProfile(_ profile: EntityProfile) throws {
         try dbQueue.write { db in
             try profile.save(db)

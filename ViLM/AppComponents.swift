@@ -184,6 +184,8 @@ struct TagBubble: View {
                 }
             }) {
                 Text(label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             .buttonStyle(.plain)
             #if os(macOS)
@@ -236,7 +238,7 @@ struct FlowLayout: Layout {
             let point = result.points[index]
             subview.place(
                 at: CGPoint(x: point.x + bounds.minX, y: point.y + bounds.minY),
-                proposal: .unspecified
+                proposal: ProposedViewSize(width: bounds.width, height: nil)
             )
         }
     }
@@ -252,7 +254,8 @@ struct FlowLayout: Layout {
             var totalWidth: CGFloat = 0
 
             for subview in subviews {
-                let size = subview.sizeThatFits(.unspecified)
+                let proposed = maxWidth > 0 ? ProposedViewSize(width: maxWidth, height: nil) : .unspecified
+                let size = subview.sizeThatFits(proposed)
                 if currentX + size.width > maxWidth && currentX > 0 {
                     currentX = 0
                     currentY += lineHeight + spacing

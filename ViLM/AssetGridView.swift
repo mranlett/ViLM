@@ -37,6 +37,7 @@ struct AssetsGridView: View {
                 case .actor(let name): return asset.tags.contains("actor:\(name)")
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
+                case .series(let name): return asset.videoName == name
                 }
             }
             
@@ -74,6 +75,7 @@ struct AssetsGridView: View {
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
+        case .series(let name): return name
         }
     }
     
@@ -230,15 +232,17 @@ struct AssetsGridView: View {
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
+        case .series(let name): return name
         }
     }
     
     private func color(for item: SidebarItem) -> Color {
         switch item {
-        case .allAssets, .actorGallery, .tagGallery: return .gray
         case .actor: return .blue
         case .tag: return .green
         case .studio: return .purple
+        case .series: return .orange
+        default: return .gray
         }
     }
     @ViewBuilder

@@ -4,13 +4,24 @@ import LibraryCore
 struct TagGalleryView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
+    let libraryURL: URL?
+    
+    @State private var tagProfiles: [String: EntityProfile] = [:]
     
     @State private var alphaFilter: Character? = nil
     
     var allUniqueTags: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actionTags = allTags.filter { $0.hasPrefix("tag:") }.map { String($0.dropFirst(4)) }
-        return Array(Set(actionTags)).sorted()
+        var unique = Set(actionTags)
+        
+        for key in tagProfiles.keys {
+            if key.hasPrefix("tag:") {
+                unique.insert(String(key.dropFirst(4)))
+            }
+        }
+        
+        return Array(unique).sorted()
     }
     
     var filteredTags: [String] {
@@ -28,6 +39,18 @@ struct TagGalleryView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     ForEach(filteredTags, id: \.self) { tag in
                         let isSelected = sidebarSelection.contains(.tag(tag))
+                        #if os(iOS)
+                        Button(action: {
+                            sidebarSelection = [.tag(tag)]
+                        }) {
+                            TagGalleryItemView(
+                                tag: tag,
+                                assetsCount: assets.filter { $0.tags.contains("tag:\(tag)") }.count,
+                                isSelected: isSelected
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        #else
                         Button(action: {
                             toggleSelection(item: .tag(tag))
                         }) {
@@ -38,6 +61,7 @@ struct TagGalleryView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        #endif
                     }
                 }
                 .padding(.horizontal)
@@ -47,6 +71,7 @@ struct TagGalleryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Tags Gallery")
         .toolbar {
+#if !os(iOS)
             let selectedTagsCount = sidebarSelection.filter { item in
                 if case .tag = item { return true }
                 return false
@@ -63,6 +88,13 @@ struct TagGalleryView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
+#endif
+        }
+        .onAppear {
+            fetchProfiles()
+        }
+        .onChange(of: assets.count) { old, new in
+            fetchProfiles()
         }
     }
     
@@ -72,6 +104,21 @@ struct TagGalleryView: View {
         } else {
             sidebarSelection.remove(.allAssets)
             sidebarSelection.insert(item)
+        }
+    }
+    
+    private func fetchProfiles() {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            let allProfiles = try store.fetchAllEntityProfiles()
+            for profile in allProfiles {
+                if profile.id.hasPrefix("tag:") {
+                    tagProfiles[profile.id] = profile
+                }
+            }
+        } catch {
+            print("Failed to fetch tag profiles: \(error)")
         }
     }
 }

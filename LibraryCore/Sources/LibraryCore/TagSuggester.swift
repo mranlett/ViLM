@@ -23,7 +23,7 @@ public struct TagSuggester {
             // Let's do regex split for " and " case insensitive.
             
             do {
-                let regex = try NSRegularExpression(pattern: "(?i)\\s+and\\s+", options: [])
+                let regex = try NSRegularExpression(pattern: "(?i)\\s+and\\s+|,\\s*", options: [])
                 let range = NSRange(location: 0, length: component.utf16.count)
                 let replaced = regex.stringByReplacingMatches(in: component, options: [], range: range, withTemplate: "|||")
                 

@@ -14,6 +14,7 @@ enum SidebarItem: Hashable {
     case actor(String)
     case tag(String)
     case studio(String)
+    case series(String)
 }
 
 struct ContentView: View {
@@ -42,6 +43,7 @@ struct ContentView: View {
             SidebarView(
                 selection: $sidebarSelection,
                 assets: assets,
+                libraryURL: selectedLibraryURL,
                 onOpenLibrary: openLibrary,
                 onValidate: validateLibrary,
                 onApplyFilters: {
@@ -62,7 +64,8 @@ struct ContentView: View {
                     } else if sidebarSelection.contains(.tagGallery) {
                         TagGalleryView(
                             assets: assets,
-                            sidebarSelection: $sidebarSelection
+                            sidebarSelection: $sidebarSelection,
+                            libraryURL: selectedLibraryURL
                         )
                     } else {
                         AssetsGridView(
@@ -98,16 +101,6 @@ struct ContentView: View {
                             libraryURL: selectedLibraryURL,
                             missingAssetIDs: $missingAssetIDs
                         )
-                    case .sidebar(let item):
-                        AssetsGridView(
-                            assets: assets,
-                            sidebarSelection: .constant([item]),
-                            searchText: $searchText,
-                            selectedAssetIDs: $selectedAssetIDs,
-                            missingAssetIDs: missingAssetIDs,
-                            libraryURL: selectedLibraryURL,
-                            refreshID: gridRefreshID
-                        )
                     }
                 }
             }
@@ -123,7 +116,8 @@ struct ContentView: View {
                 } else if sidebarSelection.contains(.tagGallery) {
                     TagGalleryView(
                         assets: assets,
-                        sidebarSelection: $sidebarSelection
+                        sidebarSelection: $sidebarSelection,
+                        libraryURL: selectedLibraryURL
                     )
                 } else {
                     AssetsGridView(
@@ -160,16 +154,6 @@ struct ContentView: View {
                         libraryURL: selectedLibraryURL,
                         missingAssetIDs: $missingAssetIDs
                     )
-                case .sidebar(let item):
-                    AssetsGridView(
-                        assets: assets,
-                        sidebarSelection: .constant([item]),
-                        searchText: $searchText,
-                        selectedAssetIDs: $selectedAssetIDs,
-                        missingAssetIDs: missingAssetIDs,
-                        libraryURL: selectedLibraryURL,
-                        refreshID: gridRefreshID
-                    )
                 }
             }
 #endif
@@ -204,6 +188,8 @@ struct ContentView: View {
         }
 #endif
     }
+    
+    // MARK: - Routing Helper removed and replaced with struct
     
     // MARK: - Library Logic
     
@@ -439,7 +425,4 @@ private struct LibraryFolderPicker: UIViewControllerRepresentable {
         }
     }
 }
-#endif
-
-#if os(iOS)
 #endif

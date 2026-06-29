@@ -4,9 +4,12 @@ import LibraryCore
 struct SidebarView: View {
     @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
+    let libraryURL: URL?
     let onOpenLibrary: () -> Void
     let onValidate: () -> Void
     let onApplyFilters: () -> Void
+    
+    @State private var profiles: [EntityProfile] = []
     
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true
@@ -21,19 +24,34 @@ struct SidebarView: View {
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actorTags = allTags.filter { $0.hasPrefix("actor:") }.map { String($0.dropFirst(6)) }
-        return Array(Set(actorTags)).sorted()
+        var unique = Set(actorTags)
+        
+        for profile in profiles where profile.id.hasPrefix("actor:") {
+            unique.insert(String(profile.id.dropFirst(6)))
+        }
+        return Array(unique).sorted()
     }
     
     var allUniqueTags: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actionTags = allTags.filter { $0.hasPrefix("tag:") }.map { String($0.dropFirst(4)) }
-        return Array(Set(actionTags)).sorted()
+        var unique = Set(actionTags)
+        
+        for profile in profiles where profile.id.hasPrefix("tag:") {
+            unique.insert(String(profile.id.dropFirst(4)))
+        }
+        return Array(unique).sorted()
     }
     
     var allUniqueStudios: [String] {
         let allTags = assets.flatMap { $0.tags }
         let studioTags = allTags.filter { $0.hasPrefix("studio:") }.map { String($0.dropFirst(7)) }
-        return Array(Set(studioTags)).sorted()
+        var unique = Set(studioTags)
+        
+        for profile in profiles where profile.id.hasPrefix("studio:") {
+            unique.insert(String(profile.id.dropFirst(7)))
+        }
+        return Array(unique).sorted()
     }
     
     var actorCounts: [String: Int] {

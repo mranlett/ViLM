@@ -20,7 +20,16 @@ struct ActorGridView: View {
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actorTags = allTags.filter { $0.hasPrefix("actor:") }.map { String($0.dropFirst(6)) }
-        return Array(Set(actorTags)).sorted()
+        var unique = Set(actorTags)
+        
+        // Include any actors that have saved profiles, even if they have 0 matched videos
+        for key in actorProfiles.keys {
+            if key.hasPrefix("actor:") {
+                unique.insert(String(key.dropFirst(6)))
+            }
+        }
+        
+        return Array(unique).sorted()
     }
     
     var filteredActors: [String] {
@@ -39,12 +48,14 @@ struct ActorGridView: View {
                     ForEach(filteredActors, id: \.self) { actor in
                         let isSelected = sidebarSelection.contains(.actor(actor))
                         #if os(iOS)
-                        NavigationLink(value: AppRoute.sidebar(.actor(actor))) {
+                        Button(action: {
+                            sidebarSelection = [.actor(actor)]
+                        }) {
                             ActorGridItemView(
                                 actor: actor,
                                 profile: actorProfiles["actor:\(actor)"],
                                 assetsCount: assets.filter { $0.actors.contains(actor) }.count,
-                                isSelected: false,
+                                isSelected: isSelected,
                                 libraryURL: libraryURL
                             )
                         }
@@ -132,7 +143,7 @@ struct ActorGridView: View {
         .onAppear {
             fetchProfiles()
         }
-        .onChange(of: assets.count) {
+        .onChange(of: assets.count) { old, new in
             fetchProfiles()
         }
     }
@@ -150,9 +161,10 @@ struct ActorGridView: View {
         guard let url = libraryURL else { return }
         do {
             let store = try LibraryStore(at: url)
-            for actor in allUniqueActors {
-                if let profile = try store.fetchEntityProfile(for: "actor:\(actor)") {
-                    actorProfiles["actor:\(actor)"] = profile
+            let allProfiles = try store.fetchAllEntityProfiles()
+            for profile in allProfiles {
+                if profile.id.hasPrefix("actor:") {
+                    actorProfiles[profile.id] = profile
                 }
             }
         } catch {

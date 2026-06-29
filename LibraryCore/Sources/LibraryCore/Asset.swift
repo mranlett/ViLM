@@ -11,6 +11,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
     public var externalLink: String?
     public var notes: String?
     public var rating: Int?
+    public var videoName: String?
+    public var episode: String?
     
     public static let databaseTableName = "assets"
 
@@ -27,7 +29,9 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
                 tags: [String] = [],
                 externalLink: String? = nil,
                 notes: String? = nil,
-                rating: Int? = nil) {
+                rating: Int? = nil,
+                videoName: String? = nil,
+                episode: String? = nil) {
         self.id = id
         self.relativePath = relativePath
         self.fileName = fileName
@@ -37,6 +41,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.externalLink = externalLink
         self.notes = notes
         self.rating = rating
+        self.videoName = videoName
+        self.episode = episode
     }
     
     public init(from decoder: Decoder) throws {
@@ -53,6 +59,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         self.externalLink = try container.decodeIfPresent(String.self, forKey: .externalLink)
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
         self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
+        self.videoName = try container.decodeIfPresent(String.self, forKey: .videoName)
+        self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
         
         // Enhanced tag decoding
         var decodedTags: [String] = []
@@ -76,6 +84,8 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
         case externalLink = "external_link"
         case notes
         case rating
+        case videoName = "video_name"
+        case episode
     }
 }
 
@@ -90,6 +100,8 @@ extension Asset {
         container["external_link"] = externalLink
         container["notes"] = notes
         container["rating"] = rating
+        container["video_name"] = videoName
+        container["episode"] = episode
         
         // Encode tags array to JSON String for SQLite storage
         if let jsonData = try? JSONEncoder().encode(tags),
@@ -124,25 +136,58 @@ extension Asset {
             .sorted()
     }
 
-    /// Computes the suggested filename format based on applied tags
     public var suggestedFileNameFromTags: String? {
         let actorsPart = actors.joined(separator: ", ")
-        let actionsPart = actions.joined(separator: ", ")
+        let tagsPart = actions.joined(separator: ", ")
         let studiosPart = studios.joined(separator: ", ")
         
-        var components: [String] = []
-        if !actorsPart.isEmpty { components.append(actorsPart) }
-        if !actionsPart.isEmpty { components.append(actionsPart) }
-        if !studiosPart.isEmpty { components.append(studiosPart) }
+        var videoPartComponents: [String] = []
+        if let v = videoName, !v.isEmpty { videoPartComponents.append(v) }
+        if let e = episode, !e.isEmpty { videoPartComponents.append(e) }
+        let videoPart = videoPartComponents.joined(separator: " ")
         
+        // Priority 1: Actors
+        // Priority 2: Video Part
+        // Priority 3: Tags
+        // Priority 4: Studios
+        
+        var components = [actorsPart, videoPart, tagsPart, studiosPart].filter { !$0.isEmpty }
         if components.isEmpty { return nil }
         
-        let baseName = components.joined(separator: " - ")
+        var baseName = components.joined(separator: " - ")
+        
         let ext = (fileName as NSString).pathExtension
-        if ext.isEmpty {
-            return baseName
-        } else {
-            return "\(baseName).\(ext)"
+        let extSuffix = ext.isEmpty ? "" : ".\(ext)"
+        let maxBaseLength = 250 - extSuffix.count
+        
+        if baseName.count <= maxBaseLength {
+            return baseName + extSuffix
         }
+        
+        // Too long. Start dropping from lowest priority (right to left)
+        if !studiosPart.isEmpty {
+            components.removeAll { $0 == studiosPart }
+            baseName = components.joined(separator: " - ")
+            if baseName.count <= maxBaseLength { return baseName + extSuffix }
+        }
+        
+        if !tagsPart.isEmpty {
+            components.removeAll { $0 == tagsPart }
+            baseName = components.joined(separator: " - ")
+            if baseName.count <= maxBaseLength { return baseName + extSuffix }
+        }
+        
+        if !videoPart.isEmpty {
+            components.removeAll { $0 == videoPart }
+            baseName = components.joined(separator: " - ")
+            if baseName.count <= maxBaseLength { return baseName + extSuffix }
+        }
+        
+        // If STILL too long (e.g. huge actor list), safely truncate the actors
+        if baseName.count > maxBaseLength {
+            baseName = String(baseName.prefix(maxBaseLength))
+        }
+        
+        return baseName + extSuffix
     }
 }

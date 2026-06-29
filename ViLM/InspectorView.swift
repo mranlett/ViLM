@@ -56,6 +56,7 @@ struct SingleInspectorView: View {
     @State private var editingTagValue: String? = nil
     @State private var isShowingRenameDialog = false
     @State private var suggestedRenameValue = ""
+    @State private var showDeleteConfirmation = false
 
     // Playback / selection
     @State private var scrubTime: Double = 0
@@ -224,6 +225,34 @@ struct SingleInspectorView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Text("Video / Series Name").font(.subheadline).foregroundColor(.secondary)
+                        TextField("e.g. Movie Name or TV Show", text: Binding(
+                            get: { asset.videoName ?? "" },
+                            set: { newValue in
+                                var updatedAsset = asset
+                                updatedAsset.videoName = newValue.isEmpty ? nil : newValue
+                                if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Episode Info").font(.subheadline).foregroundColor(.secondary)
+                        TextField("e.g. Season 2 Episode 3", text: Binding(
+                            get: { asset.episode ?? "" },
+                            set: { newValue in
+                                var updatedAsset = asset
+                                updatedAsset.episode = newValue.isEmpty ? nil : newValue
+                                if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("External Link").font(.subheadline).foregroundColor(.secondary)
                         HStack {
                             TextField("https://...", text: Binding(
@@ -284,6 +313,20 @@ struct SingleInspectorView: View {
                     .controlSize(.large)
                 }
                 #endif
+                
+                Divider()
+                DisclosureGroup("Danger Zone") {
+                    Button(role: .destructive, action: {
+                        showDeleteConfirmation = true
+                    }) {
+                        Label("Delete Video", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.top, 4)
+                }
+                .tint(.red)
             }
             .padding()
         }
@@ -300,6 +343,14 @@ struct SingleInspectorView: View {
                     performRename()
                 }
             )
+        }
+        .alert("Delete Video?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteVideo()
+            }
+        } message: {
+            Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
         }
         .onAppear {
             #if os(macOS)
@@ -780,6 +831,47 @@ struct SingleInspectorView: View {
             isShowingRenameDialog = false
         } catch {
             print("Failed to rename: \(error)")
+        }
+    }
+
+    private func deleteVideo() {
+        guard let url = libraryURL else { return }
+        
+        let videoURL = url.appendingPathComponent(asset.relativePath)
+        let sidecarURL = videoURL.deletingPathExtension().appendingPathExtension("json")
+        let thumbnailURL = url.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg")
+        let contactSheetURL = url.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
+        
+        // Trash/Delete physical files
+        do {
+            try FileManager.default.trashItem(at: videoURL, resultingItemURL: nil)
+        } catch {
+            print("Failed to trash video: \(error)")
+        }
+        
+        do {
+            try FileManager.default.trashItem(at: sidecarURL, resultingItemURL: nil)
+        } catch {
+            print("Failed to trash sidecar: \(error)")
+        }
+        
+        try? FileManager.default.removeItem(at: thumbnailURL)
+        try? FileManager.default.removeItem(at: contactSheetURL)
+        
+        // Remove from DB and memory
+        do {
+            let store = try LibraryStore(at: url)
+            try store.deleteAsset(asset)
+            
+            // Clear selection and close inspector
+            selectedAssetBinding.removeAll()
+            
+            // Remove from global assets list
+            if let index = assets.firstIndex(where: { $0.id == asset.id }) {
+                assets.remove(at: index)
+            }
+        } catch {
+            print("Failed to delete asset from store: \(error)")
         }
     }
 
