@@ -180,7 +180,7 @@ struct ActorGridView: View {
             let profile = actorProfiles["actor:\(actor)"]
             let name = escapeCSV(actor)
             let bio = escapeCSV(profile?.bio ?? "")
-            let photoUrl = escapeCSV(profile?.photoUrl ?? "")
+            let photoUrl = escapeCSV("")
             let homePage = escapeCSV(profile?.homePage ?? "")
             csvString.append("\(name),\(bio),\(photoUrl),\(homePage)\n")
         }
@@ -283,25 +283,25 @@ struct ActorGridItemView: View {
     
     var body: some View {
         VStack {
-            if let photoUrlString = profile?.photoUrl {
-                ProfileImageView(libraryURL: libraryURL, entityId: "actor:\(actor)", photoUrl: photoUrlString) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    ProgressView()
+            ProfileImageView(libraryURL: libraryURL, entityId: "actor:\(actor)", photoUrl: profile?.photoUrl) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.2))
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 50))
+                                .foregroundColor(.secondary)
+                        )
+                    if profile?.photoUrl != nil {
+                        ProgressView()
+                    }
                 }
-                .frame(width: 120, height: 120)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .shadow(radius: 4)
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.secondary.opacity(0.2))
-                    .frame(width: 120, height: 120)
-                    .overlay(
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.secondary)
-                    )
             }
+            .frame(width: 120, height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(radius: 4)
             
             Text(actor)
                 .font(.headline)

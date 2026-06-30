@@ -23,6 +23,13 @@ struct AssetsGridView: View {
     @State private var sortAscending: Bool = true
     @State private var fileSizes: [Asset.ID: Int64] = [:]
     
+    enum ReviewFilter: String, CaseIterable {
+        case all = "All"
+        case reviewed = "Reviewed"
+        case unreviewed = "Unreviewed"
+    }
+    @State private var reviewFilter: ReviewFilter = .all
+    
     enum GridStyle {
         case singleFrame
         case contactSheet
@@ -39,6 +46,17 @@ struct AssetsGridView: View {
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
                 case .series(let name): return asset.videoName == name
                 }
+            }
+            
+            let matchesReviewStatus: Bool
+            switch reviewFilter {
+            case .all: matchesReviewStatus = true
+            case .reviewed: matchesReviewStatus = asset.status == .reviewed
+            case .unreviewed: matchesReviewStatus = asset.status == .unreviewed
+            }
+            
+            if !matchesReviewStatus {
+                return false
             }
             
             if searchText.isEmpty {
@@ -164,6 +182,16 @@ struct AssetsGridView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
+                    Menu {
+                        Picker("Review Status", selection: $reviewFilter) {
+                            ForEach(ReviewFilter.allCases, id: \.self) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+                    } label: {
+                        Label("Status", systemImage: reviewFilter == .all ? "checkmark.circle" : (reviewFilter == .reviewed ? "checkmark.seal.fill" : "circle.dashed"))
+                    }
+                    
                     Menu {
                         Picker("Sort By", selection: $sortOption) {
                             ForEach(SortOption.allCases, id: \.self) { option in

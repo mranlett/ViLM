@@ -32,11 +32,17 @@ struct EntityProfileEditorView: View {
                         .textInputAutocapitalization(.never)
                         #endif
                     
-                    if !photoUrl.isEmpty {
-                        ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl) { image in
-                            image.resizable().scaledToFit().frame(maxHeight: 150)
-                        } placeholder: {
+                    ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl.isEmpty ? nil : photoUrl) { image in
+                        image.resizable().scaledToFit().frame(maxHeight: 150)
+                    } placeholder: {
+                        if !photoUrl.isEmpty {
                             ProgressView()
+                        } else {
+                            Image(systemName: "person.crop.square")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 150)
+                                .foregroundColor(.secondary.opacity(0.3))
                         }
                     }
                 }
@@ -63,10 +69,16 @@ struct EntityProfileEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        let finalPhotoUrl = photoUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !finalPhotoUrl.isEmpty {
+                            downloadProfileImage(urlString: finalPhotoUrl)
+                        }
+                        
                         let profile = EntityProfile(
                             id: entityId,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
-                            photoUrl: photoUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : photoUrl,
+                            photoUrl: nil,
+
                             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage
                         )
                         onSave(profile)
@@ -77,5 +89,22 @@ struct EntityProfileEditorView: View {
             }
         }
         .frame(minWidth: 400, minHeight: 500)
+    }
+    
+    private func downloadProfileImage(urlString: String) {
+        guard let url = URL(string: urlString), let libraryURL = libraryURL else { return }
+        let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        let fileURL = profilesDir.appendingPathComponent("\(safeId).jpg")
+        
+        Task.detached {
+            do {
+                try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)
+                let (data, _) = try await URLSession.shared.data(from: url)
+                try data.write(to: fileURL, options: .atomic)
+            } catch {
+                print("Failed to forcefully download profile image for \(entityId): \(error)")
+            }
+        }
     }
 }

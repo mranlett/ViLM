@@ -93,15 +93,19 @@ struct ProfileGraphHeaderView: View {
             
             if let profile = entityProfile {
                 HStack(alignment: .top, spacing: 16) {
-                    if let photoUrl = profile.photoUrl {
-                        ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            ProgressView()
+                    ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: profile.photoUrl) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        ZStack {
+                            Circle().fill(Color.secondary.opacity(0.2))
+                            Image(systemName: "person.fill").font(.system(size: 40)).foregroundColor(.secondary)
+                            if profile.photoUrl != nil {
+                                ProgressView()
+                            }
                         }
-                        .frame(width: 80, height: 80)
-                        .clipShape(Circle())
                     }
+                    .frame(width: 80, height: 80)
+                    .clipShape(Circle())
                     
                     VStack(alignment: .leading, spacing: 8) {
                         if let bio = profile.bio {

@@ -1,15 +1,16 @@
 import SwiftUI
+import CryptoKit
 
 struct ProfileImageView<Content: View, Placeholder: View>: View {
     let libraryURL: URL?
     let entityId: String
-    let photoUrl: String
+    let photoUrl: String?
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
     
     @State private var localURL: URL?
     
-    init(libraryURL: URL?, entityId: String, photoUrl: String, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(libraryURL: URL?, entityId: String, photoUrl: String?, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.libraryURL = libraryURL
         self.entityId = entityId
         self.photoUrl = photoUrl
@@ -25,27 +26,42 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: photoUrl) {
+        .task(id: photoUrl ?? "") {
             await resolveLocalImage()
         }
     }
     
     private func resolveLocalImage() async {
-        guard let libraryURL = libraryURL, let url = URL(string: photoUrl) else { return }
+        guard let libraryURL = libraryURL else { return }
         
         let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         
-        // Use a hash of the URL to ensure if the user changes the photo URL for the same entity, it downloads the new one
-        let fileName = "\(safeId)_\(abs(photoUrl.hashValue)).jpg"
+        let fileName = "\(safeId).jpg"
         let fileURL = profilesDir.appendingPathComponent(fileName)
         
+        // 1. Check if the primary image file exists
         if FileManager.default.fileExists(atPath: fileURL.path) {
             localURL = fileURL
             return
         }
         
-        // Download and save
+        // 2. Check for legacy images to migrate (previously hashed by URL)
+        if let fallbackFile = findAnyExistingImage(in: profilesDir, for: safeId) {
+            do {
+                try FileManager.default.moveItem(at: fallbackFile, to: fileURL)
+                localURL = fileURL
+                cleanupOldImages(in: profilesDir, for: safeId, keeping: fileName)
+                return
+            } catch {
+                localURL = fallbackFile
+                return
+            }
+        }
+        
+        // 3. If no local image exists, and a URL was provided, attempt to download it
+        guard let photoUrlString = photoUrl, let url = URL(string: photoUrlString) else { return }
+        
         do {
             try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)
             let (data, _) = try await URLSession.shared.data(from: url)
@@ -53,6 +69,29 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
             localURL = fileURL
         } catch {
             print("Failed to download profile image for \(entityId): \(error)")
+        }
+    }
+    
+    private func findAnyExistingImage(in directory: URL, for safeId: String) -> URL? {
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            return files.first { $0.lastPathComponent.hasPrefix("\(safeId)_") && $0.lastPathComponent.hasSuffix(".jpg") }
+        } catch {
+            return nil
+        }
+    }
+    
+    private func cleanupOldImages(in directory: URL, for safeId: String, keeping currentFileName: String) {
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            for file in files {
+                let name = file.lastPathComponent
+                if name.hasPrefix("\(safeId)_") && name.hasSuffix(".jpg") && name != currentFileName {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        } catch {
+            // Ignore cleanup errors
         }
     }
 }
