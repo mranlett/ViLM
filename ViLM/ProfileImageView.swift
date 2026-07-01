@@ -5,15 +5,17 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     let libraryURL: URL?
     let entityId: String
     let photoUrl: String?
+    let isGallery: Bool
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
     
     @State private var localURL: URL?
     
-    init(libraryURL: URL?, entityId: String, photoUrl: String?, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(libraryURL: URL?, entityId: String, photoUrl: String?, isGallery: Bool = false, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.libraryURL = libraryURL
         self.entityId = entityId
         self.photoUrl = photoUrl
+        self.isGallery = isGallery
         self.content = content
         self.placeholder = placeholder
     }
@@ -37,7 +39,15 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         
-        let fileName = "\(safeId).jpg"
+        let fileName: String
+        if isGallery, let urlString = photoUrl {
+            let hashData = SHA256.hash(data: Data(urlString.utf8))
+            let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
+            fileName = "\(safeId)_\(hashString).jpg"
+        } else {
+            fileName = "\(safeId).jpg"
+        }
+        
         let fileURL = profilesDir.appendingPathComponent(fileName)
         
         // 1. Check if the primary image file exists
@@ -46,8 +56,8 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
             return
         }
         
-        // 2. Check for legacy images to migrate (previously hashed by URL)
-        if let fallbackFile = findAnyExistingImage(in: profilesDir, for: safeId) {
+        // 2. Check for legacy images to migrate (previously hashed by URL) - only for primary
+        if !isGallery, let fallbackFile = findAnyExistingImage(in: profilesDir, for: safeId) {
             do {
                 try FileManager.default.moveItem(at: fallbackFile, to: fileURL)
                 localURL = fileURL

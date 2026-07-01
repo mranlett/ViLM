@@ -101,11 +101,80 @@ struct ContentView: View {
                             libraryURL: selectedLibraryURL,
                             missingAssetIDs: $missingAssetIDs
                         )
+                    case .entityProfile(let category, let name):
+                        EntityProfileRouteView(
+                            category: category,
+                            name: name,
+                            assets: assets,
+                            libraryURL: selectedLibraryURL,
+                            gridRefreshID: gridRefreshID
+                        )
                     }
                 }
             }
 #endif
         } content: {
+#if os(iOS)
+            NavigationStack {
+                Group {
+                    if sidebarSelection.contains(.actorGallery) {
+                        ActorGridView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            libraryURL: selectedLibraryURL
+                        )
+                    } else if sidebarSelection.contains(.tagGallery) {
+                        TagGalleryView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            libraryURL: selectedLibraryURL
+                        )
+                    } else {
+                        AssetsGridView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            searchText: $searchText,
+                            selectedAssetIDs: $selectedAssetIDs,
+                            missingAssetIDs: missingAssetIDs,
+                            libraryURL: selectedLibraryURL,
+                            refreshID: gridRefreshID
+                        )
+                    }
+                }
+                .navigationDestination(for: AppRoute.self) { route in
+                    switch route {
+                    case .asset(let id):
+                        InspectorView(
+                            sidebarSelection: $sidebarSelection,
+                            selectedAssetIDs: [id],
+                            assets: $assets,
+                            selectedAssetBinding: $selectedAssetIDs,
+                            gridRefreshID: $gridRefreshID,
+                            libraryURL: selectedLibraryURL,
+                            missingAssetIDs: $missingAssetIDs
+                        )
+                    case .assets(let ids):
+                        InspectorView(
+                            sidebarSelection: $sidebarSelection,
+                            selectedAssetIDs: ids,
+                            assets: $assets,
+                            selectedAssetBinding: $selectedAssetIDs,
+                            gridRefreshID: $gridRefreshID,
+                            libraryURL: selectedLibraryURL,
+                            missingAssetIDs: $missingAssetIDs
+                        )
+                    case .entityProfile(let category, let name):
+                        EntityProfileRouteView(
+                            category: category,
+                            name: name,
+                            assets: assets,
+                            libraryURL: selectedLibraryURL,
+                            gridRefreshID: gridRefreshID
+                        )
+                    }
+                }
+            }
+#else
             Group {
                 if sidebarSelection.contains(.actorGallery) {
                     ActorGridView(
@@ -128,31 +197,6 @@ struct ContentView: View {
                         missingAssetIDs: missingAssetIDs,
                         libraryURL: selectedLibraryURL,
                         refreshID: gridRefreshID
-                    )
-                }
-            }
-#if os(iOS)
-            .navigationDestination(for: AppRoute.self) { route in
-                switch route {
-                case .asset(let id):
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: [id],
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
-                    )
-                case .assets(let ids):
-                    InspectorView(
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: ids,
-                        assets: $assets,
-                        selectedAssetBinding: $selectedAssetIDs,
-                        gridRefreshID: $gridRefreshID,
-                        libraryURL: selectedLibraryURL,
-                        missingAssetIDs: $missingAssetIDs
                     )
                 }
             }
@@ -426,3 +470,45 @@ private struct LibraryFolderPicker: UIViewControllerRepresentable {
     }
 }
 #endif
+
+// MARK: - EntityProfileRouteView
+struct EntityProfileRouteView: View {
+    let category: String
+    let name: String
+    let assets: [Asset]
+    let libraryURL: URL?
+    let gridRefreshID: UUID
+    @State private var localSelection: Set<SidebarItem>
+    @State private var searchText = ""
+    @State private var selectedAssetIDs: Set<Asset.ID> = []
+    @State private var missingAssetIDs: Set<Asset.ID> = []
+    
+    init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID) {
+        self.category = category
+        self.name = name
+        self.assets = assets
+        self.libraryURL = libraryURL
+        self.gridRefreshID = gridRefreshID
+        
+        let item: SidebarItem
+        switch category {
+        case "actor": item = .actor(name)
+        case "studio": item = .studio(name)
+        case "series": item = .series(name)
+        default: item = .tag(name)
+        }
+        self._localSelection = State(initialValue: [item])
+    }
+    
+    var body: some View {
+        AssetsGridView(
+            assets: assets,
+            sidebarSelection: $localSelection,
+            searchText: $searchText,
+            selectedAssetIDs: $selectedAssetIDs,
+            missingAssetIDs: missingAssetIDs,
+            libraryURL: libraryURL,
+            refreshID: gridRefreshID
+        )
+    }
+}

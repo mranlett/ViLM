@@ -10,6 +10,7 @@ struct ProfileGraphHeaderView: View {
     @State private var entityProfile: EntityProfile?
     @State private var isShowingEditor = false
     @State private var isShowingRenameDialog = false
+    @State private var selectedFullImageIdentifier: String? = nil
     @State private var newGlobalName = ""
     
     private var relatedStudios: [String] {
@@ -93,27 +94,87 @@ struct ProfileGraphHeaderView: View {
             
             if let profile = entityProfile {
                 HStack(alignment: .top, spacing: 16) {
-                    ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: profile.photoUrl) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        ZStack {
-                            Circle().fill(Color.secondary.opacity(0.2))
-                            Image(systemName: "person.fill").font(.system(size: 40)).foregroundColor(.secondary)
-                            if profile.photoUrl != nil {
-                                ProgressView()
+                    Button(action: {
+                        selectedFullImageIdentifier = "primary"
+                    }) {
+                        ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: profile.photoUrl, isGallery: false) { image in
+                            Color.clear
+                                .overlay(
+                                    image
+                                        .resizable()
+                                        .scaledToFill(),
+                                    alignment: .top
+                                )
+                        } placeholder: {
+                            ZStack {
+                                Circle().fill(Color.secondary.opacity(0.2))
+                                Image(systemName: "person.fill").font(.system(size: 40)).foregroundColor(.secondary)
+                                if profile.photoUrl != nil {
+                                    ProgressView()
+                                }
                             }
                         }
+                        .frame(width: 80, height: 80)
+                        .contentShape(Circle())
+                        .clipShape(Circle())
                     }
-                    .frame(width: 80, height: 80)
-                    .clipShape(Circle())
+                    .buttonStyle(.plain)
                     
                     VStack(alignment: .leading, spacing: 8) {
                         if let bio = profile.bio {
                             Text(bio).font(.body)
                         }
+                        
+                        let metadataStrings: [String] = [
+                            profile.gender.map { "Gender: \($0)" },
+                            profile.hairColor.map { "Hair Color: \($0)" },
+                            profile.birthYear.map { "Birth Year: \($0)" },
+                            profile.countryOfOrigin.map { "Country: \($0)" }
+                        ].compactMap { $0 }
+                        
+                        if !metadataStrings.isEmpty {
+                            Text(metadataStrings.joined(separator: " • "))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
                         if let homePage = profile.homePage, let url = URL(string: homePage) {
                             Link("Visit Website", destination: url)
                                 .font(.callout)
+                        }
+                    }
+                }
+            }
+            
+            if let profile = entityProfile, !profile.tags.isEmpty {
+                tagSection(title: "Profile Tags", items: profile.tags, color: .accentColor) { item in
+                    .tag(item)
+                }
+            }
+            
+            if let profile = entityProfile, !profile.galleryUrls.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Photo Gallery").font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(profile.galleryUrls, id: \.self) { url in
+                                Button(action: {
+                                    selectedFullImageIdentifier = url
+                                }) {
+                                    ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: url, isGallery: url != profile.photoUrl) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        ZStack {
+                                            Rectangle().fill(Color.secondary.opacity(0.2))
+                                            ProgressView()
+                                        }
+                                    }
+                                    .frame(width: 80, height: 80)
+                                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
@@ -159,6 +220,40 @@ struct ProfileGraphHeaderView: View {
         } message: {
             Text("This will rename the entity across all videos in your library.")
         }
+        .sheet(item: Binding(
+            get: { selectedFullImageIdentifier.map { IdentifiableString(id: $0) } },
+            set: { selectedFullImageIdentifier = $0?.id }
+        )) { item in
+            if let profile = entityProfile {
+                NavigationStack {
+                    let isGallery = item.id != "primary" && item.id != profile.photoUrl
+                    let photoUrl = item.id == "primary" ? profile.photoUrl : item.id
+                    
+                    ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl, isGallery: isGallery) { image in
+                        image
+                            .resizable()
+                            .scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                selectedFullImageIdentifier = nil
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.large])
+            }
+        }
+    }
+    
+    struct IdentifiableString: Identifiable {
+        let id: String
     }
     
     private var titleText: String {
@@ -258,37 +353,34 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
+    private func route(for item: SidebarItem, fallbackName: String) -> AppRoute {
+        switch item {
+        case .actor(let name): return .entityProfile(category: "actor", name: name)
+        case .studio(let name): return .entityProfile(category: "studio", name: name)
+        case .tag(let name): return .entityProfile(category: "tag", name: name)
+        case .series(let name): return .entityProfile(category: "series", name: name)
+        default: return .entityProfile(category: "unknown", name: fallbackName)
+        }
+    }
+    
     private func tagSection(title: String, items: [String], color: Color, isAdditive: Bool = false, itemType: @escaping (String) -> SidebarItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
             FlowLayout(spacing: 6) {
                 ForEach(items, id: \.self) { item in
                     let sidebarItem = itemType(item)
-                    Button(action: {
+                    
+                    #if os(iOS)
+                    TagBubble(label: item, color: color, navRoute: route(for: sidebarItem, fallbackName: item))
+                    #else
+                    TagBubble(label: item, color: color, onPivot: {
                         if isAdditive {
                             sidebarSelection.insert(sidebarItem)
                         } else {
                             sidebarSelection = [sidebarItem]
                         }
-                    }) {
-                        Text(item)
-                            .font(.caption)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(color.opacity(0.15))
-                            .foregroundColor(color)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-#if os(macOS)
-                    .onHover { isHovered in
-                        if isHovered {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
-#endif
+                    })
+                    #endif
                 }
             }
         }

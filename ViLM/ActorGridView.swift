@@ -8,7 +8,35 @@ struct ActorGridView: View {
     let libraryURL: URL?
     
     @State private var actorProfiles: [String: EntityProfile] = [:]
+    @State private var profileImageFileNames: Set<String> = []
     @State private var alphaFilter: Character? = nil
+    
+    @State private var filterCriteria = ActorFilterCriteria()
+    @State private var isShowingFilterBuilder = false
+    
+    var uniqueGenders: [String] {
+        let values = actorProfiles.values.compactMap { $0.gender }
+            .flatMap { $0.components(separatedBy: ",") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted()
+    }
+    
+    var uniqueHairColors: [String] {
+        let values = actorProfiles.values.compactMap { $0.hairColor }
+            .flatMap { $0.components(separatedBy: ",") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted()
+    }
+    
+    var uniqueCountries: [String] {
+        let values = actorProfiles.values.compactMap { $0.countryOfOrigin }
+            .flatMap { $0.components(separatedBy: ",") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted()
+    }
     
     // CSV Export/Import
     @State private var isShowingExportPicker = false
@@ -32,9 +60,67 @@ struct ActorGridView: View {
         return Array(unique).sorted()
     }
     
+    var allUniqueTags: [String] {
+        let values = actorProfiles.values.flatMap { $0.tags }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return Array(Set(values)).sorted()
+    }
+    
     var filteredActors: [String] {
-        guard let letter = alphaFilter else { return allUniqueActors }
-        return allUniqueActors.filter { $0.uppercased().hasPrefix(String(letter)) }
+        var result = allUniqueActors
+        
+        if let letter = alphaFilter {
+            result = result.filter { $0.uppercased().hasPrefix(String(letter)) }
+        }
+        
+        if filterCriteria.showMissingPhotosOnly {
+            result = result.filter { actor in
+                let safeId = "actor:\(actor)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+                if profileImageFileNames.contains("\(safeId).jpg") {
+                    return false
+                }
+                return !profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
+            }
+        }
+        
+        if !filterCriteria.gender.isEmpty {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                let values = profile?.gender?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
+                return values.contains(filterCriteria.gender.lowercased())
+            }
+        }
+        
+        if !filterCriteria.hairColor.isEmpty {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                let values = profile?.hairColor?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
+                return values.contains(filterCriteria.hairColor.lowercased())
+            }
+        }
+        
+        if !filterCriteria.country.isEmpty {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                let values = profile?.countryOfOrigin?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
+                return values.contains(filterCriteria.country.lowercased())
+            }
+        }
+        
+        if !filterCriteria.selectedTags.isEmpty {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                let actorTags = Set(profile?.tags ?? [])
+                if filterCriteria.tagsLogic == .and {
+                    return filterCriteria.selectedTags.isSubset(of: actorTags)
+                } else {
+                    return !filterCriteria.selectedTags.isDisjoint(with: actorTags)
+                }
+            }
+        }
+        
+        return result
     }
     
     var body: some View {
@@ -48,9 +134,7 @@ struct ActorGridView: View {
                     ForEach(filteredActors, id: \.self) { actor in
                         let isSelected = sidebarSelection.contains(.actor(actor))
                         #if os(iOS)
-                        Button(action: {
-                            sidebarSelection = [.actor(actor)]
-                        }) {
+                        NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
                             ActorGridItemView(
                                 actor: actor,
                                 profile: actorProfiles["actor:\(actor)"],
@@ -80,6 +164,15 @@ struct ActorGridView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $isShowingFilterBuilder) {
+            ActorFilterBuilderView(
+                allUniqueGenders: uniqueGenders,
+                allUniqueHairColors: uniqueHairColors,
+                allUniqueCountries: uniqueCountries,
+                allUniqueTags: allUniqueTags,
+                criteria: $filterCriteria
+            )
+        }
         .navigationTitle("Actors Gallery")
         .toolbar {
             #if !os(iOS)
@@ -100,6 +193,12 @@ struct ActorGridView: View {
                 }
             }
             #endif
+            
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { isShowingFilterBuilder = true }) {
+                    Label("Filter", systemImage: filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                }
+            }
             
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -162,10 +261,17 @@ struct ActorGridView: View {
         do {
             let store = try LibraryStore(at: url)
             let allProfiles = try store.fetchAllEntityProfiles()
+            var newActorProfiles: [String: EntityProfile] = [:]
             for profile in allProfiles {
                 if profile.id.hasPrefix("actor:") {
-                    actorProfiles[profile.id] = profile
+                    newActorProfiles[profile.id] = profile
                 }
+            }
+            actorProfiles = newActorProfiles
+            
+            let profilesDir = url.appendingPathComponent(".catalog/profiles")
+            if let files = try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path) {
+                profileImageFileNames = Set(files.filter { $0.hasSuffix(".jpg") })
             }
         } catch {
             print("Failed to fetch actor profiles: \(error)")
@@ -175,14 +281,19 @@ struct ActorGridView: View {
     // MARK: - CSV Logic
     
     private func exportCSV() {
-        var csvString = "Name,Bio,PhotoURL,HomePage\n"
+        var csvString = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin\n"
         for actor in allUniqueActors {
             let profile = actorProfiles["actor:\(actor)"]
             let name = escapeCSV(actor)
             let bio = escapeCSV(profile?.bio ?? "")
             let photoUrl = escapeCSV("")
             let homePage = escapeCSV(profile?.homePage ?? "")
-            csvString.append("\(name),\(bio),\(photoUrl),\(homePage)\n")
+            let gender = escapeCSV(profile?.gender ?? "")
+            let hairColor = escapeCSV(profile?.hairColor ?? "")
+            let birthYear = escapeCSV(profile?.birthYear.map { String($0) } ?? "")
+            let country = escapeCSV(profile?.countryOfOrigin ?? "")
+            
+            csvString.append("\(name),\(bio),\(photoUrl),\(homePage),\(gender),\(hairColor),\(birthYear),\(country)\n")
         }
         csvDocument = CSVDocument(text: csvString)
         isShowingExportPicker = true
@@ -220,7 +331,28 @@ struct ActorGridView: View {
                     let photoUrl = columns[2].isEmpty ? nil : columns[2]
                     let homePage = columns[3].isEmpty ? nil : columns[3]
                     
-                    let profile = EntityProfile(id: "actor:\(name)", bio: bio, photoUrl: photoUrl, homePage: homePage)
+                    var gender: String? = nil
+                    var hairColor: String? = nil
+                    var birthYear: Int? = nil
+                    var country: String? = nil
+                    
+                    if columns.count >= 8 {
+                        gender = columns[4].isEmpty ? nil : columns[4]
+                        hairColor = columns[5].isEmpty ? nil : columns[5]
+                        birthYear = Int(columns[6])
+                        country = columns[7].isEmpty ? nil : columns[7]
+                    }
+                    
+                    let profile = EntityProfile(
+                        id: "actor:\(name)",
+                        bio: bio,
+                        photoUrl: photoUrl,
+                        homePage: homePage,
+                        gender: gender,
+                        hairColor: hairColor,
+                        birthYear: birthYear,
+                        countryOfOrigin: country
+                    )
                     try store.saveEntityProfile(profile)
                 }
             }
@@ -284,7 +416,13 @@ struct ActorGridItemView: View {
     var body: some View {
         VStack {
             ProfileImageView(libraryURL: libraryURL, entityId: "actor:\(actor)", photoUrl: profile?.photoUrl) { image in
-                image.resizable().scaledToFill()
+                Color.clear
+                    .overlay(
+                        image
+                            .resizable()
+                            .scaledToFill(),
+                        alignment: .top
+                    )
             } placeholder: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)

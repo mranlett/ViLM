@@ -3,10 +3,18 @@ import LibraryCore
 
 struct FilterBuilderView: View {
     let assets: [Asset]
-    @Binding var sidebarSelection: Set<SidebarItem>
+    @Binding var criteria: AssetFilterCriteria
     @Environment(\.dismiss) private var dismiss
     
     @State private var searchText = ""
+    
+    @State private var isActorsExpanded = false
+    @State private var isTagsExpanded = false
+    @State private var isStudiosExpanded = false
+    
+    @State private var actorAlphaFilter: Character? = nil
+    @State private var tagAlphaFilter: Character? = nil
+    @State private var studioAlphaFilter: Character? = nil
     
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
@@ -29,9 +37,66 @@ struct FilterBuilderView: View {
     var body: some View {
         NavigationStack {
             List {
-                filterSection(title: "Actors", items: allUniqueActors, itemType: { .actor($0) })
-                filterSection(title: "Studios", items: allUniqueStudios, itemType: { .studio($0) })
-                filterSection(title: "Tags", items: allUniqueTags, itemType: { .tag($0) })
+                Section("Review Status") {
+                    Picker("Status", selection: $criteria.reviewStatus) {
+                        ForEach(AssetFilterCriteria.ReviewStatusFilter.allCases, id: \.self) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                
+                Section("Minimum Rating") {
+                    Stepper(value: Binding(
+                        get: { criteria.minRating ?? 0 },
+                        set: { criteria.minRating = $0 == 0 ? nil : $0 }
+                    ), in: 0...5) {
+                        HStack {
+                            Text("Rating:")
+                            if let rating = criteria.minRating {
+                                HStack(spacing: 2) {
+                                    ForEach(0..<rating, id: \.self) { _ in
+                                        Image(systemName: "star.fill").foregroundColor(.yellow)
+                                    }
+                                }
+                            } else {
+                                Text("Any")
+                            }
+                        }
+                    }
+                }
+                DisclosureGroup("Actors", isExpanded: $isActorsExpanded) {
+                    AlphaPickerView(filter: $actorAlphaFilter)
+                        .padding(.vertical, 4)
+                    filterSection(
+                        items: allUniqueActors,
+                        filter: actorAlphaFilter,
+                        logicBinding: $criteria.actorsLogic,
+                        selectionBinding: $criteria.selectedActors
+                    )
+                }
+                
+                DisclosureGroup("Studios", isExpanded: $isStudiosExpanded) {
+                    AlphaPickerView(filter: $studioAlphaFilter)
+                        .padding(.vertical, 4)
+                    filterSection(
+                        items: allUniqueStudios,
+                        filter: studioAlphaFilter,
+                        logicBinding: $criteria.studiosLogic,
+                        selectionBinding: $criteria.selectedStudios
+                    )
+                }
+                
+                DisclosureGroup("Tags", isExpanded: $isTagsExpanded) {
+                    AlphaPickerView(filter: $tagAlphaFilter)
+                        .padding(.vertical, 4)
+                    filterSection(
+                        items: allUniqueTags,
+                        filter: tagAlphaFilter,
+                        logicBinding: $criteria.tagsLogic,
+                        selectionBinding: $criteria.selectedTags
+                    )
+                }
             }
             .searchable(text: $searchText, prompt: "Search filters")
             .navigationTitle("Filters")
@@ -44,34 +109,46 @@ struct FilterBuilderView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Clear") {
-                        sidebarSelection = [.allAssets]
+                        criteria = AssetFilterCriteria()
                     }
-                    .disabled(sidebarSelection.isEmpty || sidebarSelection == [.allAssets])
+                    .disabled(criteria.isEmpty)
                 }
             }
         }
-        .frame(minWidth: 350, minHeight: 500)
+        .frame(minWidth: 400, minHeight: 600)
     }
     
-    private func filterSection(title: String, items: [String], itemType: @escaping (String) -> SidebarItem) -> some View {
-        let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
+    private func filteredItems(_ items: [String], by filter: Character?) -> [String] {
+        guard let filter = filter else { return items }
+        if filter == "#" {
+            return items.filter { $0.first?.isLetter == false }
+        }
+        return items.filter { $0.uppercased().hasPrefix(String(filter)) }
+    }
+    
+    private func filterSection(items: [String], filter: Character?, logicBinding: Binding<AssetFilterCriteria.Logic>, selectionBinding: Binding<Set<String>>) -> some View {
+        let alphaFiltered = filteredItems(items, by: filter)
+        let finalFiltered = alphaFiltered.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
         
         return Group {
-            if !filtered.isEmpty {
-                Section(title) {
-                    ForEach(filtered, id: \.self) { item in
-                        let sidebarItem = itemType(item)
-                        let isSelected = sidebarSelection.contains(sidebarItem)
+            if !finalFiltered.isEmpty || !selectionBinding.wrappedValue.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    Picker("Match", selection: logicBinding) {
+                        ForEach(AssetFilterCriteria.Logic.allCases, id: \.self) { logic in
+                            Text(logic.rawValue).tag(logic)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.vertical, 8)
+                    
+                    ForEach(finalFiltered, id: \.self) { item in
+                        let isSelected = selectionBinding.wrappedValue.contains(item)
                         
                         Button {
                             if isSelected {
-                                sidebarSelection.remove(sidebarItem)
-                                if sidebarSelection.isEmpty {
-                                    sidebarSelection = [.allAssets]
-                                }
+                                selectionBinding.wrappedValue.remove(item)
                             } else {
-                                sidebarSelection.remove(.allAssets)
-                                sidebarSelection.insert(sidebarItem)
+                                selectionBinding.wrappedValue.insert(item)
                             }
                         } label: {
                             HStack {
@@ -82,8 +159,10 @@ struct FilterBuilderView: View {
                                 }
                             }
                             .contentShape(Rectangle())
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
+                        Divider()
                     }
                 }
             }

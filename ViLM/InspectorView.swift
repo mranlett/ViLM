@@ -577,6 +577,23 @@ struct SingleInspectorView: View {
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(items, id: \.self) { item in
+                        #if os(iOS)
+                        TagBubble(
+                            label: item,
+                            color: color,
+                            onPivot: nil,
+                            onEdit: {
+                                activeCategory = category
+                                newTagValue = item
+                                editingTagValue = item
+                                isShowingTagEntry = true
+                            },
+                            onDelete: {
+                                deleteTag(category: category, value: item)
+                            },
+                            navRoute: AppRoute.entityProfile(category: category, name: item)
+                        )
+                        #else
                         TagBubble(label: item, color: color, onPivot: {
                             var pivotItem: SidebarItem
                             switch category {
@@ -595,6 +612,7 @@ struct SingleInspectorView: View {
                         }) {
                             deleteTag(category: category, value: item)
                         }
+                        #endif
                     }
                 }
             }

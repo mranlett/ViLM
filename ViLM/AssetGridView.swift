@@ -1,6 +1,27 @@
 import SwiftUI
 import LibraryCore
 
+struct AssetFilterCriteria: Equatable {
+    enum Logic: String, CaseIterable, Equatable { case and = "AND", or = "OR" }
+    enum ReviewStatusFilter: String, CaseIterable, Equatable { case all = "All", reviewed = "Reviewed", unreviewed = "Unreviewed" }
+
+    var reviewStatus: ReviewStatusFilter = .all
+    var minRating: Int? = nil
+    
+    var actorsLogic: Logic = .and
+    var selectedActors: Set<String> = []
+    
+    var tagsLogic: Logic = .and
+    var selectedTags: Set<String> = []
+    
+    var studiosLogic: Logic = .and
+    var selectedStudios: Set<String> = []
+    
+    var isEmpty: Bool {
+        reviewStatus == .all && minRating == nil && selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty
+    }
+}
+
 struct AssetsGridView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
@@ -23,12 +44,7 @@ struct AssetsGridView: View {
     @State private var sortAscending: Bool = true
     @State private var fileSizes: [Asset.ID: Int64] = [:]
     
-    enum ReviewFilter: String, CaseIterable {
-        case all = "All"
-        case reviewed = "Reviewed"
-        case unreviewed = "Unreviewed"
-    }
-    @State private var reviewFilter: ReviewFilter = .all
+    @State private var filterCriteria = AssetFilterCriteria()
     
     enum GridStyle {
         case singleFrame
@@ -48,22 +64,57 @@ struct AssetsGridView: View {
                 }
             }
             
+            if !matchesCategory { return false }
+            
             let matchesReviewStatus: Bool
-            switch reviewFilter {
+            switch filterCriteria.reviewStatus {
             case .all: matchesReviewStatus = true
             case .reviewed: matchesReviewStatus = asset.status == .reviewed
             case .unreviewed: matchesReviewStatus = asset.status == .unreviewed
             }
             
-            if !matchesReviewStatus {
+            if !matchesReviewStatus { return false }
+            
+            if let minRating = filterCriteria.minRating {
+                let assetRating = asset.rating ?? 0
+                if assetRating < minRating { return false }
+            }
+            
+            // Actors Filter
+            if !filterCriteria.selectedActors.isEmpty {
+                let assetActors = Set(asset.actors)
+                if filterCriteria.actorsLogic == .and {
+                    if !filterCriteria.selectedActors.isSubset(of: assetActors) { return false }
+                } else {
+                    if filterCriteria.selectedActors.isDisjoint(with: assetActors) { return false }
+                }
+            }
+            
+            // Tags Filter
+            if !filterCriteria.selectedTags.isEmpty {
+                let assetTags = Set(asset.actions)
+                if filterCriteria.tagsLogic == .and {
+                    if !filterCriteria.selectedTags.isSubset(of: assetTags) { return false }
+                } else {
+                    if filterCriteria.selectedTags.isDisjoint(with: assetTags) { return false }
+                }
+            }
+            
+            // Studios Filter
+            if !filterCriteria.selectedStudios.isEmpty {
+                let assetStudios = Set(asset.studios)
+                if filterCriteria.studiosLogic == .and {
+                    if !filterCriteria.selectedStudios.isSubset(of: assetStudios) { return false }
+                } else {
+                    if filterCriteria.selectedStudios.isDisjoint(with: assetStudios) { return false }
+                }
+            }
+            
+            if !searchText.isEmpty && !asset.fileName.localizedCaseInsensitiveContains(searchText) {
                 return false
             }
             
-            if searchText.isEmpty {
-                return matchesCategory
-            } else {
-                return matchesCategory && asset.fileName.localizedCaseInsensitiveContains(searchText)
-            }
+            return true
         }
         
         return filtered.sorted { a, b in
@@ -100,78 +151,80 @@ struct AssetsGridView: View {
     // MARK: - Body
     var body: some View {
         ScrollView {
-            if sidebarSelection.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(Array(sidebarSelection).sorted(by: { sidebarSelectionTitle(for: $0) < sidebarSelectionTitle(for: $1) }), id: \.self) { item in
-                            if item != .allAssets {
-                                TagBubble(label: sidebarSelectionTitle(for: item), color: color(for: item), onDelete: {
-                                    sidebarSelection.remove(item)
-                                    if sidebarSelection.isEmpty {
-                                        sidebarSelection = [.allAssets]
-                                    }
-                                })
+            VStack(spacing: 0) {
+                if sidebarSelection.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(Array(sidebarSelection).sorted(by: { sidebarSelectionTitle(for: $0) < sidebarSelectionTitle(for: $1) }), id: \.self) { item in
+                                if item != .allAssets {
+                                    TagBubble(label: sidebarSelectionTitle(for: item), color: color(for: item), onDelete: {
+                                        sidebarSelection.remove(item)
+                                        if sidebarSelection.isEmpty {
+                                            sidebarSelection = [.allAssets]
+                                        }
+                                    })
+                                }
                             }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
+                    .padding(.top)
+                } else if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
+                    ProfileGraphHeaderView(
+                        filteredAssets: filteredAssets,
+                        sidebarSelection: $sidebarSelection,
+                        currentSelection: first,
+                        libraryURL: libraryURL
+                    )
+                    .padding(.top)
                 }
-                .padding(.top)
-            } else if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
-                ProfileGraphHeaderView(
-                    filteredAssets: filteredAssets,
-                    sidebarSelection: $sidebarSelection,
-                    currentSelection: first,
-                    libraryURL: libraryURL
-                )
-                .padding(.top)
-            }
-            
-            if filteredAssets.isEmpty {
-                emptyStateView // Use the helper view here
-                    .padding(.top, 100)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
-                    ForEach(filteredAssets) { asset in
+                
+                if filteredAssets.isEmpty {
+                    emptyStateView // Use the helper view here
+                        .padding(.top, 100)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
+                        ForEach(filteredAssets) { asset in
 #if os(iOS)
-                        if isEditMode {
-                            gridItem(for: asset)
-                                .onTapGesture {
+                            if isEditMode {
+                                gridItem(for: asset)
+                                    .onTapGesture {
+                                        if selectedAssetIDs.contains(asset.id) {
+                                            selectedAssetIDs.remove(asset.id)
+                                        } else {
+                                            selectedAssetIDs.insert(asset.id)
+                                        }
+                                    }
+                            } else {
+                                NavigationLink(value: AppRoute.asset(asset.id)) {
+                                    gridItem(for: asset)
+                                }
+                                .buttonStyle(.plain)
+                                .simultaneousGesture(TapGesture().onEnded {
+                                    selectedAssetIDs = [asset.id]
+                                })
+                            }
+#else
+                            Button(action: {
+                                if NSEvent.modifierFlags.contains(.command) {
                                     if selectedAssetIDs.contains(asset.id) {
                                         selectedAssetIDs.remove(asset.id)
                                     } else {
                                         selectedAssetIDs.insert(asset.id)
                                     }
+                                } else {
+                                    selectedAssetIDs = [asset.id]
                                 }
-                        } else {
-                            NavigationLink(value: AppRoute.asset(asset.id)) {
+                            }) {
                                 gridItem(for: asset)
                             }
                             .buttonStyle(.plain)
-                            .simultaneousGesture(TapGesture().onEnded {
-                                selectedAssetIDs = [asset.id]
-                            })
-                        }
-#else
-                        Button(action: {
-                            if NSEvent.modifierFlags.contains(.command) {
-                                if selectedAssetIDs.contains(asset.id) {
-                                    selectedAssetIDs.remove(asset.id)
-                                } else {
-                                    selectedAssetIDs.insert(asset.id)
-                                }
-                            } else {
-                                selectedAssetIDs = [asset.id]
-                            }
-                        }) {
-                            gridItem(for: asset)
-                        }
-                        .buttonStyle(.plain)
 #endif
+                        }
+                        
                     }
-                    
+                    .padding()
                 }
-                .padding()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -182,16 +235,6 @@ struct AssetsGridView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
-                    Menu {
-                        Picker("Review Status", selection: $reviewFilter) {
-                            ForEach(ReviewFilter.allCases, id: \.self) { filter in
-                                Text(filter.rawValue).tag(filter)
-                            }
-                        }
-                    } label: {
-                        Label("Status", systemImage: reviewFilter == .all ? "checkmark.circle" : (reviewFilter == .reviewed ? "checkmark.seal.fill" : "circle.dashed"))
-                    }
-                    
                     Menu {
                         Picker("Sort By", selection: $sortOption) {
                             ForEach(SortOption.allCases, id: \.self) { option in
@@ -207,7 +250,7 @@ struct AssetsGridView: View {
                     }
                     
                     Button(action: { isShowingFilterBuilder = true }) {
-                        Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        Label("Filter", systemImage: filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                     gridStylePicker
                 }
@@ -232,7 +275,7 @@ struct AssetsGridView: View {
 #endif
         }
         .sheet(isPresented: $isShowingFilterBuilder) {
-            FilterBuilderView(assets: assets, sidebarSelection: $sidebarSelection)
+            FilterBuilderView(assets: assets, criteria: $filterCriteria)
         }
         .task(id: assets.count) {
             guard let url = libraryURL else { return }

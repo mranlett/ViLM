@@ -172,27 +172,37 @@ struct TagBubble: View {
     let color: Color
     var onPivot: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
-    var onDelete: () -> Void
+    var onDelete: (() -> Void)? = nil
+    var navRoute: AppRoute? = nil
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(action: {
-                if let pivot = onPivot {
-                    pivot()
-                } else if let edit = onEdit {
-                    edit() // Fallback if no pivot provided
+            if let route = navRoute {
+                NavigationLink(value: route) {
+                    Text(label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-            }) {
-                Text(label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                .buttonStyle(.plain)
+            } else {
+                Button(action: {
+                    if let pivot = onPivot {
+                        pivot()
+                    } else if let edit = onEdit {
+                        edit() // Fallback if no pivot provided
+                    }
+                }) {
+                    Text(label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .buttonStyle(.plain)
+                #if os(macOS)
+                .onHover { isHovered in
+                    if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                #endif
             }
-            .buttonStyle(.plain)
-            #if os(macOS)
-            .onHover { isHovered in
-                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
-            #endif
             
             if onPivot != nil && onEdit != nil {
                 Button(action: { onEdit?() }) {
@@ -203,12 +213,14 @@ struct TagBubble: View {
                 .buttonStyle(.plain)
             }
             
-            Button(action: onDelete) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption2)
-                    .opacity(0.6)
+            if let deleteAction = onDelete {
+                Button(action: deleteAction) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption2)
+                        .opacity(0.6)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .font(.caption2)
         .fontWeight(.medium)

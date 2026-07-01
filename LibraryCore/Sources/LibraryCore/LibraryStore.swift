@@ -72,6 +72,30 @@ public class LibraryStore {
             }
         }
         
+        // --- NEW: Migration v6 adds actor metadata ---
+        migrator.registerMigration("v6") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "gender", .text)
+                t.add(column: "hair_color", .text)
+                t.add(column: "birth_year", .integer)
+                t.add(column: "country_of_origin", .text)
+            }
+        }
+        
+        // --- NEW: Migration v7 adds actor tags ---
+        migrator.registerMigration("v7") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "tags", .text).notNull().defaults(to: "[]")
+            }
+        }
+        
+        // --- NEW: Migration v8 adds gallery URLs ---
+        migrator.registerMigration("v8") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "gallery_urls", .text).notNull().defaults(to: "[]")
+            }
+        }
+        
         try migrator.migrate(dbQueue)
     }
     
@@ -102,7 +126,7 @@ public class LibraryStore {
 
     public func deleteEntityProfile(for id: String) throws {
         try dbQueue.write { db in
-            try EntityProfile.deleteOne(db, key: id)
+            _ = try EntityProfile.deleteOne(db, key: id)
         }
     }
 
@@ -127,7 +151,16 @@ public class LibraryStore {
             
             // Rename the entity profile if one exists
             if let profile = try EntityProfile.fetchOne(db, key: normalizedOld) {
-                let newProfile = EntityProfile(id: normalizedNew, bio: profile.bio, photoUrl: profile.photoUrl, homePage: profile.homePage)
+                let newProfile = EntityProfile(
+                    id: normalizedNew,
+                    bio: profile.bio,
+                    photoUrl: profile.photoUrl,
+                    homePage: profile.homePage,
+                    gender: profile.gender,
+                    hairColor: profile.hairColor,
+                    birthYear: profile.birthYear,
+                    countryOfOrigin: profile.countryOfOrigin
+                )
                 try newProfile.save(db)
                 try profile.delete(db)
             }
