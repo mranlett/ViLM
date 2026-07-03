@@ -21,10 +21,26 @@ struct EntityProfileEditorView: View {
     @State private var galleryUrls: [String] = []
     @State private var newGalleryUrl: String = ""
     
+    @State private var allUniqueTags: [String] = []
+    @State private var allUniqueGenders: [String] = []
+    
     // Tag Entry State
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
     @State private var editingTagValue: String? = nil
+    
+    // Gender Entry State
+    @State private var isShowingGenderSuggestions = false
+    
+    private var filteredTagSuggestions: [String] {
+        if newTagValue.isEmpty { return [] }
+        return allUniqueTags.filter { $0.localizedCaseInsensitiveContains(newTagValue) && !tags.contains($0) }.prefix(10).map { $0 }
+    }
+    
+    private var filteredGenderSuggestions: [String] {
+        if gender.isEmpty { return allUniqueGenders }
+        return allUniqueGenders.filter { $0.localizedCaseInsensitiveContains(gender) }
+    }
     
     enum Field: Hashable {
         case newGalleryUrl, homePage, gender, hairColor, birthYear, country, bio
@@ -42,9 +58,29 @@ struct EntityProfileEditorView: View {
         _gender = State(initialValue: profile?.gender ?? "")
         _hairColor = State(initialValue: profile?.hairColor ?? "")
         _birthYearString = State(initialValue: profile?.birthYear.map { String($0) } ?? "")
-        _countryOfOrigin = State(initialValue: profile?.countryOfOrigin ?? "")
+        var initialCountry = profile?.countryOfOrigin ?? ""
+        if !initialCountry.isEmpty {
+            let flag = CountryFlagHelper.flagEmoji(for: initialCountry)
+            if !flag.isEmpty && !initialCountry.contains(flag) {
+                initialCountry = "\(initialCountry) \(flag)"
+            }
+        }
+        _countryOfOrigin = State(initialValue: initialCountry)
         _tags = State(initialValue: profile?.tags ?? [])
-        _galleryUrls = State(initialValue: profile?.galleryUrls ?? [])
+        
+        var initialGallery = profile?.galleryUrls ?? []
+        if let photo = profile?.photoUrl, !photo.isEmpty, !initialGallery.contains(photo) {
+            initialGallery.insert(photo, at: 0)
+        } else if let libraryURL = libraryURL, (profile?.photoUrl ?? "").isEmpty {
+            let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+            let fileURL = libraryURL.appendingPathComponent(".catalog/profiles").appendingPathComponent("\(safeId).jpg")
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                if !initialGallery.contains("local://primary") {
+                    initialGallery.insert("local://primary", at: 0)
+                }
+            }
+        }
+        _galleryUrls = State(initialValue: initialGallery)
     }
     
     var body: some View {
@@ -146,10 +182,33 @@ struct EntityProfileEditorView: View {
                         .submitLabel(.next)
                         .onSubmit { focusedField = .gender }
                     
-                    TextField("Gender", text: $gender)
-                        .focused($focusedField, equals: .gender)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .hairColor }
+                    VStack(alignment: .leading) {
+                        TextField("Gender", text: $gender)
+                            .focused($focusedField, equals: .gender)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .hairColor }
+                            .onChange(of: gender) { _, _ in isShowingGenderSuggestions = true }
+                        
+                        if isShowingGenderSuggestions && !filteredGenderSuggestions.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(filteredGenderSuggestions, id: \.self) { suggestion in
+                                        Button(action: {
+                                            gender = suggestion
+                                            isShowingGenderSuggestions = false
+                                        }) {
+                                            Text(suggestion)
+                                                .font(.caption)
+                                                .padding(6)
+                                                .background(Color.secondary.opacity(0.2))
+                                                .cornerRadius(6)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
                         
                     TextField("Hair Color", text: $hairColor)
                         .focused($focusedField, equals: .hairColor)
@@ -174,6 +233,12 @@ struct EntityProfileEditorView: View {
                         .focused($focusedField, equals: .country)
                         .submitLabel(.next)
                         .onSubmit { focusedField = .bio }
+                        .onChange(of: countryOfOrigin) { _, newValue in
+                            let flag = CountryFlagHelper.flagEmoji(for: newValue)
+                            if !flag.isEmpty && !newValue.contains(flag) {
+                                countryOfOrigin = "\(newValue.trimmingCharacters(in: .whitespaces)) \(flag)"
+                            }
+                        }
                     
                     Text("Bio")
                         .font(.caption)
@@ -235,6 +300,14 @@ struct EntityProfileEditorView: View {
                     Button("Save") {
                         let finalPhotoUrl = photoUrl.trimmingCharacters(in: .whitespacesAndNewlines)
                         
+                        var finalCountry = countryOfOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !finalCountry.isEmpty {
+                            let flag = CountryFlagHelper.flagEmoji(for: finalCountry)
+                            if !flag.isEmpty && !finalCountry.contains(flag) {
+                                finalCountry = "\(finalCountry) \(flag)"
+                            }
+                        }
+                        
                         let profile = EntityProfile(
                             id: entityId,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
@@ -243,7 +316,7 @@ struct EntityProfileEditorView: View {
                             gender: gender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : gender,
                             hairColor: hairColor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : hairColor,
                             birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
-                            countryOfOrigin: countryOfOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : countryOfOrigin,
+                            countryOfOrigin: finalCountry.isEmpty ? nil : finalCountry,
                             tags: tags,
                             galleryUrls: galleryUrls
                         )
@@ -268,6 +341,20 @@ struct EntityProfileEditorView: View {
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
         }
+        .onAppear {
+            guard let url = libraryURL else { return }
+            do {
+                let store = try LibraryStore(at: url)
+                let profiles = try store.fetchAllEntityProfiles()
+                let allTagsSet = Set(profiles.flatMap { $0.tags })
+                allUniqueTags = Array(allTagsSet).sorted()
+                
+                let gendersSet = Set(profiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                allUniqueGenders = Array(gendersSet).sorted()
+            } catch {
+                print("Failed to fetch unique tags/genders: \(error)")
+            }
+        }
     }
     
     private var tagEntryPopover: some View {
@@ -277,6 +364,26 @@ struct EntityProfileEditorView: View {
             TextField("Tag Name...", text: $newTagValue)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { saveTag() }
+                
+            if !filteredTagSuggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(filteredTagSuggestions, id: \.self) { suggestion in
+                            Button(action: {
+                                newTagValue = suggestion
+                                saveTag()
+                            }) {
+                                Text(suggestion)
+                                    .font(.caption)
+                                    .padding(6)
+                                    .background(Color.secondary.opacity(0.2))
+                                    .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
 
             Button("Save") { saveTag() }
                 .buttonStyle(.borderedProminent)
@@ -311,6 +418,7 @@ struct EntityProfileEditorView: View {
     }
     
     private func downloadProfileImage(urlString: String, isGallery: Bool) {
+        guard urlString != "local://primary" else { return }
         guard let url = URL(string: urlString), let libraryURL = libraryURL else { return }
         let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")

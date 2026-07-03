@@ -10,9 +10,21 @@ struct ActorGridView: View {
     @State private var actorProfiles: [String: EntityProfile] = [:]
     @State private var profileImageFileNames: Set<String> = []
     @State private var alphaFilter: Character? = nil
+    @State private var hasLoadedDefaults = false
     
+    @AppStorage("defaultActorFiltersStr") private var defaultFilterCriteriaStr: String = ""
+    private var defaultFilterCriteria: ActorFilterCriteria {
+        get {
+            guard let data = defaultFilterCriteriaStr.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(ActorFilterCriteria.self, from: data) else {
+                return ActorFilterCriteria()
+            }
+            return result
+        }
+    }
     @State private var filterCriteria = ActorFilterCriteria()
     @State private var isShowingFilterBuilder = false
+    @State private var isSelectionMode = false
     
     var uniqueGenders: [String] {
         let values = actorProfiles.values.compactMap { $0.gender }
@@ -84,11 +96,18 @@ struct ActorGridView: View {
             }
         }
         
-        if !filterCriteria.gender.isEmpty {
+        if filterCriteria.showMissingGenderOnly {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                return (profile?.gender ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        }
+        
+        if !filterCriteria.selectedGenders.isEmpty {
             result = result.filter { actor in
                 let profile = actorProfiles["actor:\(actor)"]
                 let values = profile?.gender?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
-                return values.contains(filterCriteria.gender.lowercased())
+                return !filterCriteria.selectedGenders.isDisjoint(with: values)
             }
         }
         
@@ -120,6 +139,45 @@ struct ActorGridView: View {
             }
         }
         
+        if let minVid = filterCriteria.minVideos {
+            result = result.filter { actor in assets.filter { $0.actors.contains(actor) }.count >= minVid }
+        }
+        if let maxVid = filterCriteria.maxVideos {
+            result = result.filter { actor in assets.filter { $0.actors.contains(actor) }.count <= maxVid }
+        }
+        if let minAge = filterCriteria.minAge {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                return (profile?.age ?? 0) >= minAge
+            }
+        }
+        if let maxAge = filterCriteria.maxAge {
+            result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                if let age = profile?.age { return age <= maxAge }
+                return false
+            }
+        }
+        
+        result.sort { a, b in
+            let factor = filterCriteria.sortDescending ? -1 : 1
+            switch filterCriteria.sortBy {
+            case .name:
+                return factor == 1 ? a < b : a > b
+            case .age:
+                let ageA = actorProfiles["actor:\(a)"]?.age ?? 0
+                let ageB = actorProfiles["actor:\(b)"]?.age ?? 0
+                if ageA != ageB { return factor == 1 ? ageA < ageB : ageA > ageB }
+                return factor == 1 ? a < b : a > b
+            case .videoCount:
+                let countA = assets.filter { $0.actors.contains(a) }.count
+                let countB = assets.filter { $0.actors.contains(b) }.count
+                if countA != countB { return factor == 1 ? countA > countB : countA < countB } // Default to descending for video count usually, but we strictly follow factor here: ascending means smallest count first. Let's make ascending = highest count first so factor 1 is highest count. Wait, standard ascending is smallest first.
+                // Re-adjusting logic for standard sorting
+                return factor == 1 ? countA < countB : countA > countB
+            }
+        }
+        
         return result
     }
     
@@ -134,19 +192,39 @@ struct ActorGridView: View {
                     ForEach(filteredActors, id: \.self) { actor in
                         let isSelected = sidebarSelection.contains(.actor(actor))
                         #if os(iOS)
-                        NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
-                            ActorGridItemView(
-                                actor: actor,
-                                profile: actorProfiles["actor:\(actor)"],
-                                assetsCount: assets.filter { $0.actors.contains(actor) }.count,
-                                isSelected: isSelected,
-                                libraryURL: libraryURL
-                            )
+                        if isSelectionMode {
+                            Button(action: {
+                                toggleSelection(item: .actor(actor))
+                            }) {
+                                ActorGridItemView(
+                                    actor: actor,
+                                    profile: actorProfiles["actor:\(actor)"],
+                                    assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                    isSelected: isSelected,
+                                    libraryURL: libraryURL
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
+                                ActorGridItemView(
+                                    actor: actor,
+                                    profile: actorProfiles["actor:\(actor)"],
+                                    assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                    isSelected: isSelected,
+                                    libraryURL: libraryURL
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                         #else
                         Button(action: {
-                            toggleSelection(item: .actor(actor))
+                            if isSelectionMode {
+                                toggleSelection(item: .actor(actor))
+                            } else {
+                                // Default macOS behavior if not in selection mode could just be single select or toggle, but to be consistent, if not in selection mode we could clear other selections? No, let's keep toggle.
+                                toggleSelection(item: .actor(actor))
+                            }
                         }) {
                             ActorGridItemView(
                                 actor: actor,
@@ -175,24 +253,63 @@ struct ActorGridView: View {
         }
         .navigationTitle("Actors Gallery")
         .toolbar {
-            #if !os(iOS)
             let selectedActorsCount = sidebarSelection.filter { item in
                 if case .actor = item { return true }
                 return false
             }.count
             
-            if selectedActorsCount > 0 {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    withAnimation {
+                        isSelectionMode.toggle()
+                        if !isSelectionMode {
+                            let actors = sidebarSelection.filter { if case .actor = $0 { return true }; return false }
+                            for a in actors { sidebarSelection.remove(a) }
+                        }
+                    }
+                }) {
+                    Text(isSelectionMode ? "Cancel" : "Select")
+                }
+            }
+            
+            if isSelectionMode && selectedActorsCount > 0 {
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: {
                         sidebarSelection.remove(.actorGallery)
+                        isSelectionMode = false
                     }) {
                         Text("View Matches")
                             .bold()
                     }
                     .buttonStyle(.borderedProminent)
                 }
+                
+                #if os(iOS)
+                ToolbarItem(placement: .bottomBar) {
+                    let selectedActors = sidebarSelection.compactMap { item -> String? in
+                        if case .actor(let a) = item { return a }
+                        return nil
+                    }
+                    NavigationLink(value: AppRoute.batchActors(Set(selectedActors))) {
+                        Text("Edit \(selectedActorsCount) Actor\(selectedActorsCount == 1 ? "" : "s")")
+                            .font(.headline)
+                    }
+                }
+                #endif
             }
-            #endif
+            
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Sort By", selection: $filterCriteria.sortBy) {
+                        ForEach(ActorFilterCriteria.SortOption.allCases, id: \.self) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                    Toggle("Descending", isOn: $filterCriteria.sortDescending)
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+            }
             
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isShowingFilterBuilder = true }) {
@@ -240,6 +357,10 @@ struct ActorGridView: View {
             }
         }
         .onAppear {
+            if !hasLoadedDefaults {
+                filterCriteria = defaultFilterCriteria
+                hasLoadedDefaults = true
+            }
             fetchProfiles()
         }
         .onChange(of: assets.count) { old, new in

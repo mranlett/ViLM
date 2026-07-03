@@ -13,6 +13,13 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
     public var birthYear: Int?
     public var countryOfOrigin: String?
     
+    public var age: Int? {
+        guard let birthYear = birthYear else { return nil }
+        let currentYear = Calendar.current.component(.year, from: Date())
+        return max(0, currentYear - birthYear)
+    }
+
+    
     public var tags: [String]
     public var galleryUrls: [String]
     

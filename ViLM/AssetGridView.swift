@@ -1,9 +1,9 @@
 import SwiftUI
 import LibraryCore
 
-struct AssetFilterCriteria: Equatable {
-    enum Logic: String, CaseIterable, Equatable { case and = "AND", or = "OR" }
-    enum ReviewStatusFilter: String, CaseIterable, Equatable { case all = "All", reviewed = "Reviewed", unreviewed = "Unreviewed" }
+struct AssetFilterCriteria: Equatable, Codable {
+    enum Logic: String, CaseIterable, Equatable, Codable { case and = "AND", or = "OR" }
+    enum ReviewStatusFilter: String, CaseIterable, Equatable, Codable { case all = "All", reviewed = "Reviewed", unreviewed = "Unreviewed" }
 
     var reviewStatus: ReviewStatusFilter = .all
     var minRating: Int? = nil
@@ -17,9 +17,23 @@ struct AssetFilterCriteria: Equatable {
     var studiosLogic: Logic = .and
     var selectedStudios: Set<String> = []
     
+    // NEW: Actor metadata filters
+    var actorTagsLogic: Logic = .and
+    var selectedActorTags: Set<String> = []
+    
+    var actorHairColorsLogic: Logic = .or
+    var selectedActorHairColors: Set<String> = []
+    
+    var actorGendersLogic: Logic = .or
+    var selectedActorGenders: Set<String> = []
+    
     var isEmpty: Bool {
-        reviewStatus == .all && minRating == nil && selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty
+        reviewStatus == .all && minRating == nil && 
+        selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
+        selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
     }
+    
+    public init() {}
 }
 
 struct AssetsGridView: View {
@@ -32,7 +46,9 @@ struct AssetsGridView: View {
     @State private var isEditMode: Bool = false
     let libraryURL: URL?
     let refreshID: UUID
+    @Binding var filteredAssetContext: [Asset.ID]
     @State private var isShowingFilterBuilder = false
+    @State private var actorProfiles: [String: EntityProfile] = [:]
     
     enum SortOption: String, CaseIterable {
         case name = "Name"
@@ -43,6 +59,18 @@ struct AssetsGridView: View {
     @State private var sortOption: SortOption = .name
     @State private var sortAscending: Bool = true
     @State private var fileSizes: [Asset.ID: Int64] = [:]
+    @State private var hasLoadedDefaults = false
+    
+    @AppStorage("defaultAssetFiltersStr") private var defaultFilterCriteriaStr: String = ""
+    private var defaultFilterCriteria: AssetFilterCriteria {
+        get {
+            guard let data = defaultFilterCriteriaStr.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(AssetFilterCriteria.self, from: data) else {
+                return AssetFilterCriteria()
+            }
+            return result
+        }
+    }
     
     @State private var filterCriteria = AssetFilterCriteria()
     
@@ -107,6 +135,41 @@ struct AssetsGridView: View {
                     if !filterCriteria.selectedStudios.isSubset(of: assetStudios) { return false }
                 } else {
                     if filterCriteria.selectedStudios.isDisjoint(with: assetStudios) { return false }
+                }
+            }
+            
+            // Actor Metadata Filters
+            if !filterCriteria.selectedActorTags.isEmpty || !filterCriteria.selectedActorHairColors.isEmpty || !filterCriteria.selectedActorGenders.isEmpty {
+                let assetActorProfiles = asset.actors.compactMap { actorProfiles["actor:\($0)"] }
+                
+                // Actor Tags
+                if !filterCriteria.selectedActorTags.isEmpty {
+                    let allTagsInVideo = Set(assetActorProfiles.flatMap { $0.tags })
+                    if filterCriteria.actorTagsLogic == .and {
+                        if !filterCriteria.selectedActorTags.isSubset(of: allTagsInVideo) { return false }
+                    } else {
+                        if filterCriteria.selectedActorTags.isDisjoint(with: allTagsInVideo) { return false }
+                    }
+                }
+                
+                // Actor Hair Colors
+                if !filterCriteria.selectedActorHairColors.isEmpty {
+                    let allHairColorsInVideo = Set(assetActorProfiles.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                    if filterCriteria.actorHairColorsLogic == .and {
+                        if !filterCriteria.selectedActorHairColors.isSubset(of: allHairColorsInVideo) { return false }
+                    } else {
+                        if filterCriteria.selectedActorHairColors.isDisjoint(with: allHairColorsInVideo) { return false }
+                    }
+                }
+                
+                // Actor Genders
+                if !filterCriteria.selectedActorGenders.isEmpty {
+                    let allGendersInVideo = Set(assetActorProfiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                    if filterCriteria.actorGendersLogic == .and {
+                        if !filterCriteria.selectedActorGenders.isSubset(of: allGendersInVideo) { return false }
+                    } else {
+                        if filterCriteria.selectedActorGenders.isDisjoint(with: allGendersInVideo) { return false }
+                    }
                 }
             }
             
@@ -196,7 +259,7 @@ struct AssetsGridView: View {
                                         }
                                     }
                             } else {
-                                NavigationLink(value: AppRoute.asset(asset.id)) {
+                                NavigationLink(value: AppRoute.asset(asset.id, context: filteredAssetContext)) {
                                     gridItem(for: asset)
                                 }
                                 .buttonStyle(.plain)
@@ -229,6 +292,16 @@ struct AssetsGridView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id(refreshID)
+        .onChange(of: filteredAssets.map { $0.id }) { _, newIds in
+            filteredAssetContext = newIds
+        }
+        .onAppear {
+            filteredAssetContext = filteredAssets.map { $0.id }
+            fetchActorProfiles()
+        }
+        .onChange(of: libraryURL) { _, _ in
+            fetchActorProfiles()
+        }
         .navigationTitle(sidebarSelectionTitle)
         .navigationSubtitle("\(filteredAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search filenames...")
@@ -275,7 +348,7 @@ struct AssetsGridView: View {
 #endif
         }
         .sheet(isPresented: $isShowingFilterBuilder) {
-            FilterBuilderView(assets: assets, criteria: $filterCriteria)
+            FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: actorProfiles)
         }
         .task(id: assets.count) {
             guard let url = libraryURL else { return }
@@ -289,6 +362,12 @@ struct AssetsGridView: View {
             }
             await MainActor.run {
                 self.fileSizes = newSizes
+            }
+        }
+        .onAppear {
+            if !hasLoadedDefaults {
+                filterCriteria = defaultFilterCriteria
+                hasLoadedDefaults = true
             }
         }
     }
@@ -367,6 +446,22 @@ struct AssetsGridView: View {
                     .foregroundColor(.green)
                     .background(Color.black.opacity(0.4).clipShape(Circle()))
                     .padding(8)
+            }
+        }
+    }
+    
+    private func fetchActorProfiles() {
+        guard let url = libraryURL else { return }
+        Task {
+            do {
+                let store = try LibraryStore(at: url)
+                let profiles = try store.fetchAllEntityProfiles()
+                let profilesDict = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+                await MainActor.run {
+                    self.actorProfiles = profilesDict
+                }
+            } catch {
+                print("Failed to fetch actor profiles: \(error)")
             }
         }
     }

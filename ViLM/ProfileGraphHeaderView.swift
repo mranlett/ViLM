@@ -220,25 +220,43 @@ struct ProfileGraphHeaderView: View {
         } message: {
             Text("This will rename the entity across all videos in your library.")
         }
-        .sheet(item: Binding(
-            get: { selectedFullImageIdentifier.map { IdentifiableString(id: $0) } },
-            set: { selectedFullImageIdentifier = $0?.id }
-        )) { item in
+        .sheet(isPresented: Binding(
+            get: { selectedFullImageIdentifier != nil },
+            set: { if !$0 { selectedFullImageIdentifier = nil } }
+        )) {
             if let profile = entityProfile {
-                NavigationStack {
-                    let isGallery = item.id != "primary" && item.id != profile.photoUrl
-                    let photoUrl = item.id == "primary" ? profile.photoUrl : item.id
-                    
-                    ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl, isGallery: isGallery) { image in
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    } placeholder: {
-                        ProgressView()
+                let allImageIdentifiers: [String] = {
+                    var list = ["primary"]
+                    for url in profile.galleryUrls where url != profile.photoUrl {
+                        list.append(url)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    return list
+                }()
+                
+                NavigationStack {
+                    TabView(selection: $selectedFullImageIdentifier) {
+                        ForEach(allImageIdentifiers, id: \.self) { item in
+                            let isGallery = item != "primary" && item != profile.photoUrl
+                            let photoUrl = item == "primary" ? profile.photoUrl : item
+                            
+                            ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl, isGallery: isGallery) { image in
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                            } placeholder: {
+                                ProgressView()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .tag(item as String?)
+                        }
+                    }
+                    #if os(iOS)
+                    .tabViewStyle(.page(indexDisplayMode: .always))
+                    #endif
                     .background(Color.black)
+                    #if os(iOS)
                     .navigationBarTitleDisplayMode(.inline)
+                    #endif
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Close") {

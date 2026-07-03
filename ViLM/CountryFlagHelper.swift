@@ -1,0 +1,59 @@
+import Foundation
+
+struct CountryFlagHelper {
+    private static let countryMapping: [String: String] = {
+        var map: [String: String] = [
+            "united states": "🇺🇸",
+            "usa": "🇺🇸",
+            "us": "🇺🇸",
+            "united kingdom": "🇬🇧",
+            "uk": "🇬🇧",
+            "england": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+            "scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+            "wales": "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
+            "south korea": "🇰🇷",
+            "north korea": "🇰🇵",
+            "russia": "🇷🇺",
+            "czech republic": "🇨🇿"
+        ]
+        
+        let locale = Locale(identifier: "en_US")
+        for regionCode in Locale.Region.isoRegions {
+            if let name = locale.localizedString(forRegionCode: regionCode.identifier)?.lowercased() {
+                let flag = emojiFlag(for: regionCode.identifier)
+                if !flag.isEmpty {
+                    map[name] = flag
+                }
+            }
+        }
+        return map
+    }()
+    
+    private static func emojiFlag(for countryCode: String) -> String {
+        let base : UInt32 = 127397
+        var flag = ""
+        for v in countryCode.uppercased().unicodeScalars {
+            guard let scalar = UnicodeScalar(base + v.value) else { continue }
+            flag.unicodeScalars.append(scalar)
+        }
+        return String(flag)
+    }
+
+    static func flagEmoji(for countryName: String) -> String {
+        let name = countryName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        // Try exact match first
+        if let exact = countryMapping[name] {
+            return exact
+        }
+        
+        // Try partial match
+        for (key, flag) in countryMapping {
+            if name.contains(key) {
+                return flag
+            }
+        }
+        
+        return ""
+    }
+}

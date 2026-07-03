@@ -40,7 +40,7 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         
         let fileName: String
-        if isGallery, let urlString = photoUrl {
+        if isGallery, let urlString = photoUrl, urlString != "local://primary" {
             let hashData = SHA256.hash(data: Data(urlString.utf8))
             let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
             fileName = "\(safeId)_\(hashString).jpg"

@@ -10,6 +10,23 @@ struct ActorFilterBuilderView: View {
     @Binding var criteria: ActorFilterCriteria
     @Environment(\.dismiss) private var dismiss
     
+    @AppStorage("defaultActorFiltersStr") private var defaultFilterCriteriaStr: String = ""
+    private var defaultFilterCriteria: ActorFilterCriteria {
+        get {
+            guard let data = defaultFilterCriteriaStr.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(ActorFilterCriteria.self, from: data) else {
+                return ActorFilterCriteria()
+            }
+            return result
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let str = String(data: data, encoding: .utf8) {
+                defaultFilterCriteriaStr = str
+            }
+        }
+    }
+    
     @State private var searchText = ""
     
     @State private var isGendersExpanded = false
@@ -22,14 +39,15 @@ struct ActorFilterBuilderView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Photo Status") {
+                Section("Status Filters") {
                     Toggle("Missing Photos Only", isOn: $criteria.showMissingPhotosOnly)
+                    Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
                 }
                 
                 DisclosureGroup("Gender", isExpanded: $isGendersExpanded) {
-                    singleSelectionSection(
+                    multiSelectionSection(
                         items: allUniqueGenders,
-                        selectionBinding: $criteria.gender
+                        selectionBinding: $criteria.selectedGenders
                     )
                 }
                 
@@ -45,6 +63,54 @@ struct ActorFilterBuilderView: View {
                         items: allUniqueCountries,
                         selectionBinding: $criteria.country
                     )
+                }
+                
+                Section("Video Count") {
+                    HStack {
+                        Picker("Min", selection: Binding(get: { criteria.minVideos ?? -1 }, set: { criteria.minVideos = $0 == -1 ? nil : $0 })) {
+                            Text("Any").tag(-1 as Int)
+                            ForEach(0...1000, id: \.self) { count in Text("\(count)").tag(count) }
+                        }
+                        #if os(iOS)
+                        .pickerStyle(.wheel)
+                        #else
+                        .pickerStyle(.menu)
+                        #endif
+                        
+                        Picker("Max", selection: Binding(get: { criteria.maxVideos ?? -1 }, set: { criteria.maxVideos = $0 == -1 ? nil : $0 })) {
+                            Text("Any").tag(-1 as Int)
+                            ForEach(0...1000, id: \.self) { count in Text("\(count)").tag(count) }
+                        }
+                        #if os(iOS)
+                        .pickerStyle(.wheel)
+                        #else
+                        .pickerStyle(.menu)
+                        #endif
+                    }
+                }
+                
+                Section("Age Range") {
+                    HStack {
+                        Picker("Min", selection: Binding(get: { criteria.minAge ?? -1 }, set: { criteria.minAge = $0 == -1 ? nil : $0 })) {
+                            Text("Any").tag(-1 as Int)
+                            ForEach(18...100, id: \.self) { age in Text("\(age)").tag(age) }
+                        }
+                        #if os(iOS)
+                        .pickerStyle(.wheel)
+                        #else
+                        .pickerStyle(.menu)
+                        #endif
+                        
+                        Picker("Max", selection: Binding(get: { criteria.maxAge ?? -1 }, set: { criteria.maxAge = $0 == -1 ? nil : $0 })) {
+                            Text("Any").tag(-1 as Int)
+                            ForEach(18...100, id: \.self) { age in Text("\(age)").tag(age) }
+                        }
+                        #if os(iOS)
+                        .pickerStyle(.wheel)
+                        #else
+                        .pickerStyle(.menu)
+                        #endif
+                    }
                 }
                 
                 DisclosureGroup("Tags", isExpanded: $isTagsExpanded) {
@@ -68,10 +134,18 @@ struct ActorFilterBuilderView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear") {
-                        criteria = ActorFilterCriteria()
+                    Menu("Actions") {
+                        Button("Load Default") {
+                            criteria = defaultFilterCriteria
+                        }
+                        Button("Save as Default") {
+                            defaultFilterCriteria = criteria
+                        }
+                        Divider()
+                        Button("Clear Filters", role: .destructive) {
+                            criteria = ActorFilterCriteria()
+                        }
                     }
-                    .disabled(criteria.isEmpty)
                 }
             }
         }
@@ -164,6 +238,40 @@ struct ActorFilterBuilderView: View {
                         } label: {
                             HStack {
                                 Text(item).foregroundColor(.primary)
+                                Spacer()
+                                if isSelected {
+                                    Image(systemName: "checkmark").foregroundColor(.accentColor)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func multiSelectionSection(items: [String], selectionBinding: Binding<Set<String>>) -> some View {
+        let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
+        
+        return Group {
+            if !filtered.isEmpty || !selectionBinding.wrappedValue.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(filtered, id: \.self) { item in
+                        let isSelected = selectionBinding.wrappedValue.contains(item)
+                        
+                        Button {
+                            if isSelected {
+                                selectionBinding.wrappedValue.remove(item)
+                            } else {
+                                selectionBinding.wrappedValue.insert(item)
+                            }
+                        } label: {
+                            HStack {
+                                Text(item.capitalized).foregroundColor(.primary)
                                 Spacer()
                                 if isSelected {
                                     Image(systemName: "checkmark").foregroundColor(.accentColor)

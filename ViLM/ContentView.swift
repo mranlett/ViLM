@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var gridRefreshID = UUID()
     @State private var missingAssetIDs: Set<Asset.ID> = []
+    @State private var filteredAssetContext: [Asset.ID] = []
     
     // iOS picker presentation
 #if os(iOS)
@@ -75,22 +76,29 @@ struct ContentView: View {
                             selectedAssetIDs: $selectedAssetIDs,
                             missingAssetIDs: missingAssetIDs,
                             libraryURL: selectedLibraryURL,
-                            refreshID: gridRefreshID
+                            refreshID: gridRefreshID,
+                            filteredAssetContext: $filteredAssetContext
                         )
                     }
                 }
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
-                    case .asset(let id):
+                    case .asset(let id, let context):
                         InspectorView(
                             sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: [id],
+                            selectedAssetIDs: selectedAssetIDs.isEmpty ? [id] : selectedAssetIDs,
                             assets: $assets,
                             selectedAssetBinding: $selectedAssetIDs,
                             gridRefreshID: $gridRefreshID,
                             libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs
+                            missingAssetIDs: $missingAssetIDs,
+                            contextAssetIDs: context
                         )
+                        .onAppear {
+                            if !selectedAssetIDs.contains(id) {
+                                selectedAssetIDs = [id]
+                            }
+                        }
                     case .assets(let ids):
                         InspectorView(
                             sidebarSelection: $sidebarSelection,
@@ -108,6 +116,12 @@ struct ContentView: View {
                             assets: assets,
                             libraryURL: selectedLibraryURL,
                             gridRefreshID: gridRefreshID
+                        )
+                    case .batchActors(let ids):
+                        BatchEntityProfileEditorView(
+                            libraryURL: selectedLibraryURL,
+                            entityIds: ids.map { "actor:\($0)" },
+                            onSave: { _ in gridRefreshID = UUID() }
                         )
                     }
                 }
@@ -137,22 +151,29 @@ struct ContentView: View {
                             selectedAssetIDs: $selectedAssetIDs,
                             missingAssetIDs: missingAssetIDs,
                             libraryURL: selectedLibraryURL,
-                            refreshID: gridRefreshID
+                            refreshID: gridRefreshID,
+                            filteredAssetContext: $filteredAssetContext
                         )
                     }
                 }
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
-                    case .asset(let id):
+                    case .asset(let id, let context):
                         InspectorView(
                             sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: [id],
+                            selectedAssetIDs: selectedAssetIDs.isEmpty ? [id] : selectedAssetIDs,
                             assets: $assets,
                             selectedAssetBinding: $selectedAssetIDs,
                             gridRefreshID: $gridRefreshID,
                             libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs
+                            missingAssetIDs: $missingAssetIDs,
+                            contextAssetIDs: context
                         )
+                        .onAppear {
+                            if !selectedAssetIDs.contains(id) {
+                                selectedAssetIDs = [id]
+                            }
+                        }
                     case .assets(let ids):
                         InspectorView(
                             sidebarSelection: $sidebarSelection,
@@ -170,6 +191,12 @@ struct ContentView: View {
                             assets: assets,
                             libraryURL: selectedLibraryURL,
                             gridRefreshID: gridRefreshID
+                        )
+                    case .batchActors(let ids):
+                        BatchEntityProfileEditorView(
+                            libraryURL: selectedLibraryURL,
+                            entityIds: ids.map { "actor:\($0)" },
+                            onSave: { _ in gridRefreshID = UUID() }
                         )
                     }
                 }
@@ -196,12 +223,17 @@ struct ContentView: View {
                         selectedAssetIDs: $selectedAssetIDs,
                         missingAssetIDs: missingAssetIDs,
                         libraryURL: selectedLibraryURL,
-                        refreshID: gridRefreshID
+                        refreshID: gridRefreshID,
+                        filteredAssetContext: $filteredAssetContext
                     )
                 }
             }
 #endif
         } detail: {
+            let selectedActors = sidebarSelection.compactMap { item -> String? in
+                if case .actor(let a) = item { return a }
+                return nil
+            }
             if !selectedAssetIDs.isEmpty {
                 InspectorView(
                     sidebarSelection: $sidebarSelection,
@@ -210,13 +242,20 @@ struct ContentView: View {
                     selectedAssetBinding: $selectedAssetIDs,
                     gridRefreshID: $gridRefreshID,
                     libraryURL: selectedLibraryURL,
-                    missingAssetIDs: $missingAssetIDs
+                    missingAssetIDs: $missingAssetIDs,
+                    contextAssetIDs: filteredAssetContext
+                )
+            } else if !selectedActors.isEmpty {
+                ActorInspectorView(
+                    selectedActors: selectedActors,
+                    libraryURL: selectedLibraryURL,
+                    gridRefreshID: $gridRefreshID
                 )
             } else {
                 ContentUnavailableView(
                     "No Selection",
                     systemImage: "sidebar.right",
-                    description: Text("Select a video to see details")
+                    description: Text("Select a video or actor to see details")
                 )
             }
         }
@@ -482,6 +521,7 @@ struct EntityProfileRouteView: View {
     @State private var searchText = ""
     @State private var selectedAssetIDs: Set<Asset.ID> = []
     @State private var missingAssetIDs: Set<Asset.ID> = []
+    @State private var filteredAssetContext: [Asset.ID] = []
     
     init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID) {
         self.category = category
@@ -508,7 +548,8 @@ struct EntityProfileRouteView: View {
             selectedAssetIDs: $selectedAssetIDs,
             missingAssetIDs: missingAssetIDs,
             libraryURL: libraryURL,
-            refreshID: gridRefreshID
+            refreshID: gridRefreshID,
+            filteredAssetContext: $filteredAssetContext
         )
     }
 }

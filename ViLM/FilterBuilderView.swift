@@ -4,7 +4,25 @@ import LibraryCore
 struct FilterBuilderView: View {
     let assets: [Asset]
     @Binding var criteria: AssetFilterCriteria
+    let actorProfiles: [String: EntityProfile]
     @Environment(\.dismiss) private var dismiss
+    
+    @AppStorage("defaultAssetFiltersStr") private var defaultFilterCriteriaStr: String = ""
+    private var defaultFilterCriteria: AssetFilterCriteria {
+        get {
+            guard let data = defaultFilterCriteriaStr.data(using: .utf8),
+                  let result = try? JSONDecoder().decode(AssetFilterCriteria.self, from: data) else {
+                return AssetFilterCriteria()
+            }
+            return result
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let str = String(data: data, encoding: .utf8) {
+                defaultFilterCriteriaStr = str
+            }
+        }
+    }
     
     @State private var searchText = ""
     
@@ -12,9 +30,17 @@ struct FilterBuilderView: View {
     @State private var isTagsExpanded = false
     @State private var isStudiosExpanded = false
     
+    @State private var isActorTagsExpanded = false
+    @State private var isActorHairColorsExpanded = false
+    @State private var isActorGendersExpanded = false
+    
     @State private var actorAlphaFilter: Character? = nil
     @State private var tagAlphaFilter: Character? = nil
     @State private var studioAlphaFilter: Character? = nil
+    
+    @State private var actorTagAlphaFilter: Character? = nil
+    @State private var actorHairColorAlphaFilter: Character? = nil
+    @State private var actorGenderAlphaFilter: Character? = nil
     
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
@@ -32,6 +58,21 @@ struct FilterBuilderView: View {
         let allTags = assets.flatMap { $0.tags }
         let studioTags = allTags.filter { $0.hasPrefix("studio:") }.map { String($0.dropFirst(7)) }
         return Array(Set(studioTags)).sorted()
+    }
+    
+    var allUniqueActorTags: [String] {
+        let tagsSet = Set(actorProfiles.values.flatMap { $0.tags })
+        return Array(tagsSet).sorted()
+    }
+    
+    var allUniqueActorHairColors: [String] {
+        let colorsSet = Set(actorProfiles.values.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        return Array(colorsSet).sorted()
+    }
+    
+    var allUniqueActorGenders: [String] {
+        let gendersSet = Set(actorProfiles.values.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        return Array(gendersSet).sorted()
     }
     
     var body: some View {
@@ -97,6 +138,41 @@ struct FilterBuilderView: View {
                         selectionBinding: $criteria.selectedTags
                     )
                 }
+                
+                Section("Actor Metadata") {
+                    DisclosureGroup("Actor Tags", isExpanded: $isActorTagsExpanded) {
+                        AlphaPickerView(filter: $actorTagAlphaFilter)
+                            .padding(.vertical, 4)
+                        filterSection(
+                            items: allUniqueActorTags,
+                            filter: actorTagAlphaFilter,
+                            logicBinding: $criteria.actorTagsLogic,
+                            selectionBinding: $criteria.selectedActorTags
+                        )
+                    }
+                    
+                    DisclosureGroup("Actor Hair Colors", isExpanded: $isActorHairColorsExpanded) {
+                        AlphaPickerView(filter: $actorHairColorAlphaFilter)
+                            .padding(.vertical, 4)
+                        filterSection(
+                            items: allUniqueActorHairColors,
+                            filter: actorHairColorAlphaFilter,
+                            logicBinding: $criteria.actorHairColorsLogic,
+                            selectionBinding: $criteria.selectedActorHairColors
+                        )
+                    }
+                    
+                    DisclosureGroup("Actor Genders", isExpanded: $isActorGendersExpanded) {
+                        AlphaPickerView(filter: $actorGenderAlphaFilter)
+                            .padding(.vertical, 4)
+                        filterSection(
+                            items: allUniqueActorGenders,
+                            filter: actorGenderAlphaFilter,
+                            logicBinding: $criteria.actorGendersLogic,
+                            selectionBinding: $criteria.selectedActorGenders
+                        )
+                    }
+                }
             }
             .searchable(text: $searchText, prompt: "Search filters")
             .navigationTitle("Filters")
@@ -108,10 +184,18 @@ struct FilterBuilderView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear") {
-                        criteria = AssetFilterCriteria()
+                    Menu("Actions") {
+                        Button("Load Default") {
+                            criteria = defaultFilterCriteria
+                        }
+                        Button("Save as Default") {
+                            defaultFilterCriteria = criteria
+                        }
+                        Divider()
+                        Button("Clear Filters", role: .destructive) {
+                            criteria = AssetFilterCriteria()
+                        }
                     }
-                    .disabled(criteria.isEmpty)
                 }
             }
         }

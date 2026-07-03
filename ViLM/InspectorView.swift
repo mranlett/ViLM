@@ -14,6 +14,7 @@ struct InspectorView: View {
     @Binding var gridRefreshID: UUID
     let libraryURL: URL?
     @Binding var missingAssetIDs: Set<Asset.ID>
+    var contextAssetIDs: [Asset.ID] = []
 
     var body: some View {
         if selectedAssetIDs.count > 1 {
@@ -30,7 +31,8 @@ struct InspectorView: View {
                 selectedAssetBinding: $selectedAssetBinding,
                 gridRefreshID: $gridRefreshID,
                 libraryURL: libraryURL,
-                missingAssetIDs: $missingAssetIDs
+                missingAssetIDs: $missingAssetIDs,
+                contextAssetIDs: contextAssetIDs
             )
             .id(asset.id)
         } else {
@@ -47,6 +49,7 @@ struct SingleInspectorView: View {
     @Binding var gridRefreshID: UUID
     let libraryURL: URL?
     @Binding var missingAssetIDs: Set<Asset.ID>
+    let contextAssetIDs: [Asset.ID]
     
     @Environment(\.dismiss) private var dismiss
 
@@ -57,6 +60,30 @@ struct SingleInspectorView: View {
     @State private var isShowingRenameDialog = false
     @State private var suggestedRenameValue = ""
     @State private var showDeleteConfirmation = false
+    
+    private var currentIndex: Int? {
+        contextAssetIDs.firstIndex(of: asset.id)
+    }
+    
+    private var hasPrevious: Bool {
+        guard let idx = currentIndex else { return false }
+        return idx > 0
+    }
+    
+    private var hasNext: Bool {
+        guard let idx = currentIndex else { return false }
+        return idx < contextAssetIDs.count - 1
+    }
+    
+    private func goToPrevious() {
+        guard let idx = currentIndex, idx > 0 else { return }
+        selectedAssetBinding = [contextAssetIDs[idx - 1]]
+    }
+    
+    private func goToNext() {
+        guard let idx = currentIndex, idx < contextAssetIDs.count - 1 else { return }
+        selectedAssetBinding = [contextAssetIDs[idx + 1]]
+    }
 
     // Playback / selection
     @State private var scrubTime: Double = 0
@@ -114,8 +141,31 @@ struct SingleInspectorView: View {
                     .lineLimit(nil)
 
                 HStack {
-                    Text("Metadata").font(.headline)
+                    Text("Metadata")
+                        .font(.headline)
+                        .padding(.vertical, 8)
+                    
                     Spacer()
+                    
+                    if hasPrevious || hasNext {
+                        HStack(spacing: 12) {
+                            Button(action: goToPrevious) {
+                                Image(systemName: "chevron.left")
+                            }
+                            .disabled(!hasPrevious)
+                            .keyboardShortcut(.leftArrow, modifiers: [])
+                            .help("Previous Video")
+                            
+                            Button(action: goToNext) {
+                                Image(systemName: "chevron.right")
+                            }
+                            .disabled(!hasNext)
+                            .keyboardShortcut(.rightArrow, modifiers: [])
+                            .help("Next Video")
+                        }
+                        .padding(.trailing, 8)
+                    }
+
                     if missingAssetIDs.contains(asset.id) {
                         Button("Remove Missing File") {
                             removeMissingAsset()
@@ -237,7 +287,7 @@ struct SingleInspectorView: View {
                         .textFieldStyle(.roundedBorder)
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Episode Info").font(.subheadline).foregroundColor(.secondary)
                         TextField("e.g. Season 2 Episode 3", text: Binding(
                             get: { asset.episode ?? "" },
