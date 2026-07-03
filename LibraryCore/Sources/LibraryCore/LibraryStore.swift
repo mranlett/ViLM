@@ -139,30 +139,49 @@ public class LibraryStore {
     public func renameTagGlobally(oldTag: String, newTag: String) throws {
         let normalizedOld = TagNormalizer.normalize(fullTag: oldTag)
         let normalizedNew = TagNormalizer.normalize(fullTag: newTag)
+        if normalizedOld == normalizedNew { return }
         
         try dbQueue.write { db in
             let assets = try Asset.fetchAll(db)
             for var asset in assets {
                 if let index = asset.tags.firstIndex(of: normalizedOld) {
                     asset.tags[index] = normalizedNew
+                    
+                    // Deduplicate tags while preserving order
+                    var uniqueTags = [String]()
+                    for t in asset.tags {
+                        if !uniqueTags.contains(t) {
+                            uniqueTags.append(t)
+                        }
+                    }
+                    asset.tags = uniqueTags
                     try asset.update(db)
                 }
             }
             
-            // Rename the entity profile if one exists
-            if let profile = try EntityProfile.fetchOne(db, key: normalizedOld) {
-                let newProfile = EntityProfile(
-                    id: normalizedNew,
-                    bio: profile.bio,
-                    photoUrl: profile.photoUrl,
-                    homePage: profile.homePage,
-                    gender: profile.gender,
-                    hairColor: profile.hairColor,
-                    birthYear: profile.birthYear,
-                    countryOfOrigin: profile.countryOfOrigin
-                )
-                try newProfile.save(db)
-                try profile.delete(db)
+            // Handle Entity Profile merging
+            if let oldProfile = try EntityProfile.fetchOne(db, key: normalizedOld) {
+                let destExists = try EntityProfile.fetchOne(db, key: normalizedNew) != nil
+                
+                if !destExists {
+                    // Safe to rename the profile
+                    let newProfile = EntityProfile(
+                        id: normalizedNew,
+                        bio: oldProfile.bio,
+                        photoUrl: oldProfile.photoUrl,
+                        homePage: oldProfile.homePage,
+                        gender: oldProfile.gender,
+                        hairColor: oldProfile.hairColor,
+                        birthYear: oldProfile.birthYear,
+                        countryOfOrigin: oldProfile.countryOfOrigin,
+                        tags: oldProfile.tags,
+                        galleryUrls: oldProfile.galleryUrls
+                    )
+                    try newProfile.save(db)
+                }
+                
+                // Old profile must be deleted since the tag is gone
+                _ = try oldProfile.delete(db)
             }
         }
     }

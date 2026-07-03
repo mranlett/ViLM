@@ -7,6 +7,7 @@ struct SettingsView: View {
     var onOpenLibrary: (() -> Void)?
     var onCheckForChanges: (() -> Void)?
     var onAuditFileName: (() -> Void)?
+    var onTagCleanup: (() -> Void)?
     
     var body: some View {
         NavigationStack {
@@ -42,6 +43,14 @@ struct SettingsView: View {
                         onAuditFileName?()
                     }) {
                         Label("File Name Audit", systemImage: "text.magnifyingglass")
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(action: {
+                        dismiss()
+                        onTagCleanup?()
+                    }) {
+                        Label("Tag & Actor Cleanup", systemImage: "paintbrush")
                     }
                     .buttonStyle(.plain)
                 }

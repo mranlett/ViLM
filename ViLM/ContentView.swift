@@ -34,6 +34,7 @@ struct ContentView: View {
     
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
+    @State private var isShowingTagCleanup = false
     
     // iOS picker presentation
 #if os(iOS)
@@ -300,12 +301,30 @@ struct ContentView: View {
             SettingsView(
                 onOpenLibrary: openLibrary,
                 onCheckForChanges: validateLibrary,
-                onAuditFileName: { isShowingFileNameAudit = true }
+                onAuditFileName: { isShowingFileNameAudit = true },
+                onTagCleanup: { isShowingTagCleanup = true }
             )
         }
         .sheet(isPresented: $isShowingFileNameAudit) {
             if let url = selectedLibraryURL {
                 FileNameAuditView(
+                    libraryURL: url,
+                    assets: assets,
+                    onRefresh: {
+                        do {
+                            let store = try LibraryStore(at: url)
+                            self.assets = try store.fetchAllAssets()
+                            self.gridRefreshID = UUID()
+                        } catch {
+                            print("Refresh failed: \(error)")
+                        }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $isShowingTagCleanup) {
+            if let url = selectedLibraryURL {
+                TagCleanupView(
                     libraryURL: url,
                     assets: assets,
                     onRefresh: {
