@@ -129,32 +129,32 @@ struct BatchInspectorView: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { saveTag() }
                 
-            Button("Save") { saveTag() }
-                .buttonStyle(.borderedProminent)
-                
-            let suggestions = allLibraryTagValues.sorted()
-            if !suggestions.isEmpty {
-                Divider()
-                Text("Suggestions")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(suggestions, id: \.self) { suggestion in
-                            Button {
-                                newTagValue = suggestion
-                                saveTag()
-                            } label: {
-                                Text(suggestion)
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
+            if !newTagValue.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        let matches = allLibraryTagValues.filter { $0.localizedCaseInsensitiveContains(newTagValue) && $0 != newTagValue }.sorted()
+                        
+                        ForEach(matches, id: \.self) { match in
+                            Text(match)
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    newTagValue = match
+                                }
+                            Divider()
                         }
                     }
                 }
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(8)
+                .frame(maxHeight: 150)
             }
+                
+            Button("Save") { saveTag() }
+                .buttonStyle(.borderedProminent)
+                
         }
         .padding()
         .frame(minWidth: 200, maxWidth: 300)

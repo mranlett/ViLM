@@ -5,8 +5,6 @@ struct SidebarView: View {
     @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
     let libraryURL: URL?
-    let onOpenLibrary: () -> Void
-    let onValidate: () -> Void
     let onApplyFilters: () -> Void
     
     @State private var profiles: [EntityProfile] = []
@@ -100,15 +98,9 @@ struct SidebarView: View {
     var body: some View {
         List {
             Section("Library") {
-                Button(action: onOpenLibrary) {
-                    Label("Open Library", systemImage: "folder.badge.plus")
+                sidebarRow(title: "Dashboard", icon: "house", isSelected: selection == [.dashboard]) {
+                    selection = [.dashboard]
                 }
-                .buttonStyle(.plain)
-                
-                Button(action: onValidate) {
-                    Label("Validate Library", systemImage: "checkmark.shield")
-                }
-                .buttonStyle(.plain)
                 
                 sidebarRow(title: "All Assets", icon: "play.rectangle.on.rectangle", isSelected: selection == [.allAssets], count: unreviewedCount > 0 ? unreviewedCount : nil) {
                     selection = [.allAssets]
@@ -151,7 +143,23 @@ struct SidebarView: View {
             } label: { Text("Studios").font(.headline) }
         }
         .safeAreaInset(edge: .bottom) {
-            progressFooter
+            VStack(spacing: 0) {
+                progressFooter
+                
+                Divider()
+                
+                Button(action: {
+                    // Send notification to open settings.
+                    // Instead of callback, we can use NotificationCenter
+                    NotificationCenter.default.post(name: NSNotification.Name("OpenSettings"), object: nil)
+                }) {
+                    Label("Settings", systemImage: "gearshape")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+                .buttonStyle(.plain)
+            }
+            .background(.ultraThinMaterial)
         }
         .navigationTitle("ViLM")
     }

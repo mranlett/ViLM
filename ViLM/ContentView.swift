@@ -8,6 +8,7 @@ import UIKit
 
 // Ensure this is outside the struct so other files can access it
 enum SidebarItem: Hashable {
+    case dashboard
     case allAssets
     case actorGallery
     case tagGallery
@@ -27,6 +28,13 @@ struct ContentView: View {
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
     
+    @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
+    @State private var isShowingSettings = false
+    @State private var hasInitializedSelection = false
+    
+    // Feature Sheets
+    @State private var isShowingFileNameAudit = false
+    
     // iOS picker presentation
 #if os(iOS)
     @State private var isShowingLibraryPicker = false
@@ -45,8 +53,6 @@ struct ContentView: View {
                 selection: $sidebarSelection,
                 assets: assets,
                 libraryURL: selectedLibraryURL,
-                onOpenLibrary: openLibrary,
-                onValidate: validateLibrary,
                 onApplyFilters: {
 #if os(iOS)
                     showContentOnIOS = true
@@ -56,7 +62,14 @@ struct ContentView: View {
 #if os(iOS)
             .navigationDestination(isPresented: $showContentOnIOS) {
                 Group {
-                    if sidebarSelection.contains(.actorGallery) {
+                    if sidebarSelection.contains(.dashboard) {
+                        DashboardView(
+                            assets: assets,
+                            sidebarSelection: $sidebarSelection,
+                            selectedAssetIDs: $selectedAssetIDs,
+                            libraryURL: selectedLibraryURL
+                        )
+                    } else if sidebarSelection.contains(.actorGallery) {
                         ActorGridView(
                             assets: assets,
                             sidebarSelection: $sidebarSelection,
@@ -203,7 +216,14 @@ struct ContentView: View {
             }
 #else
             Group {
-                if sidebarSelection.contains(.actorGallery) {
+                if sidebarSelection.contains(.dashboard) {
+                    DashboardView(
+                        assets: assets,
+                        sidebarSelection: $sidebarSelection,
+                        selectedAssetIDs: $selectedAssetIDs,
+                        libraryURL: selectedLibraryURL
+                    )
+                } else if sidebarSelection.contains(.actorGallery) {
                     ActorGridView(
                         assets: assets,
                         sidebarSelection: $sidebarSelection,
@@ -259,8 +279,47 @@ struct ContentView: View {
                 )
             }
         }
-        .onAppear { loadLastLibrary() }
+        .onAppear {
+            loadLastLibrary()
+            if !hasInitializedSelection {
+                switch defaultHomePage {
+                case "allAssets": sidebarSelection = [.allAssets]
+                case "actorGallery": sidebarSelection = [.actorGallery]
+                case "tagGallery": sidebarSelection = [.tagGallery]
+                default: sidebarSelection = [.dashboard]
+                }
+                hasInitializedSelection = true
+            }
+        }
         .onDisappear { endSecurityScope() }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenSettings"))) { _ in
+            isShowingSettings = true
+        }
+        
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView(
+                onOpenLibrary: openLibrary,
+                onCheckForChanges: validateLibrary,
+                onAuditFileName: { isShowingFileNameAudit = true }
+            )
+        }
+        .sheet(isPresented: $isShowingFileNameAudit) {
+            if let url = selectedLibraryURL {
+                FileNameAuditView(
+                    libraryURL: url,
+                    assets: assets,
+                    onRefresh: {
+                        do {
+                            let store = try LibraryStore(at: url)
+                            self.assets = try store.fetchAllAssets()
+                            self.gridRefreshID = UUID()
+                        } catch {
+                            print("Refresh failed: \(error)")
+                        }
+                    }
+                )
+            }
+        }
         
 #if os(iOS)
         .sheet(isPresented: $isShowingLibraryPicker) {
@@ -303,15 +362,42 @@ struct ContentView: View {
     private func validateLibrary() {
         guard let url = selectedLibraryURL else { return }
         Task {
-            var missing: Set<Asset.ID> = []
-            for asset in assets {
-                let fileURL = url.appendingPathComponent(asset.relativePath)
-                if !FileManager.default.fileExists(atPath: fileURL.path) {
-                    missing.insert(asset.id)
+            do {
+                let store = try LibraryStore(at: url)
+                let scanner = LibraryScanner(store: store)
+                let service = ContactSheetService(store: store)
+                
+                // 1. Check for new files
+                try await scanner.scan(at: url)
+                
+                // 2. Refresh assets in memory
+                let updatedAssets = try store.fetchAllAssets()
+                await MainActor.run {
+                    self.assets = updatedAssets
                 }
-            }
-            await MainActor.run {
-                self.missingAssetIDs = missing
+                
+                // 3. Generate thumbnails for any missing ones
+                for asset in updatedAssets {
+                    try? await service.generateContactSheet(for: asset, libraryURL: url)
+                    try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
+                }
+                
+                // 4. Validate missing files
+                var missing: Set<Asset.ID> = []
+                for asset in updatedAssets {
+                    let fileURL = url.appendingPathComponent(asset.relativePath)
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        missing.insert(asset.id)
+                    }
+                }
+                
+                // 5. Update UI
+                await MainActor.run {
+                    self.missingAssetIDs = missing
+                    self.gridRefreshID = UUID()
+                }
+            } catch {
+                print("Check for Changes failed: \(error)")
             }
         }
     }
@@ -395,7 +481,13 @@ struct ContentView: View {
             let store = try LibraryStore(at: url)
             self.selectedLibraryURL = url
             self.assets = try store.fetchAllAssets()
-            self.sidebarSelection = [.allAssets]
+            
+            switch defaultHomePage {
+            case "allAssets": self.sidebarSelection = [.allAssets]
+            case "actorGallery": self.sidebarSelection = [.actorGallery]
+            case "tagGallery": self.sidebarSelection = [.tagGallery]
+            default: self.sidebarSelection = [.dashboard]
+            }
             
         } catch {
             print("Bookmark resolution failed: \(error)")
@@ -428,7 +520,13 @@ struct ContentView: View {
                     await MainActor.run {
                         self.selectedLibraryURL = url
                         self.assets = initialAssets
-                        self.sidebarSelection = [.allAssets]
+                        
+                        switch defaultHomePage {
+                        case "allAssets": self.sidebarSelection = [.allAssets]
+                        case "actorGallery": self.sidebarSelection = [.actorGallery]
+                        case "tagGallery": self.sidebarSelection = [.tagGallery]
+                        default: self.sidebarSelection = [.dashboard]
+                        }
                         
 #if os(macOS)
                         if let bookmarkData = try? url.bookmarkData(

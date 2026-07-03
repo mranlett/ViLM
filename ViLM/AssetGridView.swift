@@ -84,7 +84,7 @@ struct AssetsGridView: View {
         let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
-                case .allAssets, .actorGallery, .tagGallery: return true
+                case .dashboard, .allAssets, .actorGallery, .tagGallery: return true
                 case .actor(let name): return asset.tags.contains("actor:\(name)")
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
@@ -201,6 +201,7 @@ struct AssetsGridView: View {
         if sidebarSelection.count > 1 { return "Multiple Filters" }
         guard let first = sidebarSelection.first else { return "All Assets" }
         switch first {
+        case .dashboard: return "Dashboard"
         case .allAssets: return "All Assets"
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"
@@ -376,6 +377,7 @@ struct AssetsGridView: View {
     
     private func sidebarSelectionTitle(for item: SidebarItem) -> String {
         switch item {
+        case .dashboard: return "Dashboard"
         case .allAssets: return "All"
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"

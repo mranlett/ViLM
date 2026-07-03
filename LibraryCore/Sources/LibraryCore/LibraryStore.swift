@@ -169,7 +169,7 @@ public class LibraryStore {
     
     public func deleteAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
-            try asset.delete(db)
+            _ = try asset.delete(db)
         }
     }
 
