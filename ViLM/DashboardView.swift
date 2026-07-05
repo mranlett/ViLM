@@ -354,7 +354,8 @@ struct DashboardView: View {
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
-        .navigationBarHidden(true)
+        // MODIFICATION: [2026-07-05 22:52:00 UTC] Removed .navigationBarHidden(true) to restore back button and added navigationTitle
+        .navigationTitle("Dashboard")
         .onAppear {
             loadActorProfiles()
             loadProfileImages()
