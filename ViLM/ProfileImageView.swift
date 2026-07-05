@@ -1,5 +1,10 @@
 import SwiftUI
 import CryptoKit
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 struct ProfileImageView<Content: View, Placeholder: View>: View {
     let libraryURL: URL?
@@ -9,7 +14,7 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
     
-    @State private var localURL: URL?
+    @State private var localImage: Image?
     
     init(libraryURL: URL?, entityId: String, photoUrl: String?, isGallery: Bool = false, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.libraryURL = libraryURL
@@ -22,8 +27,8 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     
     var body: some View {
         Group {
-            if let localURL = localURL {
-                AsyncImage(url: localURL, content: content, placeholder: placeholder)
+            if let localImage = localImage {
+                content(localImage)
             } else {
                 placeholder()
             }
@@ -52,20 +57,31 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         
         // 1. Check if the primary image file exists
         if FileManager.default.fileExists(atPath: fileURL.path) {
-            localURL = fileURL
-            return
+            if let image = await loadImageAsync(from: fileURL) {
+                setLocalImage(image)
+                return
+            } else {
+                // File exists but failed to decode (e.g. corrupted/0 bytes). Delete it to allow redownload.
+                try? FileManager.default.removeItem(at: fileURL)
+            }
         }
         
         // 2. Check for legacy images to migrate (previously hashed by URL) - only for primary
         if !isGallery, let fallbackFile = findAnyExistingImage(in: profilesDir, for: safeId) {
             do {
                 try FileManager.default.moveItem(at: fallbackFile, to: fileURL)
-                localURL = fileURL
                 cleanupOldImages(in: profilesDir, for: safeId, keeping: fileName)
-                return
+                if let image = await loadImageAsync(from: fileURL) {
+                    setLocalImage(image)
+                    return
+                } else {
+                    try? FileManager.default.removeItem(at: fileURL)
+                }
             } catch {
-                localURL = fallbackFile
-                return
+                if let image = await loadImageAsync(from: fallbackFile) {
+                    setLocalImage(image)
+                    return
+                }
             }
         }
         
@@ -74,12 +90,52 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         
         do {
             try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)
-            let (data, _) = try await URLSession.shared.data(from: url)
+            
+            var request = URLRequest(url: url)
+            // Add a standard User-Agent to prevent 403 Forbidden on some CDNs (like sk-static)
+            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 400 {
+                print("Failed to download profile image for \(entityId): HTTP \(httpResponse.statusCode)")
+                return
+            }
+            
             try data.write(to: fileURL)
-            localURL = fileURL
+            
+            if let image = await createImage(from: data) {
+                setLocalImage(image)
+            }
         } catch {
             print("Failed to download profile image for \(entityId): \(error)")
         }
+    }
+    
+    @MainActor
+    private func setLocalImage(_ image: Image) {
+        self.localImage = image
+    }
+    
+    private func loadImageAsync(from url: URL) async -> Image? {
+        // For local file URLs, Data(contentsOf:) is reliable and we don't need URLSession complexity
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return await createImage(from: data)
+    }
+    
+    private func createImage(from data: Data) async -> Image? {
+        await Task.detached {
+            #if os(iOS)
+            if let uiImage = UIImage(data: data) {
+                return Image(uiImage: uiImage)
+            }
+            #else
+            if let nsImage = NSImage(data: data) {
+                return Image(nsImage: nsImage)
+            }
+            #endif
+            return nil
+        }.value
     }
     
     private func findAnyExistingImage(in directory: URL, for safeId: String) -> URL? {

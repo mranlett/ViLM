@@ -25,6 +25,7 @@ struct ActorGridView: View {
     @State private var filterCriteria = ActorFilterCriteria()
     @State private var isShowingFilterBuilder = false
     @State private var isSelectionMode = false
+    @State private var searchText = ""
     
     var uniqueGenders: [String] {
         let values = actorProfiles.values.compactMap { $0.gender }
@@ -81,6 +82,10 @@ struct ActorGridView: View {
     
     var filteredActors: [String] {
         var result = allUniqueActors
+        
+        if !searchText.isEmpty {
+            result = result.filter { $0.localizedCaseInsensitiveContains(searchText) }
+        }
         
         if let letter = alphaFilter {
             result = result.filter { $0.uppercased().hasPrefix(String(letter)) }
@@ -252,6 +257,7 @@ struct ActorGridView: View {
             )
         }
         .navigationTitle("Actors Gallery")
+        .searchable(text: $searchText, prompt: "Search Actors")
         .toolbar {
             let selectedActorsCount = sidebarSelection.filter { item in
                 if case .actor = item { return true }

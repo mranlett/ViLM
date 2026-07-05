@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public struct EntityProfile: Identifiable, Codable, FetchableRecord, PersistableRecord {
+public struct EntityProfile: Identifiable, Codable, FetchableRecord, PersistableRecord, Sendable {
     public let id: String
     public var bio: String?
     public var photoUrl: String?

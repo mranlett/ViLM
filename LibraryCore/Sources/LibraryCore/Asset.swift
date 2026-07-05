@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
+public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord, Sendable {
     public let id: UUID
     public var relativePath: String
     public var fileName: String
@@ -16,7 +16,7 @@ public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord {
     
     public static let databaseTableName = "assets"
 
-    public enum ReviewStatus: String, Codable {
+    public enum ReviewStatus: String, Codable, Sendable {
         case unreviewed
         case reviewed
     }

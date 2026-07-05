@@ -47,10 +47,13 @@ struct CountryFlagHelper {
             return exact
         }
         
-        // Try partial match
-        for (key, flag) in countryMapping {
-            if name.contains(key) {
-                return flag
+        // Try partial match with word boundaries
+        // Sort keys by length descending to match longer multi-word countries first
+        let sortedKeys = countryMapping.keys.sorted { $0.count > $1.count }
+        for key in sortedKeys {
+            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: key))\\b"
+            if name.range(of: pattern, options: .regularExpression) != nil {
+                return countryMapping[key] ?? ""
             }
         }
         

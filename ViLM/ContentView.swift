@@ -31,6 +31,7 @@ struct ContentView: View {
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
     @State private var isShowingSettings = false
     @State private var hasInitializedSelection = false
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
     
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
@@ -40,6 +41,9 @@ struct ContentView: View {
 #if os(iOS)
     @State private var isShowingLibraryPicker = false
     @State private var showContentOnIOS = false
+    @State private var navigationPath = NavigationPath()
+    @State private var isShowingProgrammaticRoute = false
+    @State private var programmaticRoute: AppRoute?
 #endif
     
     // ✅ Keep security scope open for the active library
@@ -49,7 +53,7 @@ struct ContentView: View {
     private let bookmarkKey = "libraryBookmark"
     
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 selection: $sidebarSelection,
                 assets: assets,
@@ -96,54 +100,18 @@ struct ContentView: View {
                     }
                 }
                 .navigationDestination(for: AppRoute.self) { route in
-                    switch route {
-                    case .asset(let id, let context):
-                        InspectorView(
-                            sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: selectedAssetIDs.isEmpty ? [id] : selectedAssetIDs,
-                            assets: $assets,
-                            selectedAssetBinding: $selectedAssetIDs,
-                            gridRefreshID: $gridRefreshID,
-                            libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs,
-                            contextAssetIDs: context
-                        )
-                        .onAppear {
-                            if !selectedAssetIDs.contains(id) {
-                                selectedAssetIDs = [id]
-                            }
-                        }
-                    case .assets(let ids):
-                        InspectorView(
-                            sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: ids,
-                            assets: $assets,
-                            selectedAssetBinding: $selectedAssetIDs,
-                            gridRefreshID: $gridRefreshID,
-                            libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs
-                        )
-                    case .entityProfile(let category, let name):
-                        EntityProfileRouteView(
-                            category: category,
-                            name: name,
-                            assets: assets,
-                            libraryURL: selectedLibraryURL,
-                            gridRefreshID: gridRefreshID
-                        )
-                    case .batchActors(let ids):
-                        BatchEntityProfileEditorView(
-                            libraryURL: selectedLibraryURL,
-                            entityIds: ids.map { "actor:\($0)" },
-                            onSave: { _ in gridRefreshID = UUID() }
-                        )
+                    destinationView(for: route)
+                }
+                .navigationDestination(isPresented: $isShowingProgrammaticRoute) {
+                    if let route = programmaticRoute {
+                        destinationView(for: route)
                     }
                 }
             }
 #endif
         } content: {
 #if os(iOS)
-            NavigationStack {
+            NavigationStack(path: $navigationPath) {
                 Group {
                     if sidebarSelection.contains(.actorGallery) {
                         ActorGridView(
@@ -171,47 +139,11 @@ struct ContentView: View {
                     }
                 }
                 .navigationDestination(for: AppRoute.self) { route in
-                    switch route {
-                    case .asset(let id, let context):
-                        InspectorView(
-                            sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: selectedAssetIDs.isEmpty ? [id] : selectedAssetIDs,
-                            assets: $assets,
-                            selectedAssetBinding: $selectedAssetIDs,
-                            gridRefreshID: $gridRefreshID,
-                            libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs,
-                            contextAssetIDs: context
-                        )
-                        .onAppear {
-                            if !selectedAssetIDs.contains(id) {
-                                selectedAssetIDs = [id]
-                            }
-                        }
-                    case .assets(let ids):
-                        InspectorView(
-                            sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: ids,
-                            assets: $assets,
-                            selectedAssetBinding: $selectedAssetIDs,
-                            gridRefreshID: $gridRefreshID,
-                            libraryURL: selectedLibraryURL,
-                            missingAssetIDs: $missingAssetIDs
-                        )
-                    case .entityProfile(let category, let name):
-                        EntityProfileRouteView(
-                            category: category,
-                            name: name,
-                            assets: assets,
-                            libraryURL: selectedLibraryURL,
-                            gridRefreshID: gridRefreshID
-                        )
-                    case .batchActors(let ids):
-                        BatchEntityProfileEditorView(
-                            libraryURL: selectedLibraryURL,
-                            entityIds: ids.map { "actor:\($0)" },
-                            onSave: { _ in gridRefreshID = UUID() }
-                        )
+                    destinationView(for: route)
+                }
+                .navigationDestination(isPresented: $isShowingProgrammaticRoute) {
+                    if let route = programmaticRoute {
+                        destinationView(for: route)
                     }
                 }
             }
@@ -299,10 +231,43 @@ struct ContentView: View {
         
         .sheet(isPresented: $isShowingSettings) {
             SettingsView(
+                libraryURL: selectedLibraryURL,
                 onOpenLibrary: openLibrary,
                 onCheckForChanges: validateLibrary,
                 onAuditFileName: { isShowingFileNameAudit = true },
-                onTagCleanup: { isShowingTagCleanup = true }
+                onTagCleanup: { isShowingTagCleanup = true },
+                onSelectAsset: { assetID in
+                    isShowingSettings = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+#if os(iOS)
+                        showContentOnIOS = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            programmaticRoute = .asset(assetID, context: filteredAssetContext)
+                            isShowingProgrammaticRoute = true
+                        }
+#else
+                        sidebarSelection = [.allAssets]
+                        selectedAssetIDs = [assetID]
+                        columnVisibility = .all
+#endif
+                    }
+                },
+                onSelectActor: { actorID in
+                    isShowingSettings = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+#if os(iOS)
+                        showContentOnIOS = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            programmaticRoute = .entityProfile(category: "actor", name: actorID)
+                            isShowingProgrammaticRoute = true
+                        }
+#else
+                        selectedAssetIDs.removeAll()
+                        sidebarSelection = [.actor(actorID)]
+                        columnVisibility = .all
+#endif
+                    }
+                }
             )
         }
         .sheet(isPresented: $isShowingFileNameAudit) {
@@ -418,6 +383,52 @@ struct ContentView: View {
             } catch {
                 print("Check for Changes failed: \(error)")
             }
+        }
+    }
+    
+    @ViewBuilder
+    private func destinationView(for route: AppRoute) -> some View {
+        switch route {
+        case .asset(let id, let context):
+            InspectorView(
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: selectedAssetIDs.isEmpty ? [id] : selectedAssetIDs,
+                assets: $assets,
+                selectedAssetBinding: $selectedAssetIDs,
+                gridRefreshID: $gridRefreshID,
+                libraryURL: selectedLibraryURL,
+                missingAssetIDs: $missingAssetIDs,
+                contextAssetIDs: context
+            )
+            .onAppear {
+                if !selectedAssetIDs.contains(id) {
+                    selectedAssetIDs = [id]
+                }
+            }
+        case .assets(let ids):
+            InspectorView(
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: ids,
+                assets: $assets,
+                selectedAssetBinding: $selectedAssetIDs,
+                gridRefreshID: $gridRefreshID,
+                libraryURL: selectedLibraryURL,
+                missingAssetIDs: $missingAssetIDs
+            )
+        case .entityProfile(let category, let name):
+            EntityProfileRouteView(
+                category: category,
+                name: name,
+                assets: assets,
+                libraryURL: selectedLibraryURL,
+                gridRefreshID: gridRefreshID
+            )
+        case .batchActors(let ids):
+            BatchEntityProfileEditorView(
+                libraryURL: selectedLibraryURL,
+                entityIds: ids.map { "actor:\($0)" },
+                onSave: { _ in gridRefreshID = UUID() }
+            )
         }
     }
     

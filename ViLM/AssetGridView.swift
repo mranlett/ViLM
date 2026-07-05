@@ -138,38 +138,36 @@ struct AssetsGridView: View {
                 }
             }
             
-            // Actor Metadata Filters
-            if !filterCriteria.selectedActorTags.isEmpty || !filterCriteria.selectedActorHairColors.isEmpty || !filterCriteria.selectedActorGenders.isEmpty {
-                let assetActorProfiles = asset.actors.compactMap { actorProfiles["actor:\($0)"] }
-                
-                // Actor Tags
-                if !filterCriteria.selectedActorTags.isEmpty {
-                    let allTagsInVideo = Set(assetActorProfiles.flatMap { $0.tags })
-                    if filterCriteria.actorTagsLogic == .and {
-                        if !filterCriteria.selectedActorTags.isSubset(of: allTagsInVideo) { return false }
-                    } else {
-                        if filterCriteria.selectedActorTags.isDisjoint(with: allTagsInVideo) { return false }
-                    }
+            // Actor Metadata Filters (must pass all specified)
+            let assetActorProfiles = asset.actors.compactMap { actorProfiles["actor:\($0)"] }
+            
+            // Actor Tags
+            if !filterCriteria.selectedActorTags.isEmpty {
+                let allTagsInVideo = Set(assetActorProfiles.flatMap { $0.tags })
+                if filterCriteria.actorTagsLogic == .and {
+                    if !filterCriteria.selectedActorTags.isSubset(of: allTagsInVideo) { return false }
+                } else {
+                    if filterCriteria.selectedActorTags.isDisjoint(with: allTagsInVideo) { return false }
                 }
-                
-                // Actor Hair Colors
-                if !filterCriteria.selectedActorHairColors.isEmpty {
-                    let allHairColorsInVideo = Set(assetActorProfiles.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-                    if filterCriteria.actorHairColorsLogic == .and {
-                        if !filterCriteria.selectedActorHairColors.isSubset(of: allHairColorsInVideo) { return false }
-                    } else {
-                        if filterCriteria.selectedActorHairColors.isDisjoint(with: allHairColorsInVideo) { return false }
-                    }
+            }
+            
+            // Actor Hair Colors
+            if !filterCriteria.selectedActorHairColors.isEmpty {
+                let allHairColorsInVideo = Set(assetActorProfiles.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                if filterCriteria.actorHairColorsLogic == .and {
+                    if !filterCriteria.selectedActorHairColors.isSubset(of: allHairColorsInVideo) { return false }
+                } else {
+                    if filterCriteria.selectedActorHairColors.isDisjoint(with: allHairColorsInVideo) { return false }
                 }
-                
-                // Actor Genders
-                if !filterCriteria.selectedActorGenders.isEmpty {
-                    let allGendersInVideo = Set(assetActorProfiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-                    if filterCriteria.actorGendersLogic == .and {
-                        if !filterCriteria.selectedActorGenders.isSubset(of: allGendersInVideo) { return false }
-                    } else {
-                        if filterCriteria.selectedActorGenders.isDisjoint(with: allGendersInVideo) { return false }
-                    }
+            }
+            
+            // Actor Genders
+            if !filterCriteria.selectedActorGenders.isEmpty {
+                let allGendersInVideo = Set(assetActorProfiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                if filterCriteria.actorGendersLogic == .and {
+                    if !filterCriteria.selectedActorGenders.isSubset(of: allGendersInVideo) { return false }
+                } else {
+                    if filterCriteria.selectedActorGenders.isDisjoint(with: allGendersInVideo) { return false }
                 }
             }
             
