@@ -3,10 +3,11 @@ import Foundation
 struct ActorFilterCriteria: Equatable, Codable {
     enum Logic: String, CaseIterable, Equatable, Codable { case and = "AND", or = "OR" }
 
-    enum SortOption: String, CaseIterable, Codable { case name = "Name", age = "Age", videoCount = "Video Count" }
+    enum SortOption: String, CaseIterable, Codable { case name = "Name", age = "Age", videoCount = "Video Count", dateAdded = "Date Added" }
 
     var showMissingPhotosOnly: Bool = false
     var showMissingGenderOnly: Bool = false
+    var showNeedingAttentionOnly: Bool = false
     
     var selectedGenders: Set<String> = []
     var hairColor: String = ""
@@ -24,7 +25,7 @@ struct ActorFilterCriteria: Equatable, Codable {
     var sortDescending: Bool = false
     
     var isEmpty: Bool {
-        !showMissingPhotosOnly && !showMissingGenderOnly && selectedGenders.isEmpty && hairColor.isEmpty && country.isEmpty && selectedTags.isEmpty && minVideos == nil && maxVideos == nil && minAge == nil && maxAge == nil
+        !showMissingPhotosOnly && !showMissingGenderOnly && !showNeedingAttentionOnly && selectedGenders.isEmpty && hairColor.isEmpty && country.isEmpty && selectedTags.isEmpty && minVideos == nil && maxVideos == nil && minAge == nil && maxAge == nil
     }
     
     public init() {}

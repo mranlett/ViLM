@@ -6,6 +6,9 @@ struct ActorGridView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     let libraryURL: URL?
+    @Binding var pendingFilter: ActorFilterCriteria?
+    @Binding var pendingSort: ActorFilterCriteria.SortOption?
+    @Binding var pendingSortAscending: Bool?
     
     @State private var actorProfiles: [String: EntityProfile] = [:]
     @State private var profileImageFileNames: Set<String> = []
@@ -93,6 +96,9 @@ struct ActorGridView: View {
         
         if filterCriteria.showMissingPhotosOnly {
             result = result.filter { actor in
+                let profile = actorProfiles["actor:\(actor)"]
+                if let _ = profile?.photoUrl { return false }
+                
                 let safeId = "actor:\(actor)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
                 if profileImageFileNames.contains("\(safeId).jpg") {
                     return false
@@ -105,6 +111,18 @@ struct ActorGridView: View {
             result = result.filter { actor in
                 let profile = actorProfiles["actor:\(actor)"]
                 return (profile?.gender ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        }
+        
+        if filterCriteria.showNeedingAttentionOnly {
+            result = result.filter { actor in
+                let safeId = "actor:\(actor)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+                let profile = actorProfiles["actor:\(actor)"]
+                let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg") || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
+                let hasPhoto = hasLocalPhoto || profile?.photoUrl != nil
+                let hasBio = !(profile?.bio ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                let hasTags = !(profile?.tags ?? []).isEmpty
+                return !hasPhoto || !hasBio || !hasTags
             }
         }
         
@@ -177,9 +195,13 @@ struct ActorGridView: View {
             case .videoCount:
                 let countA = assets.filter { $0.actors.contains(a) }.count
                 let countB = assets.filter { $0.actors.contains(b) }.count
-                if countA != countB { return factor == 1 ? countA > countB : countA < countB } // Default to descending for video count usually, but we strictly follow factor here: ascending means smallest count first. Let's make ascending = highest count first so factor 1 is highest count. Wait, standard ascending is smallest first.
-                // Re-adjusting logic for standard sorting
-                return factor == 1 ? countA < countB : countA > countB
+                if countA != countB { return factor == 1 ? countA < countB : countA > countB }
+                return factor == 1 ? a < b : a > b
+            case .dateAdded:
+                let dateA = actorProfiles["actor:\(a)"]?.createdAt ?? Date.distantPast
+                let dateB = actorProfiles["actor:\(b)"]?.createdAt ?? Date.distantPast
+                if dateA != dateB { return factor == 1 ? dateA < dateB : dateA > dateB }
+                return factor == 1 ? a < b : a > b
             }
         }
         
@@ -362,10 +384,40 @@ struct ActorGridView: View {
                 print("Import failed: \(error.localizedDescription)")
             }
         }
+        .onChange(of: pendingFilter) { _, newValue in
+            if let newFilter = newValue {
+                filterCriteria = newFilter
+                pendingFilter = nil
+            }
+        }
+        .onChange(of: pendingSort) { _, newValue in
+            if let newSort = newValue {
+                filterCriteria.sortBy = newSort
+                pendingSort = nil
+            }
+        }
+        .onChange(of: pendingSortAscending) { _, newValue in
+            if let newAsc = newValue {
+                filterCriteria.sortDescending = !newAsc
+                pendingSortAscending = nil
+            }
+        }
         .onAppear {
             if !hasLoadedDefaults {
                 filterCriteria = defaultFilterCriteria
                 hasLoadedDefaults = true
+            }
+            if let newFilter = pendingFilter {
+                filterCriteria = newFilter
+                pendingFilter = nil
+            }
+            if let newSort = pendingSort {
+                filterCriteria.sortBy = newSort
+                pendingSort = nil
+            }
+            if let newAsc = pendingSortAscending {
+                filterCriteria.sortDescending = !newAsc
+                pendingSortAscending = nil
             }
             fetchProfiles()
         }

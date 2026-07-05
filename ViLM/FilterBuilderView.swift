@@ -33,6 +33,7 @@ struct FilterBuilderView: View {
     @State private var isActorTagsExpanded = false
     @State private var isActorHairColorsExpanded = false
     @State private var isActorGendersExpanded = false
+    @State private var isActorCountriesExpanded = false
     
     @State private var actorAlphaFilter: Character? = nil
     @State private var tagAlphaFilter: Character? = nil
@@ -41,6 +42,7 @@ struct FilterBuilderView: View {
     @State private var actorTagAlphaFilter: Character? = nil
     @State private var actorHairColorAlphaFilter: Character? = nil
     @State private var actorGenderAlphaFilter: Character? = nil
+    @State private var actorCountryAlphaFilter: Character? = nil
     
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
@@ -73,6 +75,11 @@ struct FilterBuilderView: View {
     var allUniqueActorGenders: [String] {
         let gendersSet = Set(actorProfiles.values.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         return Array(gendersSet).sorted()
+    }
+    
+    var allUniqueActorCountries: [String] {
+        let countriesSet = Set(actorProfiles.values.compactMap { $0.countryOfOrigin }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        return Array(countriesSet).sorted()
     }
     
     var body: some View {
@@ -170,6 +177,17 @@ struct FilterBuilderView: View {
                             filter: actorGenderAlphaFilter,
                             logicBinding: $criteria.actorGendersLogic,
                             selectionBinding: $criteria.selectedActorGenders
+                        )
+                    }
+                    
+                    DisclosureGroup("Actor Countries", isExpanded: $isActorCountriesExpanded) {
+                        AlphaPickerView(filter: $actorCountryAlphaFilter)
+                            .padding(.vertical, 4)
+                        filterSection(
+                            items: allUniqueActorCountries,
+                            filter: actorCountryAlphaFilter,
+                            logicBinding: $criteria.actorCountriesLogic,
+                            selectionBinding: $criteria.selectedActorCountries
                         )
                     }
                 }

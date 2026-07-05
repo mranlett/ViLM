@@ -26,6 +26,8 @@ struct AssetFilterCriteria: Equatable, Codable {
     
     var actorGendersLogic: Logic = .or
     var selectedActorGenders: Set<String> = []
+    var actorCountriesLogic: Logic = .or
+    var selectedActorCountries: Set<String> = []
     
     var isEmpty: Bool {
         reviewStatus == .all && minRating == nil && 
@@ -47,7 +49,14 @@ struct AssetsGridView: View {
     let libraryURL: URL?
     let refreshID: UUID
     @Binding var filteredAssetContext: [Asset.ID]
+    
+    @Binding var pendingFilter: AssetFilterCriteria?
+    @Binding var pendingSort: SortOption?
+    @Binding var pendingSortAscending: Bool?
+    
     @State private var isShowingFilterBuilder = false
+    @State private var isShowingSaveCollection = false
+    @State private var newCollectionName = ""
     @State private var actorProfiles: [String: EntityProfile] = [:]
     
     enum SortOption: String, CaseIterable {
@@ -84,7 +93,7 @@ struct AssetsGridView: View {
         let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
-                case .dashboard, .allAssets, .actorGallery, .tagGallery: return true
+                case .dashboard, .allAssets, .actorGallery, .tagGallery, .smartCollection: return true
                 case .actor(let name): return asset.tags.contains("actor:\(name)")
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
@@ -171,6 +180,16 @@ struct AssetsGridView: View {
                 }
             }
             
+            // Actor Countries
+            if !filterCriteria.selectedActorCountries.isEmpty {
+                let allCountriesInVideo = Set(assetActorProfiles.compactMap { $0.countryOfOrigin }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+                if filterCriteria.actorCountriesLogic == .and {
+                    if !filterCriteria.selectedActorCountries.isSubset(of: allCountriesInVideo) { return false }
+                } else {
+                    if filterCriteria.selectedActorCountries.isDisjoint(with: allCountriesInVideo) { return false }
+                }
+            }
+            
             if !searchText.isEmpty && !asset.fileName.localizedCaseInsensitiveContains(searchText) {
                 return false
             }
@@ -207,6 +226,7 @@ struct AssetsGridView: View {
         case .tag(let name): return name
         case .studio(let name): return name
         case .series(let name): return name
+        case .smartCollection(_, let name): return name
         }
     }
     
@@ -301,6 +321,69 @@ struct AssetsGridView: View {
         .onChange(of: libraryURL) { _, _ in
             fetchActorProfiles()
         }
+        .onChange(of: sidebarSelection) { _, newSelection in
+            if let first = newSelection.first {
+                switch first {
+                case .smartCollection(let id, _):
+                    loadSmartCollection(id: id)
+                case .allAssets:
+                    filterCriteria = defaultFilterCriteria
+                default:
+                    break
+                }
+            }
+        }
+        .onChange(of: pendingFilter) { _, newValue in
+            if let newFilter = newValue {
+                filterCriteria = newFilter
+                pendingFilter = nil
+            }
+        }
+        .onChange(of: pendingSort) { _, newValue in
+            if let newSort = newValue {
+                sortOption = newSort
+                pendingSort = nil
+            }
+        }
+        .onChange(of: pendingSortAscending) { _, newValue in
+            if let newAsc = newValue {
+                sortAscending = newAsc
+                pendingSortAscending = nil
+            }
+        }
+        .onAppear {
+            var handledBySidebar = false
+            if let first = sidebarSelection.first {
+                switch first {
+                case .smartCollection(let id, _):
+                    loadSmartCollection(id: id)
+                    handledBySidebar = true
+                case .allAssets:
+                    filterCriteria = defaultFilterCriteria
+                    handledBySidebar = true
+                default:
+                    break
+                }
+            }
+            if !hasLoadedDefaults {
+                if !handledBySidebar {
+                    filterCriteria = defaultFilterCriteria
+                }
+                hasLoadedDefaults = true
+            }
+            if let newFilter = pendingFilter {
+                filterCriteria = newFilter
+                pendingFilter = nil
+            }
+            if let newSort = pendingSort {
+                sortOption = newSort
+                pendingSort = nil
+            }
+            if let newAsc = pendingSortAscending {
+                sortAscending = newAsc
+                pendingSortAscending = nil
+            }
+        }
         .navigationTitle(sidebarSelectionTitle)
         .navigationSubtitle("\(filteredAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search filenames...")
@@ -324,6 +407,13 @@ struct AssetsGridView: View {
                     Button(action: { isShowingFilterBuilder = true }) {
                         Label("Filter", systemImage: filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
+                    
+                    if !filterCriteria.isEmpty {
+                        Button(action: { isShowingSaveCollection = true }) {
+                            Label("Save Collection", systemImage: "folder.badge.plus")
+                        }
+                    }
+                    
                     gridStylePicker
                 }
             }
@@ -349,6 +439,15 @@ struct AssetsGridView: View {
         .sheet(isPresented: $isShowingFilterBuilder) {
             FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: actorProfiles)
         }
+        .alert("Save Smart Collection", isPresented: $isShowingSaveCollection) {
+            TextField("Collection Name", text: $newCollectionName)
+            Button("Cancel", role: .cancel) { newCollectionName = "" }
+            Button("Save") {
+                saveSmartCollection()
+            }
+        } message: {
+            Text("Enter a name for this smart collection.")
+        }
         .task(id: assets.count) {
             guard let url = libraryURL else { return }
             var newSizes: [Asset.ID: Int64] = [:]
@@ -363,15 +462,25 @@ struct AssetsGridView: View {
                 self.fileSizes = newSizes
             }
         }
-        .onAppear {
-            if !hasLoadedDefaults {
-                filterCriteria = defaultFilterCriteria
-                hasLoadedDefaults = true
-            }
-        }
     }
     
     // MARK: - Sub-Expressions (Helpers to fix compiler error)
+    private func loadSmartCollection(id: String) {
+        if let url = libraryURL {
+            do {
+                let store = try LibraryStore(at: url)
+                let smartCollections = try store.fetchAllSmartCollections()
+                if let sc = smartCollections.first(where: { $0.id == id }) {
+                    if let criteria = try? JSONDecoder().decode(AssetFilterCriteria.self, from: sc.filterData) {
+                        self.filterCriteria = criteria
+                    }
+                }
+            } catch {
+                print("Failed to load smart collection: \(error)")
+            }
+        }
+    }
+
     
     private func sidebarSelectionTitle(for item: SidebarItem) -> String {
         switch item {
@@ -383,6 +492,7 @@ struct AssetsGridView: View {
         case .tag(let name): return name
         case .studio(let name): return name
         case .series(let name): return name
+        case .smartCollection(_, let name): return name
         }
     }
     
@@ -463,6 +573,30 @@ struct AssetsGridView: View {
             } catch {
                 print("Failed to fetch actor profiles: \(error)")
             }
+        }
+    }
+    
+    private func saveSmartCollection() {
+        guard let url = libraryURL, !newCollectionName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            var filterToSave = filterCriteria
+            for item in sidebarSelection {
+                switch item {
+                case .tag(let name): filterToSave.selectedTags.insert(name)
+                case .actor(let name): filterToSave.selectedActors.insert(name)
+                case .studio(let name): filterToSave.selectedStudios.insert(name)
+                default: break
+                }
+            }
+            
+            let data = try JSONEncoder().encode(filterToSave)
+            let sc = SmartCollection(name: newCollectionName.trimmingCharacters(in: .whitespaces), filterData: data)
+            let store = try LibraryStore(at: url)
+            try store.saveSmartCollection(sc)
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadSmartCollections"), object: nil)
+            newCollectionName = ""
+        } catch {
+            print("Failed to save smart collection: \(error)")
         }
     }
 }

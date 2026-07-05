@@ -5,10 +5,12 @@ struct SidebarView: View {
     @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
     let libraryURL: URL?
+    let smartCollections: [SmartCollection]
     let onApplyFilters: () -> Void
     
     @State private var profiles: [EntityProfile] = []
     
+    @State private var isSmartCollectionsExpanded = true
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true
     @State private var isStudiosExpanded = true
@@ -113,6 +115,24 @@ struct SidebarView: View {
                 sidebarRow(title: "Tags Gallery", icon: "tag.square.fill", isSelected: selection == [.tagGallery]) {
                     selection = [.tagGallery]
                 }
+            }
+            
+            if !smartCollections.isEmpty {
+                DisclosureGroup(isExpanded: $isSmartCollectionsExpanded) {
+                    ForEach(smartCollections) { sc in
+                        sidebarRow(title: sc.name, icon: "folder.fill", isSelected: selection == [.smartCollection(sc.id, sc.name)]) {
+                            selection = [.smartCollection(sc.id, sc.name)]
+                        }
+                        // Add context menu to delete
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                NotificationCenter.default.post(name: NSNotification.Name("DeleteSmartCollection"), object: sc.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } label: { Text("Smart Collections").font(.headline) }
             }
             
             DisclosureGroup(isExpanded: $isActorsExpanded) {

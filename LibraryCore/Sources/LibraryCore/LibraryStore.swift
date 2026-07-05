@@ -96,7 +96,43 @@ public class LibraryStore {
             }
         }
         
+        // --- NEW: Migration v9 adds created_at ---
+        migrator.registerMigration("v9") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "created_at", .datetime)
+            }
+        }
+        // --- NEW: Migration v10 adds smart collections ---
+        migrator.registerMigration("v10") { db in
+            try db.create(table: "smart_collections") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("filterData", .blob).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+        }
+        
         try migrator.migrate(dbQueue)
+    }
+    
+    // MARK: - Smart Collections
+    
+    public func fetchAllSmartCollections() throws -> [SmartCollection] {
+        try dbQueue.read { db in
+            try SmartCollection.order(Column("createdAt").asc).fetchAll(db)
+        }
+    }
+    
+    public func saveSmartCollection(_ collection: SmartCollection) throws {
+        try dbQueue.write { db in
+            try collection.save(db)
+        }
+    }
+    
+    public func deleteSmartCollection(id: String) throws {
+        try dbQueue.write { db in
+            _ = try SmartCollection.deleteOne(db, key: id)
+        }
     }
     
     public func updateAsset(_ asset: Asset) throws {

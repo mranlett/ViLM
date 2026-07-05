@@ -7,11 +7,11 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
     public var photoUrl: String?
     public var homePage: String?
     
-    // NEW FIELDS
     public var gender: String?
     public var hairColor: String?
     public var birthYear: Int?
     public var countryOfOrigin: String?
+    public var createdAt: Date?
     
     public var age: Int? {
         guard let birthYear = birthYear else { return nil }
@@ -25,7 +25,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, tags: [String] = [], galleryUrls: [String] = []) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, tags: [String] = [], galleryUrls: [String] = [], createdAt: Date? = Date()) {
         self.id = id
         self.bio = bio
         self.photoUrl = photoUrl
@@ -36,6 +36,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
         self.countryOfOrigin = countryOfOrigin
         self.tags = tags
         self.galleryUrls = galleryUrls
+        self.createdAt = createdAt
     }
     
     enum CodingKeys: String, CodingKey {
@@ -49,6 +50,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
         case countryOfOrigin = "country_of_origin"
         case tags
         case galleryUrls = "gallery_urls"
+        case createdAt = "created_at"
     }
     
     public init(from decoder: Decoder) throws {
@@ -61,6 +63,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
         self.hairColor = try container.decodeIfPresent(String.self, forKey: .hairColor)
         self.birthYear = try container.decodeIfPresent(Int.self, forKey: .birthYear)
         self.countryOfOrigin = try container.decodeIfPresent(String.self, forKey: .countryOfOrigin)
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         
         var decodedTags: [String] = []
         if let tagsArray = try? container.decode([String].self, forKey: .tags) {
@@ -93,6 +96,7 @@ extension EntityProfile {
         container["hair_color"] = hairColor
         container["birth_year"] = birthYear
         container["country_of_origin"] = countryOfOrigin
+        container["created_at"] = createdAt
         
         if let data = try? JSONEncoder().encode(tags),
            let string = String(data: data, encoding: .utf8) {

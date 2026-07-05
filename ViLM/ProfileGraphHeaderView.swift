@@ -280,7 +280,7 @@ struct ProfileGraphHeaderView: View {
         case .studio(let name): return "\(name) Studio Graph"
         case .tag(let name): return "Tag Graph: \(name)"
         case .series(let name): return "Series Graph: \(name)"
-        case .dashboard, .allAssets, .actorGallery, .tagGallery: return ""
+        case .dashboard, .allAssets, .actorGallery, .tagGallery, .smartCollection: return ""
         }
     }
     

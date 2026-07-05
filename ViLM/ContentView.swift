@@ -16,6 +16,7 @@ enum SidebarItem: Hashable {
     case tag(String)
     case studio(String)
     case series(String)
+    case smartCollection(String, String) // id, name
 }
 
 struct ContentView: View {
@@ -27,6 +28,15 @@ struct ContentView: View {
     @State private var gridRefreshID = UUID()
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
+    @State private var smartCollections: [SmartCollection] = []
+    
+    @State private var pendingAssetFilter: AssetFilterCriteria?
+    @State private var pendingAssetSort: AssetsGridView.SortOption?
+    @State private var pendingAssetSortAscending: Bool?
+    
+    @State private var pendingActorFilter: ActorFilterCriteria?
+    @State private var pendingActorSort: ActorFilterCriteria.SortOption?
+    @State private var pendingActorSortAscending: Bool?
     
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
     @State private var isShowingSettings = false
@@ -58,6 +68,7 @@ struct ContentView: View {
                 selection: $sidebarSelection,
                 assets: assets,
                 libraryURL: selectedLibraryURL,
+                smartCollections: smartCollections,
                 onApplyFilters: {
 #if os(iOS)
                     showContentOnIOS = true
@@ -72,13 +83,20 @@ struct ContentView: View {
                             assets: assets,
                             sidebarSelection: $sidebarSelection,
                             selectedAssetIDs: $selectedAssetIDs,
-                            libraryURL: selectedLibraryURL
+                            libraryURL: selectedLibraryURL,
+                            pendingAssetFilter: $pendingAssetFilter,
+                            pendingAssetSort: $pendingAssetSort,
+                            pendingAssetSortAscending: $pendingAssetSortAscending,
+                            pendingActorFilter: $pendingActorFilter
                         )
                     } else if sidebarSelection.contains(.actorGallery) {
                         ActorGridView(
                             assets: assets,
                             sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL
+                            libraryURL: selectedLibraryURL,
+                            pendingFilter: $pendingActorFilter,
+                            pendingSort: $pendingActorSort,
+                            pendingSortAscending: $pendingActorSortAscending
                         )
                     } else if sidebarSelection.contains(.tagGallery) {
                         TagGalleryView(
@@ -95,7 +113,10 @@ struct ContentView: View {
                             missingAssetIDs: missingAssetIDs,
                             libraryURL: selectedLibraryURL,
                             refreshID: gridRefreshID,
-                            filteredAssetContext: $filteredAssetContext
+                            filteredAssetContext: $filteredAssetContext,
+                            pendingFilter: $pendingAssetFilter,
+                            pendingSort: $pendingAssetSort,
+                            pendingSortAscending: $pendingAssetSortAscending
                         )
                     }
                 }
@@ -117,7 +138,10 @@ struct ContentView: View {
                         ActorGridView(
                             assets: assets,
                             sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL
+                            libraryURL: selectedLibraryURL,
+                            pendingFilter: $pendingActorFilter,
+                            pendingSort: $pendingActorSort,
+                            pendingSortAscending: $pendingActorSortAscending
                         )
                     } else if sidebarSelection.contains(.tagGallery) {
                         TagGalleryView(
@@ -134,7 +158,10 @@ struct ContentView: View {
                             missingAssetIDs: missingAssetIDs,
                             libraryURL: selectedLibraryURL,
                             refreshID: gridRefreshID,
-                            filteredAssetContext: $filteredAssetContext
+                            filteredAssetContext: $filteredAssetContext,
+                            pendingFilter: $pendingAssetFilter,
+                            pendingSort: $pendingAssetSort,
+                            pendingSortAscending: $pendingAssetSortAscending
                         )
                     }
                 }
@@ -154,13 +181,20 @@ struct ContentView: View {
                         assets: assets,
                         sidebarSelection: $sidebarSelection,
                         selectedAssetIDs: $selectedAssetIDs,
-                        libraryURL: selectedLibraryURL
+                        libraryURL: selectedLibraryURL,
+                        pendingAssetFilter: $pendingAssetFilter,
+                        pendingAssetSort: $pendingAssetSort,
+                        pendingAssetSortAscending: $pendingAssetSortAscending,
+                        pendingActorFilter: $pendingActorFilter
                     )
                 } else if sidebarSelection.contains(.actorGallery) {
                     ActorGridView(
                         assets: assets,
                         sidebarSelection: $sidebarSelection,
-                        libraryURL: selectedLibraryURL
+                        libraryURL: selectedLibraryURL,
+                        pendingFilter: $pendingActorFilter,
+                        pendingSort: $pendingActorSort,
+                        pendingSortAscending: $pendingActorSortAscending
                     )
                 } else if sidebarSelection.contains(.tagGallery) {
                     TagGalleryView(
@@ -177,7 +211,10 @@ struct ContentView: View {
                         missingAssetIDs: missingAssetIDs,
                         libraryURL: selectedLibraryURL,
                         refreshID: gridRefreshID,
-                        filteredAssetContext: $filteredAssetContext
+                        filteredAssetContext: $filteredAssetContext,
+                        pendingFilter: $pendingAssetFilter,
+                        pendingSort: $pendingAssetSort,
+                        pendingSortAscending: $pendingAssetSortAscending
                     )
                 }
             }
@@ -285,6 +322,27 @@ struct ContentView: View {
                         }
                     }
                 )
+            }
+        }
+        .onAppear {
+            if let url = selectedLibraryURL {
+                loadSmartCollections(from: url)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadSmartCollections"))) { _ in
+            if let url = selectedLibraryURL {
+                loadSmartCollections(from: url)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DeleteSmartCollection"))) { notification in
+            if let id = notification.object as? String, let url = selectedLibraryURL {
+                do {
+                    let store = try LibraryStore(at: url)
+                    try store.deleteSmartCollection(id: id)
+                    loadSmartCollections(from: url)
+                } catch {
+                    print("Failed to delete smart collection: \(error)")
+                }
             }
         }
         .sheet(isPresented: $isShowingTagCleanup) {
@@ -605,6 +663,15 @@ struct ContentView: View {
             print("Init failed: \(error)")
         }
     }
+    
+    private func loadSmartCollections(from url: URL) {
+        do {
+            let store = try LibraryStore(at: url)
+            self.smartCollections = try store.fetchAllSmartCollections()
+        } catch {
+            print("Failed to load smart collections: \(error)")
+        }
+    }
 }
 
 #if os(iOS)
@@ -677,7 +744,10 @@ struct EntityProfileRouteView: View {
             missingAssetIDs: missingAssetIDs,
             libraryURL: libraryURL,
             refreshID: gridRefreshID,
-            filteredAssetContext: $filteredAssetContext
+            filteredAssetContext: $filteredAssetContext,
+            pendingFilter: .constant(nil),
+            pendingSort: .constant(nil),
+            pendingSortAscending: .constant(nil)
         )
     }
 }
