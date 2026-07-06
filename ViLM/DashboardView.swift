@@ -5,10 +5,24 @@ import Charts
 #if os(iOS)
 import UIKit
 typealias PlatformImage = UIImage
+let PlatformSystemBackground = UIColor.systemBackground
+let PlatformSystemGroupedBackground = UIColor.systemGroupedBackground
 #else
 import AppKit
 typealias PlatformImage = NSImage
+let PlatformSystemBackground = NSColor.windowBackgroundColor
+let PlatformSystemGroupedBackground = NSColor.windowBackgroundColor
 #endif
+
+extension Image {
+    init(platformImage: PlatformImage) {
+        #if os(iOS)
+        self.init(uiImage: platformImage)
+        #else
+        self.init(nsImage: platformImage)
+        #endif
+    }
+}
 
 struct DashboardView: View {
     let assets: [Asset]
@@ -169,7 +183,7 @@ struct DashboardView: View {
                     }
                 }
                 .padding()
-                .background(Color(UIColor.systemBackground))
+                .background(Color(PlatformSystemBackground))
                 .cornerRadius(18)
                 .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
                 .padding(.horizontal)
@@ -239,7 +253,7 @@ struct DashboardView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 26)
-                        .background(Color(UIColor.systemBackground))
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(18)
                         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
                         .padding(.horizontal)
@@ -322,7 +336,7 @@ struct DashboardView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 26)
-                        .background(Color(UIColor.systemBackground))
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(18)
                         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
                         .padding(.horizontal)
@@ -343,7 +357,7 @@ struct DashboardView: View {
                                 }
                             }
                         }
-                        .background(Color(UIColor.systemBackground))
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(18)
                         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
                         .padding(.horizontal)
@@ -353,7 +367,7 @@ struct DashboardView: View {
                 Spacer().frame(height: 40)
             }
         }
-        .background(Color(UIColor.systemGroupedBackground))
+        .background(Color(PlatformSystemGroupedBackground))
         // MODIFICATION: [2026-07-05 22:52:00 UTC] Removed .navigationBarHidden(true) to restore back button and added navigationTitle
         .navigationTitle("Dashboard")
         .onAppear {
@@ -418,7 +432,7 @@ struct StatCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color(UIColor.systemBackground))
+        .background(Color(PlatformSystemBackground))
         .cornerRadius(18)
         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
     }
@@ -493,7 +507,7 @@ struct ActorCircleCard: View {
         VStack(spacing: 6) {
             Group {
                 if let image = getProfileImage() {
-                    Image(uiImage: image)
+                    Image(platformImage: image)
                         .resizable()
                         .scaledToFill()
                 } else {
@@ -561,7 +575,7 @@ struct ActorAttentionRow: View {
         HStack(spacing: 12) {
             Group {
                 if let image = getProfileImage() {
-                    Image(uiImage: image)
+                    Image(platformImage: image)
                         .resizable()
                         .scaledToFill()
                 } else {
@@ -596,7 +610,7 @@ struct ActorAttentionRow: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
-        .background(Color(UIColor.systemBackground))
+        .background(Color(PlatformSystemBackground))
     }
     
     private var hasPhoto: Bool {

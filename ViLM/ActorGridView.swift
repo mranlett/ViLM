@@ -11,6 +11,7 @@ struct ActorGridView: View {
     @Binding var pendingSortAscending: Bool?
     
     @State private var actorProfiles: [String: EntityProfile] = [:]
+    @State private var akaMap: [String: String] = [:]
     @State private var profileImageFileNames: Set<String> = []
     @State private var alphaFilter: Character? = nil
     @State private var hasLoadedDefaults = false
@@ -64,12 +65,25 @@ struct ActorGridView: View {
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actorTags = allTags.filter { $0.hasPrefix("actor:") }.map { String($0.dropFirst(6)) }
-        var unique = Set(actorTags)
+        var unique = Set<String>()
+        
+        for rawName in actorTags {
+            if let mainName = akaMap[rawName] {
+                unique.insert(mainName)
+            } else {
+                unique.insert(rawName)
+            }
+        }
         
         // Include any actors that have saved profiles, even if they have 0 matched videos
         for key in actorProfiles.keys {
             if key.hasPrefix("actor:") {
-                unique.insert(String(key.dropFirst(6)))
+                let name = String(key.dropFirst(6))
+                if let mainName = akaMap[name] {
+                    unique.insert(mainName)
+                } else {
+                    unique.insert(name)
+                }
             }
         }
         
@@ -163,10 +177,10 @@ struct ActorGridView: View {
         }
         
         if let minVid = filterCriteria.minVideos {
-            result = result.filter { actor in assets.filter { $0.actors.contains(actor) }.count >= minVid }
+            result = result.filter { actor in assetsCount(for: actor) >= minVid }
         }
         if let maxVid = filterCriteria.maxVideos {
-            result = result.filter { actor in assets.filter { $0.actors.contains(actor) }.count <= maxVid }
+            result = result.filter { actor in assetsCount(for: actor) <= maxVid }
         }
         if let minAge = filterCriteria.minAge {
             result = result.filter { actor in
@@ -193,8 +207,8 @@ struct ActorGridView: View {
                 if ageA != ageB { return factor == 1 ? ageA < ageB : ageA > ageB }
                 return factor == 1 ? a < b : a > b
             case .videoCount:
-                let countA = assets.filter { $0.actors.contains(a) }.count
-                let countB = assets.filter { $0.actors.contains(b) }.count
+                let countA = assetsCount(for: a)
+                let countB = assetsCount(for: b)
                 if countA != countB { return factor == 1 ? countA < countB : countA > countB }
                 return factor == 1 ? a < b : a > b
             case .dateAdded:
@@ -226,7 +240,7 @@ struct ActorGridView: View {
                                 ActorGridItemView(
                                     actor: actor,
                                     profile: actorProfiles["actor:\(actor)"],
-                                    assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                    assetsCount: assetsCount(for: actor),
                                     isSelected: isSelected,
                                     libraryURL: libraryURL
                                 )
@@ -237,7 +251,7 @@ struct ActorGridView: View {
                                 ActorGridItemView(
                                     actor: actor,
                                     profile: actorProfiles["actor:\(actor)"],
-                                    assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                    assetsCount: assetsCount(for: actor),
                                     isSelected: isSelected,
                                     libraryURL: libraryURL
                                 )
@@ -256,7 +270,7 @@ struct ActorGridView: View {
                             ActorGridItemView(
                                 actor: actor,
                                 profile: actorProfiles["actor:\(actor)"],
-                                assetsCount: assets.filter { $0.actors.contains(actor) }.count,
+                                assetsCount: assetsCount(for: actor),
                                 isSelected: isSelected,
                                 libraryURL: libraryURL
                             )
@@ -435,6 +449,15 @@ struct ActorGridView: View {
         }
     }
     
+    private func assetsCount(for actor: String) -> Int {
+        let profile = actorProfiles["actor:\(actor)"]
+        let akas = Set(profile?.akas ?? [])
+        return assets.filter { asset in
+            if asset.actors.contains(actor) { return true }
+            return !Set(asset.actors).isDisjoint(with: akas)
+        }.count
+    }
+    
     private func fetchProfiles() {
         guard let url = libraryURL else { return }
         do {
@@ -447,6 +470,15 @@ struct ActorGridView: View {
                 }
             }
             actorProfiles = newActorProfiles
+            
+            var newAkaMap: [String: String] = [:]
+            for profile in newActorProfiles.values {
+                let mainName = String(profile.id.dropFirst(6))
+                for aka in profile.akas {
+                    newAkaMap[aka] = mainName
+                }
+            }
+            akaMap = newAkaMap
             
             let profilesDir = url.appendingPathComponent(".catalog/profiles")
             if let files = try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path) {

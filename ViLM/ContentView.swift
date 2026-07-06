@@ -345,6 +345,22 @@ struct ContentView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
+            if let url = selectedLibraryURL {
+                Task {
+                    do {
+                        let store = try LibraryStore(at: url)
+                        let updatedAssets = try store.fetchAllAssets()
+                        await MainActor.run {
+                            self.assets = updatedAssets
+                            self.gridRefreshID = UUID()
+                        }
+                    } catch {
+                        print("Failed to reload assets: \(error)")
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $isShowingTagCleanup) {
             if let url = selectedLibraryURL {
                 TagCleanupView(

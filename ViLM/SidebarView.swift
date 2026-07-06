@@ -9,6 +9,7 @@ struct SidebarView: View {
     let onApplyFilters: () -> Void
     
     @State private var profiles: [EntityProfile] = []
+    @State private var akaMap: [String: String] = [:]
     
     @State private var isSmartCollectionsExpanded = true
     @State private var isActorsExpanded = true
@@ -24,7 +25,7 @@ struct SidebarView: View {
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actorTags = allTags.filter { $0.hasPrefix("actor:") }.map { String($0.dropFirst(6)) }
-        var unique = Set(actorTags)
+        var unique = Set(actorTags.map { akaMap[$0] ?? $0 })
         
         for profile in profiles where profile.id.hasPrefix("actor:") {
             unique.insert(String(profile.id.dropFirst(6)))
@@ -57,8 +58,14 @@ struct SidebarView: View {
     var actorCounts: [String: Int] {
         var counts = [String: Int]()
         for asset in assets {
+            var countedForAsset = Set<String>()
             for tag in asset.tags where tag.hasPrefix("actor:") {
-                counts[String(tag.dropFirst(6)), default: 0] += 1
+                let name = String(tag.dropFirst(6))
+                let mapped = akaMap[name] ?? name
+                countedForAsset.insert(mapped)
+            }
+            for mapped in countedForAsset {
+                counts[mapped, default: 0] += 1
             }
         }
         return counts
@@ -182,12 +189,43 @@ struct SidebarView: View {
             .background(.ultraThinMaterial)
         }
         .navigationTitle("ViLM")
+        .onAppear {
+            fetchProfiles()
+        }
+        .onChange(of: libraryURL) { _, _ in
+            fetchProfiles()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
+            fetchProfiles()
+        }
     }
     
     // MARK: - Helpers
     
-
-    
+    private func fetchProfiles() {
+        guard let url = libraryURL else { return }
+        Task {
+            do {
+                let store = try LibraryStore(at: url)
+                let allProfiles = try store.fetchAllEntityProfiles()
+                var newAkaMap: [String: String] = [:]
+                for profile in allProfiles {
+                    if profile.id.hasPrefix("actor:") {
+                        let mainName = String(profile.id.dropFirst(6))
+                        for aka in profile.akas {
+                            newAkaMap[aka] = mainName
+                        }
+                    }
+                }
+                await MainActor.run {
+                    self.profiles = allProfiles
+                    self.akaMap = newAkaMap
+                }
+            } catch {
+                print("Failed to fetch profiles in sidebar: \(error)")
+            }
+        }
+    }    
     private func filteredItems(_ items: [String], by letter: Character?) -> [String] {
         guard let letter = letter else { return items }
         return items.filter { $0.uppercased().hasPrefix(String(letter)) }

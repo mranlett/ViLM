@@ -2,6 +2,17 @@ import SwiftUI
 import LibraryCore
 import CryptoKit
 
+extension View {
+    @ViewBuilder
+    func popoverFrame() -> some View {
+        #if os(macOS)
+        self.frame(width: 250, height: 120, alignment: .top)
+        #else
+        self.frame(minWidth: 200, maxWidth: 300)
+        #endif
+    }
+}
+
 struct EntityProfileEditorView: View {
     let libraryURL: URL?
     let entityId: String
@@ -18,6 +29,7 @@ struct EntityProfileEditorView: View {
     @State private var countryOfOrigin: String = ""
     
     @State private var tags: [String] = []
+    @State private var akas: [String] = []
     @State private var galleryUrls: [String] = []
     @State private var newGalleryUrl: String = ""
     
@@ -28,6 +40,11 @@ struct EntityProfileEditorView: View {
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
     @State private var editingTagValue: String? = nil
+    
+    // AKA Entry State
+    @State private var isShowingAkaEntry = false
+    @State private var newAkaValue = ""
+    @State private var editingAkaValue: String? = nil
     
     // Gender Entry State
     @State private var isShowingGenderSuggestions = false
@@ -67,6 +84,7 @@ struct EntityProfileEditorView: View {
         }
         _countryOfOrigin = State(initialValue: initialCountry)
         _tags = State(initialValue: profile?.tags ?? [])
+        _akas = State(initialValue: profile?.akas ?? [])
         
         var initialGallery = profile?.galleryUrls ?? []
         if let photo = profile?.photoUrl, !photo.isEmpty, !initialGallery.contains(photo) {
@@ -248,6 +266,48 @@ struct EntityProfileEditorView: View {
                         .focused($focusedField, equals: .bio)
                 }
                 
+                Section(header: Text("Also Known As (AKAs)").font(.headline)) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                newAkaValue = ""
+                                editingAkaValue = nil
+                                isShowingAkaEntry = true
+                            } label: {
+                                Image(systemName: "plus.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.accentColor)
+                        }
+                        
+                        if akas.isEmpty {
+                            Text("No AKAs").font(.caption).foregroundColor(.secondary)
+                        } else {
+                            FlowLayout(spacing: 8) {
+                                ForEach(akas, id: \.self) { aka in
+                                    TagBubble(
+                                        label: aka,
+                                        color: .green,
+                                        onPivot: nil,
+                                        onEdit: {
+                                            newAkaValue = aka
+                                            editingAkaValue = aka
+                                            isShowingAkaEntry = true
+                                        },
+                                        onDelete: {
+                                            if let idx = akas.firstIndex(of: aka) {
+                                                akas.remove(at: idx)
+                                            }
+                                        },
+                                        navRoute: nil
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 Section(header: Text("Tags").font(.headline)) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -318,7 +378,8 @@ struct EntityProfileEditorView: View {
                             birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
                             countryOfOrigin: finalCountry.isEmpty ? nil : finalCountry,
                             tags: tags,
-                            galleryUrls: galleryUrls
+                            galleryUrls: galleryUrls,
+                            akas: akas
                         )
                         
                         if !finalPhotoUrl.isEmpty {
@@ -340,6 +401,9 @@ struct EntityProfileEditorView: View {
         .frame(minWidth: 400, minHeight: 650)
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
+        }
+        .popover(isPresented: $isShowingAkaEntry) {
+            akaEntryPopover
         }
         .onAppear {
             guard let url = libraryURL else { return }
@@ -389,11 +453,7 @@ struct EntityProfileEditorView: View {
                 .buttonStyle(.borderedProminent)
         }
         .padding()
-        #if os(macOS)
-        .frame(width: 250, height: 120, alignment: .top)
-        #else
-        .frame(minWidth: 200, maxWidth: 300)
-        #endif
+        .popoverFrame()
     }
     
     private func saveTag() {
@@ -415,6 +475,42 @@ struct EntityProfileEditorView: View {
         }
         tags.sort()
         isShowingTagEntry = false
+    }
+    
+    private var akaEntryPopover: some View {
+        VStack(spacing: 12) {
+            Text(editingAkaValue == nil ? "Add AKA" : "Edit AKA")
+                .font(.headline)
+            TextField("AKA Name...", text: $newAkaValue)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { saveAka() }
+                
+            Button("Save") { saveAka() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .popoverFrame()
+    }
+    
+    private func saveAka() {
+        let val = newAkaValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !val.isEmpty else {
+            isShowingAkaEntry = false
+            return
+        }
+        let normalized = TagNormalizer.normalize(tagValue: val)
+        
+        if let editing = editingAkaValue {
+            if let idx = akas.firstIndex(of: editing) {
+                akas[idx] = normalized
+            }
+        } else {
+            if !akas.contains(normalized) {
+                akas.append(normalized)
+            }
+        }
+        akas.sort()
+        isShowingAkaEntry = false
     }
     
     private func downloadProfileImage(urlString: String, isGallery: Bool) {

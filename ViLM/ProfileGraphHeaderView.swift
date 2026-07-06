@@ -64,32 +64,52 @@ struct ProfileGraphHeaderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(titleText)
-                    .font(.title2)
-                    .fontWeight(.bold)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(titleText)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    if let profile = entityProfile, !profile.akas.isEmpty {
+                        Text("AKA: \(profile.akas.joined(separator: ", "))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
                 Spacer()
                 
-                if let name = currentName {
-                    Button("Rename Globally") {
-                        newGlobalName = name
-                        isShowingRenameDialog = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-                
-                if isEditableEntity {
-                    Button("Edit Bio") {
-                        isShowingEditor = true
-                    }
-                    .buttonStyle(.bordered)
-                    if filteredAssets.count == 0 && entityProfile != nil {
-                        Button("Delete Profile", role: .destructive) {
-                            deleteProfile()
+                Menu {
+                    if let name = currentName {
+                        Button {
+                            newGlobalName = name
+                            isShowingRenameDialog = true
+                        } label: {
+                            Label("Rename Globally", systemImage: "pencil")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
                     }
+                    
+                    if isEditableEntity {
+                        Button {
+                            isShowingEditor = true
+                        } label: {
+                            Label("Edit Bio", systemImage: "person.text.rectangle")
+                        }
+                        
+                        if filteredAssets.count == 0 && entityProfile != nil {
+                            Divider()
+                            Button(role: .destructive) {
+                                deleteProfile()
+                            } label: {
+                                Label("Delete Profile", systemImage: "trash")
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title2)
+                        .foregroundColor(.accentColor)
                 }
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
             }
             
             if let profile = entityProfile {
@@ -352,6 +372,7 @@ struct ProfileGraphHeaderView: View {
         guard parts.count == 2 else { return }
         let category = String(parts[0])
         let newTag = "\(category):\(newGlobalName)"
+        let normalizedNewName = TagNormalizer.normalize(tagValue: newGlobalName)
         
         do {
             let store = try LibraryStore(at: url)
@@ -359,13 +380,14 @@ struct ProfileGraphHeaderView: View {
             
             var pivotItem: SidebarItem
             switch category {
-            case "actor": pivotItem = .actor(newGlobalName)
-            case "studio": pivotItem = .studio(newGlobalName)
-            default: pivotItem = .tag(newGlobalName)
+            case "actor": pivotItem = .actor(normalizedNewName)
+            case "studio": pivotItem = .studio(normalizedNewName)
+            default: pivotItem = .tag(normalizedNewName)
             }
             sidebarSelection = [pivotItem]
             
             fetchProfile()
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch {
             print("Failed to rename globally: \(error)")
         }

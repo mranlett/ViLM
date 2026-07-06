@@ -58,6 +58,7 @@ struct AssetsGridView: View {
     @State private var isShowingSaveCollection = false
     @State private var newCollectionName = ""
     @State private var actorProfiles: [String: EntityProfile] = [:]
+    @State private var akaMap: [String: String] = [:]
     
     enum SortOption: String, CaseIterable {
         case name = "Name"
@@ -94,7 +95,7 @@ struct AssetsGridView: View {
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
                 case .dashboard, .allAssets, .actorGallery, .tagGallery, .smartCollection: return true
-                case .actor(let name): return asset.tags.contains("actor:\(name)")
+                case .actor(let name): return mappedActors(for: asset).contains(name)
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
                 case .series(let name): return asset.videoName == name
@@ -119,7 +120,7 @@ struct AssetsGridView: View {
             
             // Actors Filter
             if !filterCriteria.selectedActors.isEmpty {
-                let assetActors = Set(asset.actors)
+                let assetActors = mappedActors(for: asset)
                 if filterCriteria.actorsLogic == .and {
                     if !filterCriteria.selectedActors.isSubset(of: assetActors) { return false }
                 } else {
@@ -148,7 +149,7 @@ struct AssetsGridView: View {
             }
             
             // Actor Metadata Filters (must pass all specified)
-            let assetActorProfiles = asset.actors.compactMap { actorProfiles["actor:\($0)"] }
+            let assetActorProfiles = mappedActors(for: asset).compactMap { actorProfiles["actor:\($0)"] }
             
             // Actor Tags
             if !filterCriteria.selectedActorTags.isEmpty {
@@ -324,6 +325,12 @@ struct AssetsGridView: View {
         .onChange(of: sidebarSelection) { _, newSelection in
             if let first = newSelection.first {
                 switch first {
+                case .actor(let name):
+                    if let resolved = akaMap[name], resolved != name {
+                        DispatchQueue.main.async {
+                            sidebarSelection = [.actor(resolved)]
+                        }
+                    }
                 case .smartCollection(let id, _):
                     loadSmartCollection(id: id)
                 case .allAssets:
@@ -480,6 +487,10 @@ struct AssetsGridView: View {
             }
         }
     }
+    
+    private func mappedActors(for asset: Asset) -> Set<String> {
+        return Set(asset.actors.map { akaMap[$0] ?? $0 })
+    }
 
     
     private func sidebarSelectionTitle(for item: SidebarItem) -> String {
@@ -567,8 +578,24 @@ struct AssetsGridView: View {
                 let store = try LibraryStore(at: url)
                 let profiles = try store.fetchAllEntityProfiles()
                 let profilesDict = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+                var newAkaMap: [String: String] = [:]
+                for profile in profiles {
+                    if profile.id.hasPrefix("actor:") {
+                        let mainName = String(profile.id.dropFirst(6))
+                        for aka in profile.akas {
+                            newAkaMap[aka] = mainName
+                        }
+                    }
+                }
                 await MainActor.run {
                     self.actorProfiles = profilesDict
+                    self.akaMap = newAkaMap
+                    
+                    if let first = sidebarSelection.first, case .actor(let name) = first {
+                        if let resolved = newAkaMap[name], resolved != name {
+                            sidebarSelection = [.actor(resolved)]
+                        }
+                    }
                 }
             } catch {
                 print("Failed to fetch actor profiles: \(error)")

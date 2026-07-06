@@ -3,8 +3,10 @@ import GRDB
 
 public class LibraryStore {
     private let dbQueue: DatabaseQueue
+    public let libraryURL: URL
 
     public init(at url: URL) throws {
+        self.libraryURL = url
         let catalogURL = url.appendingPathComponent(".catalog")
         try FileManager.default.createDirectory(at: catalogURL, withIntermediateDirectories: true)
 
@@ -112,6 +114,13 @@ public class LibraryStore {
             }
         }
         
+        // --- NEW: Migration v11 adds akas to entity profiles ---
+        migrator.registerMigration("v11") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "akas", .text).notNull().defaults(to: "[]")
+            }
+        }
+        
         try migrator.migrate(dbQueue)
     }
     
@@ -159,6 +168,17 @@ public class LibraryStore {
             try EntityProfile.fetchAll(db)
         }
     }
+    
+    public func resolveActorAKA(for normalizedName: String) throws -> String {
+        let profiles = try fetchAllEntityProfiles()
+        for profile in profiles where profile.id.hasPrefix("actor:") {
+            let mainName = String(profile.id.dropFirst(6))
+            if profile.akas.contains(normalizedName) {
+                return mainName
+            }
+        }
+        return normalizedName
+    }
 
     public func deleteEntityProfile(for id: String) throws {
         try dbQueue.write { db in
@@ -180,9 +200,15 @@ public class LibraryStore {
         try dbQueue.write { db in
             let assets = try Asset.fetchAll(db)
             for var asset in assets {
-                if let index = asset.tags.firstIndex(of: normalizedOld) {
-                    asset.tags[index] = normalizedNew
-                    
+                var modified = false
+                for i in 0..<asset.tags.count {
+                    if asset.tags[i] == normalizedOld {
+                        asset.tags[i] = normalizedNew
+                        modified = true
+                    }
+                }
+                
+                if modified {
                     // Deduplicate tags while preserving order
                     var uniqueTags = [String]()
                     for t in asset.tags {
@@ -218,6 +244,31 @@ public class LibraryStore {
                 
                 // Old profile must be deleted since the tag is gone
                 _ = try oldProfile.delete(db)
+            }
+        }
+        
+        // Handle renaming image files on disk
+        let oldSafeId = normalizedOld.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let newSafeId = normalizedNew.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        
+        if FileManager.default.fileExists(atPath: profilesDir.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: profilesDir, includingPropertiesForKeys: nil)
+                for file in files {
+                    let fileName = file.lastPathComponent
+                    if fileName == "\(oldSafeId).jpg" {
+                        let newFile = profilesDir.appendingPathComponent("\(newSafeId).jpg")
+                        try? FileManager.default.moveItem(at: file, to: newFile)
+                    } else if fileName.hasPrefix("\(oldSafeId)_") && fileName.hasSuffix(".jpg") {
+                        let suffix = String(fileName.dropFirst(oldSafeId.count))
+                        let newFileName = newSafeId + suffix
+                        let newFile = profilesDir.appendingPathComponent(newFileName)
+                        try? FileManager.default.moveItem(at: file, to: newFile)
+                    }
+                }
+            } catch {
+                print("Failed to rename profile images: \(error)")
             }
         }
     }

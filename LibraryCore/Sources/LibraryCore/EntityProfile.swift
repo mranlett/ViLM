@@ -22,10 +22,11 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
     
     public var tags: [String]
     public var galleryUrls: [String]
+    public var akas: [String]
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, tags: [String] = [], galleryUrls: [String] = [], createdAt: Date? = Date()) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date()) {
         self.id = id
         self.bio = bio
         self.photoUrl = photoUrl
@@ -36,6 +37,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
         self.countryOfOrigin = countryOfOrigin
         self.tags = tags
         self.galleryUrls = galleryUrls
+        self.akas = akas
         self.createdAt = createdAt
     }
     
@@ -50,6 +52,7 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
         case countryOfOrigin = "country_of_origin"
         case tags
         case galleryUrls = "gallery_urls"
+        case akas
         case createdAt = "created_at"
     }
     
@@ -82,6 +85,15 @@ public struct EntityProfile: Identifiable, Codable, FetchableRecord, Persistable
             decodedGallery = (try? JSONDecoder().decode([String].self, from: data)) ?? []
         }
         self.galleryUrls = decodedGallery
+        
+        var decodedAkas: [String] = []
+        if let akasArray = try? container.decode([String].self, forKey: .akas) {
+            decodedAkas = akasArray
+        } else if let akasString = try? container.decode(String.self, forKey: .akas),
+                  let data = akasString.data(using: .utf8) {
+            decodedAkas = (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        }
+        self.akas = decodedAkas
     }
 }
 
@@ -110,6 +122,13 @@ extension EntityProfile {
             container["gallery_urls"] = string
         } else {
             container["gallery_urls"] = "[]"
+        }
+        
+        if let data = try? JSONEncoder().encode(akas),
+           let string = String(data: data, encoding: .utf8) {
+            container["akas"] = string
+        } else {
+            container["akas"] = "[]"
         }
     }
 }
