@@ -252,39 +252,15 @@ struct ProfileGraphHeaderView: View {
                     }
                     return list
                 }()
-                
-                NavigationStack {
-                    TabView(selection: $selectedFullImageIdentifier) {
-                        ForEach(allImageIdentifiers, id: \.self) { item in
-                            let isGallery = item != "primary" && item != profile.photoUrl
-                            let photoUrl = item == "primary" ? profile.photoUrl : item
-                            
-                            ProfileImageView(libraryURL: libraryURL, entityId: currentEntityId ?? "unknown", photoUrl: photoUrl, isGallery: isGallery) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                            } placeholder: {
-                                ProgressView()
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .tag(item as String?)
-                        }
-                    }
-                    #if os(iOS)
-                    .tabViewStyle(.page(indexDisplayMode: .always))
-                    #endif
-                    .background(Color.black)
-                    #if os(iOS)
-                    .navigationBarTitleDisplayMode(.inline)
-                    #endif
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") {
-                                selectedFullImageIdentifier = nil
-                            }
-                        }
-                    }
-                }
+
+                FullScreenPhotoBrowser(
+                    libraryURL: libraryURL,
+                    entityId: currentEntityId ?? "unknown",
+                    primaryPhotoUrl: profile.photoUrl,
+                    identifiers: allImageIdentifiers,
+                    initialIdentifier: selectedFullImageIdentifier ?? "primary",
+                    onClose: { selectedFullImageIdentifier = nil }
+                )
                 .presentationDetents([.large])
             }
         }
@@ -292,6 +268,102 @@ struct ProfileGraphHeaderView: View {
     
     struct IdentifiableString: Identifiable {
         let id: String
+    }
+
+    // MARK: - Full Screen Photo Browser
+
+    /// Paged full-screen photo viewer that wraps around endlessly.
+    ///
+    /// SwiftUI's paged TabView cannot wrap natively, so sentinel copies of the
+    /// last and first photos are placed before/after the real pages. When a
+    /// swipe settles on a sentinel, the selection is repositioned to the
+    /// matching real page with animations disabled — invisible to the user
+    /// because the two pages show the same photo.
+    private struct FullScreenPhotoBrowser: View {
+        let libraryURL: URL?
+        let entityId: String
+        let primaryPhotoUrl: String?
+        let identifiers: [String]      // "primary" + gallery URLs
+        let initialIdentifier: String
+        let onClose: () -> Void
+
+        @State private var pageIndex: Int = 0
+
+        // Wrapping only makes sense with more than one photo, and the
+        // sentinel trick relies on the iOS paged style.
+        private var wraps: Bool {
+#if os(iOS)
+            identifiers.count > 1
+#else
+            false
+#endif
+        }
+
+        // Real pages are tagged 1...count when wrapping (0 and count+1 are
+        // the sentinels), 0-based otherwise.
+        private var currentPhotoNumber: Int {
+            let index = wraps ? pageIndex - 1 : pageIndex
+            return min(max(index, 0), identifiers.count - 1) + 1
+        }
+
+        var body: some View {
+            NavigationStack {
+                TabView(selection: $pageIndex) {
+                    if wraps, let last = identifiers.last {
+                        photoPage(for: last).tag(0)
+                    }
+                    ForEach(Array(identifiers.enumerated()), id: \.offset) { index, identifier in
+                        photoPage(for: identifier).tag(wraps ? index + 1 : index)
+                    }
+                    if wraps, let first = identifiers.first {
+                        photoPage(for: first).tag(identifiers.count + 1)
+                    }
+                }
+#if os(iOS)
+                // Dots would count the sentinel pages; the title shows the
+                // position instead.
+                .tabViewStyle(.page(indexDisplayMode: .never))
+#endif
+                .background(Color.black)
+                .navigationTitle(identifiers.count > 1 ? "\(currentPhotoNumber) of \(identifiers.count)" : "")
+#if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+#endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { onClose() }
+                    }
+                }
+                .onChange(of: pageIndex) { _, newValue in
+                    guard wraps else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    if newValue == 0 {
+                        withTransaction(transaction) { pageIndex = identifiers.count }
+                    } else if newValue == identifiers.count + 1 {
+                        withTransaction(transaction) { pageIndex = 1 }
+                    }
+                }
+                .onAppear {
+                    let realIndex = identifiers.firstIndex(of: initialIdentifier) ?? 0
+                    pageIndex = wraps ? realIndex + 1 : realIndex
+                }
+            }
+        }
+
+        private func photoPage(for identifier: String) -> some View {
+            let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+            let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
+
+            return ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+                image
+                    .resizable()
+                    .scaledToFit()
+            } placeholder: {
+                ProgressView()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
     
     private var titleText: String {

@@ -438,8 +438,10 @@ struct DashboardView: View {
         if let url = libraryURL {
             do {
                 let store = try LibraryStore(at: url)
-                try store.saveAsset(updated)
-                NotificationCenter.default.post(name: NSNotification.Name("RefreshLibraryNotification"), object: nil)
+                // saveAsset is insert-only (INSERT OR IGNORE); updating an
+                // existing row requires updateAsset.
+                try store.updateAsset(updated)
+                NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
             } catch {
                 print("Failed to save asset: \(error)")
             }

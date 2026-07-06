@@ -19,6 +19,18 @@ struct SidebarView: View {
     @State private var actorAlphaFilter: Character? = nil
     @State private var tagAlphaFilter: Character? = nil
     @State private var studioAlphaFilter: Character? = nil
+
+    @Environment(\.usesStackNavigation) private var usesStackNavigation
+
+    // True when at least one actor/tag/studio/series filter is toggled.
+    private var hasActiveEntityFilters: Bool {
+        selection.contains { item in
+            switch item {
+            case .actor, .tag, .studio, .series: return true
+            default: return false
+            }
+        }
+    }
     
     // MARK: - Computed Properties
     
@@ -276,20 +288,28 @@ struct SidebarView: View {
     // MARK: - Progress Footer
     private var progressFooter: some View {
         VStack(spacing: 8) {
-#if os(iOS)
-            Button(action: onApplyFilters) {
-                Text("Apply Filters & View Assets")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.accentColor)
-                    .cornerRadius(10)
+            // Only needed in the compact stack layout, and only once filters
+            // are toggled: in the split layout the content pane updates live,
+            // and top-level sections already navigate on tap.
+            if usesStackNavigation && hasActiveEntityFilters {
+                Button(action: {
+                    // Filters apply on the assets grid; drop any section
+                    // selection so this always lands on the filtered grid.
+                    selection.subtract([.dashboard, .actorGallery, .tagGallery])
+                    onApplyFilters()
+                }) {
+                    Text("Apply Filters & View Assets")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.accentColor)
+                        .cornerRadius(10)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-#endif
-            
+
             Divider()
             HStack {
                 Text("Review Progress")
