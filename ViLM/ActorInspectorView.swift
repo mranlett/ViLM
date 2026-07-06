@@ -19,6 +19,7 @@ struct ActorInspectorView: View {
                         libraryURL: libraryURL,
                         entityId: "actor:\(selectedActors[0])",
                         profile: profile,
+                        embedsInNavigationStack: false,
                         onSave: { _ in
                             gridRefreshID = UUID()
                         }
@@ -41,6 +42,20 @@ struct ActorInspectorView: View {
         }
         .onAppear { fetchProfile() }
         .onChange(of: selectedActors) { _, _ in fetchProfile() }
+        .navigationTitle("Actor Profile")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("ToggleFullScreen"), object: nil)
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Toggle Full Screen")
+            }
+        }
     }
     
     private func fetchProfile() {

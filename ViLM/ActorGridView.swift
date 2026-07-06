@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ActorGridView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
+    @Binding var selectedAssetIDs: Set<Asset.ID>
     let libraryURL: URL?
     @Binding var pendingFilter: ActorFilterCriteria?
     @Binding var pendingSort: ActorFilterCriteria.SortOption?
@@ -15,6 +16,7 @@ struct ActorGridView: View {
     @State private var profileImageFileNames: Set<String> = []
     @State private var alphaFilter: Character? = nil
     @State private var hasLoadedDefaults = false
+    @Environment(\.usesStackNavigation) private var usesStackNavigation
     
     @AppStorage("defaultActorFiltersStr") private var defaultFilterCriteriaStr: String = ""
     private var defaultFilterCriteria: ActorFilterCriteria {
@@ -232,51 +234,7 @@ struct ActorGridView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
                     ForEach(filteredActors, id: \.self) { actor in
                         let isSelected = sidebarSelection.contains(.actor(actor))
-                        #if os(iOS)
-                        if isSelectionMode {
-                            Button(action: {
-                                toggleSelection(item: .actor(actor))
-                            }) {
-                                ActorGridItemView(
-                                    actor: actor,
-                                    profile: actorProfiles["actor:\(actor)"],
-                                    assetsCount: assetsCount(for: actor),
-                                    isSelected: isSelected,
-                                    libraryURL: libraryURL
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
-                                ActorGridItemView(
-                                    actor: actor,
-                                    profile: actorProfiles["actor:\(actor)"],
-                                    assetsCount: assetsCount(for: actor),
-                                    isSelected: isSelected,
-                                    libraryURL: libraryURL
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        #else
-                        Button(action: {
-                            if isSelectionMode {
-                                toggleSelection(item: .actor(actor))
-                            } else {
-                                // Default macOS behavior if not in selection mode could just be single select or toggle, but to be consistent, if not in selection mode we could clear other selections? No, let's keep toggle.
-                                toggleSelection(item: .actor(actor))
-                            }
-                        }) {
-                            ActorGridItemView(
-                                actor: actor,
-                                profile: actorProfiles["actor:\(actor)"],
-                                assetsCount: assetsCount(for: actor),
-                                isSelected: isSelected,
-                                libraryURL: libraryURL
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        #endif
+                        interactiveGridItem(for: actor, isSelected: isSelected)
                     }
                 }
                 .padding(.horizontal)
@@ -446,7 +404,84 @@ struct ActorGridView: View {
         } else {
             sidebarSelection.remove(.allAssets)
             sidebarSelection.insert(item)
+            // The detail pane shows a selected video with priority over a
+            // selected actor, so clear the video selection when picking an actor.
+            selectedAssetIDs.removeAll()
         }
+    }
+
+    // Plain taps outside batch-selection mode replace the actor selection
+    // instead of accumulating it, so the detail pane follows the tapped actor.
+    private func selectActor(_ actor: String) {
+        var newSelection = sidebarSelection.filter { item in
+            if case .actor = item { return false }
+            return true
+        }
+        newSelection.remove(.allAssets)
+        newSelection.insert(.actor(actor))
+        sidebarSelection = newSelection
+        selectedAssetIDs.removeAll()
+    }
+    
+    @ViewBuilder
+    private func interactiveGridItem(for actor: String, isSelected: Bool) -> some View {
+#if os(iOS)
+        if isSelectionMode {
+            Button(action: {
+                toggleSelection(item: .actor(actor))
+            }) {
+                ActorGridItemView(
+                    actor: actor,
+                    profile: actorProfiles["actor:\(actor)"],
+                    assetsCount: assetsCount(for: actor),
+                    isSelected: isSelected,
+                    libraryURL: libraryURL
+                )
+            }
+            .buttonStyle(.plain)
+        } else if !usesStackNavigation {
+            Button(action: {
+                selectActor(actor)
+            }) {
+                ActorGridItemView(
+                    actor: actor,
+                    profile: actorProfiles["actor:\(actor)"],
+                    assetsCount: assetsCount(for: actor),
+                    isSelected: isSelected,
+                    libraryURL: libraryURL
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
+                ActorGridItemView(
+                    actor: actor,
+                    profile: actorProfiles["actor:\(actor)"],
+                    assetsCount: assetsCount(for: actor),
+                    isSelected: isSelected,
+                    libraryURL: libraryURL
+                )
+            }
+            .buttonStyle(.plain)
+        }
+#else
+        Button(action: {
+            if isSelectionMode {
+                toggleSelection(item: .actor(actor))
+            } else {
+                selectActor(actor)
+            }
+        }) {
+            ActorGridItemView(
+                actor: actor,
+                profile: actorProfiles["actor:\(actor)"],
+                assetsCount: assetsCount(for: actor),
+                isSelected: isSelected,
+                libraryURL: libraryURL
+            )
+        }
+        .buttonStyle(.plain)
+#endif
     }
     
     private func assetsCount(for actor: String) -> Int {

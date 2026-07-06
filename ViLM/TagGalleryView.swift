@@ -39,18 +39,6 @@ struct TagGalleryView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     ForEach(filteredTags, id: \.self) { tag in
                         let isSelected = sidebarSelection.contains(.tag(tag))
-                        #if os(iOS)
-                        Button(action: {
-                            sidebarSelection = [.tag(tag)]
-                        }) {
-                            TagGalleryItemView(
-                                tag: tag,
-                                assetsCount: assets.filter { $0.tags.contains("tag:\(tag)") }.count,
-                                isSelected: isSelected
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        #else
                         Button(action: {
                             toggleSelection(item: .tag(tag))
                         }) {
@@ -61,7 +49,6 @@ struct TagGalleryView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        #endif
                     }
                 }
                 .padding(.horizontal)
@@ -71,15 +58,16 @@ struct TagGalleryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Tags Gallery")
         .toolbar {
-#if !os(iOS)
             let selectedTagsCount = sidebarSelection.filter { item in
                 if case .tag = item { return true }
                 return false
             }.count
-            
+
             if selectedTagsCount > 0 {
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: {
+                        // Leaving the gallery switches the content view to the
+                        // asset grid filtered by the selected tags.
                         sidebarSelection.remove(.tagGallery)
                     }) {
                         Text("View Matches")
@@ -88,7 +76,6 @@ struct TagGalleryView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
-#endif
         }
         .onAppear {
             fetchProfiles()

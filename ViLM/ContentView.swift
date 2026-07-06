@@ -29,201 +29,334 @@ struct ContentView: View {
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
     @State private var smartCollections: [SmartCollection] = []
-    
+
     @State private var pendingAssetFilter: AssetFilterCriteria?
     @State private var pendingAssetSort: AssetsGridView.SortOption?
     @State private var pendingAssetSortAscending: Bool?
-    
+
     @State private var pendingActorFilter: ActorFilterCriteria?
     @State private var pendingActorSort: ActorFilterCriteria.SortOption?
     @State private var pendingActorSortAscending: Bool?
-    
+
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
     @State private var isShowingSettings = false
     @State private var hasInitializedSelection = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
-    
+    @State private var detailPath: [AppRoute] = []
+
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
-    
-    // iOS picker presentation
+
 #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isShowingLibraryPicker = false
-    @State private var showContentOnIOS = false
-    @State private var navigationPath = NavigationPath()
-    @State private var isShowingProgrammaticRoute = false
-    @State private var programmaticRoute: AppRoute?
+    // Single navigation path for compact-width (iPhone) layout
+    @State private var navigationPath: [AppRoute] = []
 #endif
-    
+
     // ✅ Keep security scope open for the active library
     @State private var activeSecurityScopedURL: URL?
     @State private var hasActiveSecurityScope: Bool = false
-    
+
     private let bookmarkKey = "libraryBookmark"
-    
+
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        rootNavigationView
+            .onChange(of: sidebarSelection) { _, _ in
+                detailPath.removeAll()
+            }
+            .onChange(of: selectedAssetIDs) { _, _ in
+                detailPath.removeAll()
+            }
+#if os(iOS)
+            .onChange(of: horizontalSizeClass) { _, newValue in
+                syncNavigation(for: newValue)
+            }
+#endif
+            .onAppear {
+                loadLastLibrary()
+                if !hasInitializedSelection {
+                    switch defaultHomePage {
+                    case "allAssets": sidebarSelection = [.allAssets]
+                    case "actorGallery": sidebarSelection = [.actorGallery]
+                    case "tagGallery": sidebarSelection = [.tagGallery]
+                    default: sidebarSelection = [.dashboard]
+                    }
+                    hasInitializedSelection = true
+                }
+                if let url = selectedLibraryURL {
+                    loadSmartCollections(from: url)
+                }
+            }
+            .onDisappear { endSecurityScope() }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ToggleFullScreen"))) { _ in
+                if columnVisibility == .detailOnly {
+                    columnVisibility = .all
+                } else {
+                    columnVisibility = .detailOnly
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenSettings"))) { _ in
+                isShowingSettings = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadSmartCollections"))) { _ in
+                if let url = selectedLibraryURL {
+                    loadSmartCollections(from: url)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DeleteSmartCollection"))) { notification in
+                if let id = notification.object as? String, let url = selectedLibraryURL {
+                    do {
+                        let store = try LibraryStore(at: url)
+                        try store.deleteSmartCollection(id: id)
+                        loadSmartCollections(from: url)
+                    } catch {
+                        print("Failed to delete smart collection: \(error)")
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
+                if let url = selectedLibraryURL {
+                    Task {
+                        do {
+                            let store = try LibraryStore(at: url)
+                            let updatedAssets = try store.fetchAllAssets()
+                            await MainActor.run {
+                                self.assets = updatedAssets
+                                self.gridRefreshID = UUID()
+                            }
+                        } catch {
+                            print("Failed to reload assets: \(error)")
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingSettings) {
+                SettingsView(
+                    libraryURL: selectedLibraryURL,
+                    onOpenLibrary: openLibrary,
+                    onCheckForChanges: validateLibrary,
+                    onAuditFileName: { isShowingFileNameAudit = true },
+                    onTagCleanup: { isShowingTagCleanup = true },
+                    onSelectAsset: { assetID in
+                        isShowingSettings = false
+#if os(iOS)
+                        if horizontalSizeClass == .compact {
+                            sidebarSelection = [.allAssets]
+                            selectedAssetIDs = [assetID]
+                            navigationPath = [.browse, .asset(assetID, context: filteredAssetContext)]
+                            return
+                        }
+#endif
+                        sidebarSelection = [.allAssets]
+                        selectedAssetIDs = [assetID]
+                        columnVisibility = .all
+                    },
+                    onSelectActor: { actorID in
+                        isShowingSettings = false
+#if os(iOS)
+                        if horizontalSizeClass == .compact {
+                            sidebarSelection = [.actorGallery]
+                            selectedAssetIDs.removeAll()
+                            navigationPath = [.browse, .entityProfile(category: "actor", name: actorID)]
+                            return
+                        }
+#endif
+                        selectedAssetIDs.removeAll()
+                        sidebarSelection = [.actor(actorID)]
+                        columnVisibility = .all
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingFileNameAudit) {
+                if let url = selectedLibraryURL {
+                    FileNameAuditView(
+                        libraryURL: url,
+                        assets: assets,
+                        onRefresh: {
+                            do {
+                                let store = try LibraryStore(at: url)
+                                self.assets = try store.fetchAllAssets()
+                                self.gridRefreshID = UUID()
+                            } catch {
+                                print("Refresh failed: \(error)")
+                            }
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: $isShowingTagCleanup) {
+                if let url = selectedLibraryURL {
+                    TagCleanupView(
+                        libraryURL: url,
+                        assets: assets,
+                        onRefresh: {
+                            do {
+                                let store = try LibraryStore(at: url)
+                                self.assets = try store.fetchAllAssets()
+                                self.gridRefreshID = UUID()
+                            } catch {
+                                print("Refresh failed: \(error)")
+                            }
+                        }
+                    )
+                }
+            }
+#if os(iOS)
+            .sheet(isPresented: $isShowingLibraryPicker) {
+                LibraryFolderPicker { pickedURL in
+                    guard let pickedURL else { return }
+                    processFolder(at: pickedURL)
+                }
+            }
+#endif
+    }
+
+    // MARK: - Navigation Layout
+
+    @ViewBuilder
+    private var rootNavigationView: some View {
+#if os(iOS)
+        // Compact width (iPhone, narrow iPad windows): a single NavigationStack.
+        // Regular width (iPad full screen, landscape big phones): the split view.
+        // Both are driven by the same state, so rotating preserves context.
+        if horizontalSizeClass == .compact {
+            compactNavigationView
+        } else {
+            splitNavigationView
+        }
+#else
+        splitNavigationView
+#endif
+    }
+
+#if os(iOS)
+    private var compactNavigationView: some View {
+        NavigationStack(path: $navigationPath) {
             SidebarView(
                 selection: $sidebarSelection,
                 assets: assets,
                 libraryURL: selectedLibraryURL,
                 smartCollections: smartCollections,
                 onApplyFilters: {
-#if os(iOS)
-                    showContentOnIOS = true
-#endif
+                    if navigationPath.isEmpty {
+                        navigationPath.append(.browse)
+                    }
                 }
             )
-#if os(iOS)
-            .navigationDestination(isPresented: $showContentOnIOS) {
-                Group {
-                    if sidebarSelection.contains(.dashboard) {
-                        DashboardView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            selectedAssetIDs: $selectedAssetIDs,
-                            libraryURL: selectedLibraryURL,
-                            pendingAssetFilter: $pendingAssetFilter,
-                            pendingAssetSort: $pendingAssetSort,
-                            pendingAssetSortAscending: $pendingAssetSortAscending,
-                            pendingActorFilter: $pendingActorFilter
-                        )
-                    } else if sidebarSelection.contains(.actorGallery) {
-                        ActorGridView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL,
-                            pendingFilter: $pendingActorFilter,
-                            pendingSort: $pendingActorSort,
-                            pendingSortAscending: $pendingActorSortAscending
-                        )
-                    } else if sidebarSelection.contains(.tagGallery) {
-                        TagGalleryView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL
-                        )
-                    } else {
-                        AssetsGridView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            searchText: $searchText,
-                            selectedAssetIDs: $selectedAssetIDs,
-                            missingAssetIDs: missingAssetIDs,
-                            libraryURL: selectedLibraryURL,
-                            refreshID: gridRefreshID,
-                            filteredAssetContext: $filteredAssetContext,
-                            pendingFilter: $pendingAssetFilter,
-                            pendingSort: $pendingAssetSort,
-                            pendingSortAscending: $pendingAssetSortAscending
-                        )
-                    }
-                }
-                .navigationDestination(for: AppRoute.self) { route in
-                    destinationView(for: route)
-                }
-                .navigationDestination(isPresented: $isShowingProgrammaticRoute) {
-                    if let route = programmaticRoute {
-                        destinationView(for: route)
-                    }
-                }
+            .navigationDestination(for: AppRoute.self) { route in
+                destinationView(for: route)
             }
+        }
+        .environment(\.usesStackNavigation, true)
+    }
+
+    // Rebuild the compact path (or clear it) when the layout mode flips,
+    // so rotation lands the user on the same content instead of dumping
+    // them back at the sidebar.
+    private func syncNavigation(for sizeClass: UserInterfaceSizeClass?) {
+        if sizeClass == .compact {
+            if selectedAssetIDs.count == 1, let id = selectedAssetIDs.first {
+                navigationPath = [.browse, .asset(id, context: filteredAssetContext)]
+            } else if let actor = selectedSidebarActors.first {
+                navigationPath = [.browse, .entityProfile(category: "actor", name: actor)]
+            } else {
+                navigationPath = [.browse]
+            }
+        } else {
+            navigationPath.removeAll()
+        }
+    }
 #endif
+
+    private var splitNavigationView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            SidebarView(
+                selection: $sidebarSelection,
+                assets: assets,
+                libraryURL: selectedLibraryURL,
+                smartCollections: smartCollections,
+                onApplyFilters: {}
+            )
         } content: {
 #if os(iOS)
-            NavigationStack(path: $navigationPath) {
-                Group {
-                    if sidebarSelection.contains(.actorGallery) {
-                        ActorGridView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL,
-                            pendingFilter: $pendingActorFilter,
-                            pendingSort: $pendingActorSort,
-                            pendingSortAscending: $pendingActorSortAscending
-                        )
-                    } else if sidebarSelection.contains(.tagGallery) {
-                        TagGalleryView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            libraryURL: selectedLibraryURL
-                        )
-                    } else {
-                        AssetsGridView(
-                            assets: assets,
-                            sidebarSelection: $sidebarSelection,
-                            searchText: $searchText,
-                            selectedAssetIDs: $selectedAssetIDs,
-                            missingAssetIDs: missingAssetIDs,
-                            libraryURL: selectedLibraryURL,
-                            refreshID: gridRefreshID,
-                            filteredAssetContext: $filteredAssetContext,
-                            pendingFilter: $pendingAssetFilter,
-                            pendingSort: $pendingAssetSort,
-                            pendingSortAscending: $pendingAssetSortAscending
-                        )
-                    }
-                }
-                .navigationDestination(for: AppRoute.self) { route in
-                    destinationView(for: route)
-                }
-                .navigationDestination(isPresented: $isShowingProgrammaticRoute) {
-                    if let route = programmaticRoute {
+            NavigationStack {
+                browseContentView
+                    .navigationDestination(for: AppRoute.self) { route in
                         destinationView(for: route)
                     }
-                }
             }
 #else
-            Group {
-                if sidebarSelection.contains(.dashboard) {
-                    DashboardView(
-                        assets: assets,
-                        sidebarSelection: $sidebarSelection,
-                        selectedAssetIDs: $selectedAssetIDs,
-                        libraryURL: selectedLibraryURL,
-                        pendingAssetFilter: $pendingAssetFilter,
-                        pendingAssetSort: $pendingAssetSort,
-                        pendingAssetSortAscending: $pendingAssetSortAscending,
-                        pendingActorFilter: $pendingActorFilter
-                    )
-                } else if sidebarSelection.contains(.actorGallery) {
-                    ActorGridView(
-                        assets: assets,
-                        sidebarSelection: $sidebarSelection,
-                        libraryURL: selectedLibraryURL,
-                        pendingFilter: $pendingActorFilter,
-                        pendingSort: $pendingActorSort,
-                        pendingSortAscending: $pendingActorSortAscending
-                    )
-                } else if sidebarSelection.contains(.tagGallery) {
-                    TagGalleryView(
-                        assets: assets,
-                        sidebarSelection: $sidebarSelection,
-                        libraryURL: selectedLibraryURL
-                    )
-                } else {
-                    AssetsGridView(
-                        assets: assets,
-                        sidebarSelection: $sidebarSelection,
-                        searchText: $searchText,
-                        selectedAssetIDs: $selectedAssetIDs,
-                        missingAssetIDs: missingAssetIDs,
-                        libraryURL: selectedLibraryURL,
-                        refreshID: gridRefreshID,
-                        filteredAssetContext: $filteredAssetContext,
-                        pendingFilter: $pendingAssetFilter,
-                        pendingSort: $pendingAssetSort,
-                        pendingSortAscending: $pendingAssetSortAscending
-                    )
-                }
-            }
+            browseContentView
 #endif
         } detail: {
-            let selectedActors = sidebarSelection.compactMap { item -> String? in
-                if case .actor(let a) = item { return a }
-                return nil
+            NavigationStack(path: $detailPath) {
+                detailRootView
+                    .navigationDestination(for: AppRoute.self) { route in
+                        destinationView(for: route)
+                    }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var browseContentView: some View {
+        if sidebarSelection.contains(.dashboard) {
+            DashboardView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: $selectedAssetIDs,
+                libraryURL: selectedLibraryURL,
+                pendingAssetFilter: $pendingAssetFilter,
+                pendingAssetSort: $pendingAssetSort,
+                pendingAssetSortAscending: $pendingAssetSortAscending,
+                pendingActorFilter: $pendingActorFilter
+            )
+        } else if sidebarSelection.contains(.actorGallery) {
+            ActorGridView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                selectedAssetIDs: $selectedAssetIDs,
+                libraryURL: selectedLibraryURL,
+                pendingFilter: $pendingActorFilter,
+                pendingSort: $pendingActorSort,
+                pendingSortAscending: $pendingActorSortAscending
+            )
+        } else if sidebarSelection.contains(.tagGallery) {
+            TagGalleryView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                libraryURL: selectedLibraryURL
+            )
+        } else {
+            AssetsGridView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                searchText: $searchText,
+                selectedAssetIDs: $selectedAssetIDs,
+                missingAssetIDs: missingAssetIDs,
+                libraryURL: selectedLibraryURL,
+                refreshID: gridRefreshID,
+                filteredAssetContext: $filteredAssetContext,
+                pendingFilter: $pendingAssetFilter,
+                pendingSort: $pendingAssetSort,
+                pendingSortAscending: $pendingAssetSortAscending
+            )
+        }
+    }
+
+    private var selectedSidebarActors: [String] {
+        sidebarSelection.compactMap { item -> String? in
+            if case .actor(let a) = item { return a }
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private var detailRootView: some View {
+        let selectedActors = selectedSidebarActors
+        ZStack {
             if !selectedAssetIDs.isEmpty {
                 InspectorView(
                     sidebarSelection: $sidebarSelection,
@@ -235,7 +368,18 @@ struct ContentView: View {
                     missingAssetIDs: $missingAssetIDs,
                     contextAssetIDs: filteredAssetContext
                 )
-            } else if !selectedActors.isEmpty {
+            } else if selectedActors.count == 1, let actor = selectedActors.first {
+                // Same profile page the compact layout pushes (graph header +
+                // filmography); its Edit button opens the editor as a sheet.
+                EntityProfileRouteView(
+                    category: "actor",
+                    name: actor,
+                    assets: assets,
+                    libraryURL: selectedLibraryURL,
+                    gridRefreshID: gridRefreshID
+                )
+                .id(actor)
+            } else if selectedActors.count > 1 {
                 ActorInspectorView(
                     selectedActors: selectedActors,
                     libraryURL: selectedLibraryURL,
@@ -249,150 +393,10 @@ struct ContentView: View {
                 )
             }
         }
-        .onAppear {
-            loadLastLibrary()
-            if !hasInitializedSelection {
-                switch defaultHomePage {
-                case "allAssets": sidebarSelection = [.allAssets]
-                case "actorGallery": sidebarSelection = [.actorGallery]
-                case "tagGallery": sidebarSelection = [.tagGallery]
-                default: sidebarSelection = [.dashboard]
-                }
-                hasInitializedSelection = true
-            }
-        }
-        .onDisappear { endSecurityScope() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenSettings"))) { _ in
-            isShowingSettings = true
-        }
-        
-        .sheet(isPresented: $isShowingSettings) {
-            SettingsView(
-                libraryURL: selectedLibraryURL,
-                onOpenLibrary: openLibrary,
-                onCheckForChanges: validateLibrary,
-                onAuditFileName: { isShowingFileNameAudit = true },
-                onTagCleanup: { isShowingTagCleanup = true },
-                onSelectAsset: { assetID in
-                    isShowingSettings = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-#if os(iOS)
-                        showContentOnIOS = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                            programmaticRoute = .asset(assetID, context: filteredAssetContext)
-                            isShowingProgrammaticRoute = true
-                        }
-#else
-                        sidebarSelection = [.allAssets]
-                        selectedAssetIDs = [assetID]
-                        columnVisibility = .all
-#endif
-                    }
-                },
-                onSelectActor: { actorID in
-                    isShowingSettings = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-#if os(iOS)
-                        showContentOnIOS = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                            programmaticRoute = .entityProfile(category: "actor", name: actorID)
-                            isShowingProgrammaticRoute = true
-                        }
-#else
-                        selectedAssetIDs.removeAll()
-                        sidebarSelection = [.actor(actorID)]
-                        columnVisibility = .all
-#endif
-                    }
-                }
-            )
-        }
-        .sheet(isPresented: $isShowingFileNameAudit) {
-            if let url = selectedLibraryURL {
-                FileNameAuditView(
-                    libraryURL: url,
-                    assets: assets,
-                    onRefresh: {
-                        do {
-                            let store = try LibraryStore(at: url)
-                            self.assets = try store.fetchAllAssets()
-                            self.gridRefreshID = UUID()
-                        } catch {
-                            print("Refresh failed: \(error)")
-                        }
-                    }
-                )
-            }
-        }
-        .onAppear {
-            if let url = selectedLibraryURL {
-                loadSmartCollections(from: url)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadSmartCollections"))) { _ in
-            if let url = selectedLibraryURL {
-                loadSmartCollections(from: url)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DeleteSmartCollection"))) { notification in
-            if let id = notification.object as? String, let url = selectedLibraryURL {
-                do {
-                    let store = try LibraryStore(at: url)
-                    try store.deleteSmartCollection(id: id)
-                    loadSmartCollections(from: url)
-                } catch {
-                    print("Failed to delete smart collection: \(error)")
-                }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
-            if let url = selectedLibraryURL {
-                Task {
-                    do {
-                        let store = try LibraryStore(at: url)
-                        let updatedAssets = try store.fetchAllAssets()
-                        await MainActor.run {
-                            self.assets = updatedAssets
-                            self.gridRefreshID = UUID()
-                        }
-                    } catch {
-                        print("Failed to reload assets: \(error)")
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $isShowingTagCleanup) {
-            if let url = selectedLibraryURL {
-                TagCleanupView(
-                    libraryURL: url,
-                    assets: assets,
-                    onRefresh: {
-                        do {
-                            let store = try LibraryStore(at: url)
-                            self.assets = try store.fetchAllAssets()
-                            self.gridRefreshID = UUID()
-                        } catch {
-                            print("Refresh failed: \(error)")
-                        }
-                    }
-                )
-            }
-        }
-        
-#if os(iOS)
-        .sheet(isPresented: $isShowingLibraryPicker) {
-            LibraryFolderPicker { pickedURL in
-                guard let pickedURL else { return }
-                processFolder(at: pickedURL)
-            }
-        }
-#endif
     }
-    
-    // MARK: - Routing Helper removed and replaced with struct
-    
+
     // MARK: - Library Logic
-    
+
     func openLibrary() {
 #if os(macOS)
         openLibrary_macOS()
@@ -400,7 +404,7 @@ struct ContentView: View {
         isShowingLibraryPicker = true
 #endif
     }
-    
+
 #if os(macOS)
     private func openLibrary_macOS() {
         let panel = NSOpenPanel()
@@ -408,15 +412,15 @@ struct ContentView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Select Library"
-        
+
         if panel.runModal() == .OK, let url = panel.url {
             processFolder(at: url)
         }
     }
 #endif
-    
+
     // MARK: - Validation Logic
-    
+
     private func validateLibrary() {
         guard let url = selectedLibraryURL else { return }
         Task {
@@ -424,22 +428,22 @@ struct ContentView: View {
                 let store = try LibraryStore(at: url)
                 let scanner = LibraryScanner(store: store)
                 let service = ContactSheetService(store: store)
-                
+
                 // 1. Check for new files
                 try await scanner.scan(at: url)
-                
+
                 // 2. Refresh assets in memory
                 let updatedAssets = try store.fetchAllAssets()
                 await MainActor.run {
                     self.assets = updatedAssets
                 }
-                
+
                 // 3. Generate thumbnails for any missing ones
                 for asset in updatedAssets {
                     try? await service.generateContactSheet(for: asset, libraryURL: url)
                     try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
                 }
-                
+
                 // 4. Validate missing files
                 var missing: Set<Asset.ID> = []
                 for asset in updatedAssets {
@@ -448,7 +452,7 @@ struct ContentView: View {
                         missing.insert(asset.id)
                     }
                 }
-                
+
                 // 5. Update UI
                 await MainActor.run {
                     self.missingAssetIDs = missing
@@ -459,10 +463,14 @@ struct ContentView: View {
             }
         }
     }
-    
+
+    // MARK: - Route Destinations
+
     @ViewBuilder
     private func destinationView(for route: AppRoute) -> some View {
         switch route {
+        case .browse:
+            browseContentView
         case .asset(let id, let context):
             InspectorView(
                 sidebarSelection: $sidebarSelection,
@@ -505,7 +513,7 @@ struct ContentView: View {
             )
         }
     }
-    
+
     // ✅ Keep security scope open as long as this library is selected
     private func beginSecurityScope(for url: URL) {
         // Stop previous if different
@@ -514,10 +522,10 @@ struct ContentView: View {
             hasActiveSecurityScope = false
             activeSecurityScopedURL = nil
         }
-        
+
         // Already active
         if hasActiveSecurityScope, activeSecurityScopedURL == url { return }
-        
+
         // Start for new URL
         let started = url.startAccessingSecurityScopedResource()
         if started {
@@ -528,7 +536,7 @@ struct ContentView: View {
             print("⚠️ startAccessingSecurityScopedResource() returned false for: \(url)")
         }
     }
-    
+
     private func endSecurityScope() {
         if let current = activeSecurityScopedURL, hasActiveSecurityScope {
             current.stopAccessingSecurityScopedResource()
@@ -536,10 +544,10 @@ struct ContentView: View {
         hasActiveSecurityScope = false
         activeSecurityScopedURL = nil
     }
-    
+
     func loadLastLibrary() {
         guard let bookmarkData = UserDefaults.standard.data(forKey: bookmarkKey) else { return }
-        
+
         var isStale = false
         do {
 #if os(macOS)
@@ -557,7 +565,7 @@ struct ContentView: View {
                 bookmarkDataIsStale: &isStale
             )
 #endif
-            
+
             if isStale {
                 // Refresh bookmark if needed
 #if os(macOS)
@@ -578,60 +586,60 @@ struct ContentView: View {
                 }
 #endif
             }
-            
+
             // ✅ keep scope open for ongoing access
             beginSecurityScope(for: url)
-            
+
             let store = try LibraryStore(at: url)
             self.selectedLibraryURL = url
             self.assets = try store.fetchAllAssets()
-            
+
             switch defaultHomePage {
             case "allAssets": self.sidebarSelection = [.allAssets]
             case "actorGallery": self.sidebarSelection = [.actorGallery]
             case "tagGallery": self.sidebarSelection = [.tagGallery]
             default: self.sidebarSelection = [.dashboard]
             }
-            
+
         } catch {
             print("Bookmark resolution failed: \(error)")
         }
     }
-    
+
     func processFolder(at url: URL) {
         // ✅ keep scope open for the life of the active library (no defer stop)
         beginSecurityScope(for: url)
-        
+
         let catalogURL = url.appendingPathComponent(".catalog")
         let thumbsURL = catalogURL.appendingPathComponent("thumbnails")
-        
+
         // IMPORTANT: align with ContactSheetService output
         let sheetsURL = catalogURL.appendingPathComponent("contactSheets")
-        
+
         do {
             try FileManager.default.createDirectory(at: thumbsURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: sheetsURL, withIntermediateDirectories: true)
-            
+
             let store = try LibraryStore(at: url)
             let scanner = LibraryScanner(store: store)
             let service = ContactSheetService(store: store)
-            
+
             Task {
                 do {
                     try await scanner.scan(at: url)
                     let initialAssets = try store.fetchAllAssets()
-                    
+
                     await MainActor.run {
                         self.selectedLibraryURL = url
                         self.assets = initialAssets
-                        
+
                         switch defaultHomePage {
                         case "allAssets": self.sidebarSelection = [.allAssets]
                         case "actorGallery": self.sidebarSelection = [.actorGallery]
                         case "tagGallery": self.sidebarSelection = [.tagGallery]
                         default: self.sidebarSelection = [.dashboard]
                         }
-                        
+
 #if os(macOS)
                         if let bookmarkData = try? url.bookmarkData(
                             options: [.withSecurityScope],
@@ -650,19 +658,19 @@ struct ContentView: View {
                         }
 #endif
                     }
-                    
+
                     // Generate images in background task to not block UI updates
                     Task {
                         for asset in initialAssets {
                             try? await service.generateContactSheet(for: asset, libraryURL: url)
                             try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
-                            
+
                             // Incremental refresh
                             await MainActor.run {
                                 self.gridRefreshID = UUID()
                             }
                         }
-                        
+
                         // FINAL REFRESH: ensures the UI sees the new files on disk
                         let finalAssets = (try? store.fetchAllAssets()) ?? initialAssets
                         await MainActor.run {
@@ -679,7 +687,7 @@ struct ContentView: View {
             print("Init failed: \(error)")
         }
     }
-    
+
     private func loadSmartCollections(from url: URL) {
         do {
             let store = try LibraryStore(at: url)
@@ -694,26 +702,26 @@ struct ContentView: View {
 // MARK: - iOS Folder Picker (UIDocumentPickerViewController)
 private struct LibraryFolderPicker: UIViewControllerRepresentable {
     let onPick: (URL?) -> Void
-    
+
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.folder], asCopy: false)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker
     }
-    
+
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
-    
+
     func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
-    
+
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let onPick: (URL?) -> Void
         init(onPick: @escaping (URL?) -> Void) { self.onPick = onPick }
-        
+
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
             onPick(urls.first)
         }
-        
+
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             onPick(nil)
         }
@@ -733,14 +741,14 @@ struct EntityProfileRouteView: View {
     @State private var selectedAssetIDs: Set<Asset.ID> = []
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
-    
+
     init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID) {
         self.category = category
         self.name = name
         self.assets = assets
         self.libraryURL = libraryURL
         self.gridRefreshID = gridRefreshID
-        
+
         let item: SidebarItem
         switch category {
         case "actor": item = .actor(name)
@@ -750,7 +758,7 @@ struct EntityProfileRouteView: View {
         }
         self._localSelection = State(initialValue: [item])
     }
-    
+
     var body: some View {
         AssetsGridView(
             assets: assets,

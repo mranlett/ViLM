@@ -131,7 +131,6 @@ struct SingleInspectorView: View {
                     }
                 }
                 .id(asset.id)
-                .aspectRatio(1.33, contentMode: .fit)
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(radius: 2)
@@ -417,6 +416,20 @@ struct SingleInspectorView: View {
             guard isShowingPlayer else { return }
             Task { await playback.seek(to: newValue, autoplay: nil) }
             #endif
+        }
+        .navigationTitle("Video Details")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("ToggleFullScreen"), object: nil)
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Toggle Full Screen")
+            }
         }
     }
 

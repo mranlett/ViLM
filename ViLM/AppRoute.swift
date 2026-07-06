@@ -1,6 +1,9 @@
 import Foundation
 
 enum AppRoute: Hashable {
+    /// Compact-width hub: shows the section selected in the sidebar
+    /// (dashboard, asset grid, actor gallery, or tag gallery).
+    case browse
     case asset(UUID, context: [UUID])
     case assets(Set<UUID>)
     case entityProfile(category: String, name: String)

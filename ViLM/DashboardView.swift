@@ -38,6 +38,8 @@ struct DashboardView: View {
     
     @State private var actorProfiles: [String: EntityProfile] = [:]
     @State private var profileImageFileNames: Set<String> = []
+
+    @Environment(\.usesStackNavigation) private var usesStackNavigation
     
     private var totalActors: Int {
         let allTags = assets.flatMap { $0.tags }
@@ -209,14 +211,9 @@ struct DashboardView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(recentlyAdded) { asset in
-                                VideoThumbnailCard(asset: asset, libraryURL: libraryURL)
-                                    .onTapGesture {
-                                        #if os(iOS)
-                                        // Handle iOS navigation if needed
-                                        #else
-                                        selectedAssetIDs = [asset.id]
-                                        #endif
-                                    }
+                                videoNavigationWrapper(for: asset, context: recentlyAdded.map(\.id)) {
+                                    VideoThumbnailCard(asset: asset, libraryURL: libraryURL)
+                                }
                             }
                         }
                         .padding(.horizontal)
@@ -261,9 +258,13 @@ struct DashboardView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
                                 ForEach(unreviewed) { asset in
-                                    UnreviewedVideoCard(asset: asset, libraryURL: libraryURL) {
-                                        markAsReviewed(asset)
-                                    }
+                                    UnreviewedVideoCard(
+                                        asset: asset,
+                                        libraryURL: libraryURL,
+                                        openRoute: compactRoute(for: asset, context: unreviewed.map(\.id)),
+                                        onOpen: { selectedAssetIDs = [asset.id] },
+                                        onMarkReviewed: { markAsReviewed(asset) }
+                                    )
                                 }
                             }
                             .padding(.horizontal)
@@ -293,14 +294,13 @@ struct DashboardView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(recentlyAddedActors, id: \.self) { actor in
-                                ActorCircleCard(
-                                    actorName: actor,
-                                    profile: actorProfiles["actor:\(actor)"],
-                                    profileImageFileNames: profileImageFileNames,
-                                    libraryURL: libraryURL
-                                )
-                                .onTapGesture {
-                                    sidebarSelection = [.actor(actor)]
+                                actorNavigationWrapper(for: actor) {
+                                    ActorCircleCard(
+                                        actorName: actor,
+                                        profile: actorProfiles["actor:\(actor)"],
+                                        profileImageFileNames: profileImageFileNames,
+                                        libraryURL: libraryURL
+                                    )
                                 }
                             }
                         }
@@ -343,14 +343,13 @@ struct DashboardView: View {
                     } else {
                         VStack(spacing: 0) {
                             ForEach(actorsNeedingAttention, id: \.self) { actor in
-                                ActorAttentionRow(
-                                    actorName: actor,
-                                    profile: actorProfiles["actor:\(actor)"],
-                                    profileImageFileNames: profileImageFileNames,
-                                    libraryURL: libraryURL
-                                )
-                                .onTapGesture {
-                                    sidebarSelection = [.actor(actor)]
+                                actorNavigationWrapper(for: actor) {
+                                    ActorAttentionRow(
+                                        actorName: actor,
+                                        profile: actorProfiles["actor:\(actor)"],
+                                        profileImageFileNames: profileImageFileNames,
+                                        libraryURL: libraryURL
+                                    )
                                 }
                                 if actor != actorsNeedingAttention.last {
                                     Divider().padding(.leading, 68)
@@ -376,6 +375,63 @@ struct DashboardView: View {
         }
     }
     
+    // MARK: - Navigation helpers
+    //
+    // Compact width (iPhone): cards are real NavigationLinks that push onto
+    // the enclosing stack. Regular width (iPad/macOS): cards select into the
+    // detail pane, matching the split-view layout.
+
+    @ViewBuilder
+    private func videoNavigationWrapper<Content: View>(
+        for asset: Asset,
+        context: [Asset.ID],
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if usesStackNavigation {
+            NavigationLink(value: AppRoute.asset(asset.id, context: context)) {
+                content()
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded {
+                selectedAssetIDs = [asset.id]
+            })
+        } else {
+            content()
+                .onTapGesture { selectedAssetIDs = [asset.id] }
+        }
+    }
+
+    @ViewBuilder
+    private func actorNavigationWrapper<Content: View>(
+        for actor: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if usesStackNavigation {
+            NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
+                content()
+            }
+            .buttonStyle(.plain)
+        } else {
+            content()
+                .onTapGesture { selectActorInSidebar(actor) }
+        }
+    }
+
+    private func selectActorInSidebar(_ actor: String) {
+        let others = sidebarSelection.filter { if case .actor = $0 { return false }; return true }
+        sidebarSelection = others.union([.actor(actor)])
+        // The detail pane shows a selected video with priority over a
+        // selected actor, so clear the video selection when picking an actor.
+        selectedAssetIDs.removeAll()
+    }
+
+    private func compactRoute(for asset: Asset, context: [Asset.ID]) -> AppRoute? {
+        if usesStackNavigation {
+            return .asset(asset.id, context: context)
+        }
+        return nil
+    }
+
     private func markAsReviewed(_ asset: Asset) {
         var updated = asset
         updated.status = .reviewed
@@ -459,30 +515,26 @@ struct VideoThumbnailCard: View {
 struct UnreviewedVideoCard: View {
     let asset: Asset
     let libraryURL: URL?
+    var openRoute: AppRoute? = nil
+    var onOpen: (() -> Void)? = nil
     let onMarkReviewed: () -> Void
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .topLeading) {
-                VideoThumbnailView(asset: asset, libraryURL: libraryURL)
-                    .frame(width: 160, height: 90)
-                    .cornerRadius(12)
-                
-                Text("NEW")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Color.red)
-                    .cornerRadius(8)
-                    .padding([.top, .leading], 6)
+            // The thumbnail navigates; "Mark Reviewed" stays outside the
+            // link so both tap targets keep working.
+            if let route = openRoute {
+                NavigationLink(value: route) {
+                    thumbnailAndTitle
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded { onOpen?() })
+            } else {
+                thumbnailAndTitle
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen?() }
             }
-            
-            Text(asset.fileName)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .frame(width: 160, alignment: .leading)
-            
+
             HStack {
                 Spacer()
                 Button(action: onMarkReviewed) {
@@ -493,6 +545,30 @@ struct UnreviewedVideoCard: View {
                 .foregroundColor(.accentColor)
             }
             .frame(width: 160)
+        }
+    }
+
+    private var thumbnailAndTitle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                VideoThumbnailView(asset: asset, libraryURL: libraryURL)
+                    .frame(width: 160, height: 90)
+                    .cornerRadius(12)
+
+                Text("NEW")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.red)
+                    .cornerRadius(8)
+                    .padding([.top, .leading], 6)
+            }
+
+            Text(asset.fileName)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .frame(width: 160, alignment: .leading)
         }
     }
 }

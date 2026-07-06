@@ -17,6 +17,10 @@ struct EntityProfileEditorView: View {
     let libraryURL: URL?
     let entityId: String
     let initialProfile: EntityProfile?
+    // True when presented as a sheet (needs its own stack for the toolbar);
+    // false when pushed inside an existing NavigationStack — nesting stacks
+    // breaks links and toolbars on iOS.
+    let embedsInNavigationStack: Bool
     let onSave: (EntityProfile) -> Void
     @Environment(\.dismiss) private var dismiss
     
@@ -64,10 +68,11 @@ struct EntityProfileEditorView: View {
     }
     @FocusState private var focusedField: Field?
     
-    init(libraryURL: URL?, entityId: String, profile: EntityProfile?, onSave: @escaping (EntityProfile) -> Void) {
+    init(libraryURL: URL?, entityId: String, profile: EntityProfile?, embedsInNavigationStack: Bool = true, onSave: @escaping (EntityProfile) -> Void) {
         self.libraryURL = libraryURL
         self.entityId = entityId
         self.initialProfile = profile
+        self.embedsInNavigationStack = embedsInNavigationStack
         self.onSave = onSave
         _bio = State(initialValue: profile?.bio ?? "")
         _photoUrl = State(initialValue: profile?.photoUrl ?? "")
@@ -102,7 +107,19 @@ struct EntityProfileEditorView: View {
     }
     
     var body: some View {
-        NavigationStack {
+        Group {
+            if embedsInNavigationStack {
+                NavigationStack { editorForm }
+            } else {
+                editorForm
+            }
+        }
+#if os(macOS)
+        .frame(minWidth: 400, minHeight: 650)
+#endif
+    }
+
+    private var editorForm: some View {
             Form {
                 Section(header: Text("Photo Gallery").font(.headline)) {
                     HStack {
@@ -397,8 +414,6 @@ struct EntityProfileEditorView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
-        }
-        .frame(minWidth: 400, minHeight: 650)
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
         }

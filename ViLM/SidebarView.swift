@@ -107,20 +107,26 @@ struct SidebarView: View {
     var body: some View {
         List {
             Section("Library") {
+                // Top-level sections navigate immediately; onApplyFilters is a
+                // no-op in the split layout and pushes the content view on iPhone.
                 sidebarRow(title: "Dashboard", icon: "house", isSelected: selection == [.dashboard]) {
                     selection = [.dashboard]
+                    onApplyFilters()
                 }
-                
+
                 sidebarRow(title: "All Assets", icon: "play.rectangle.on.rectangle", isSelected: selection == [.allAssets], count: unreviewedCount > 0 ? unreviewedCount : nil) {
                     selection = [.allAssets]
+                    onApplyFilters()
                 }
-                
+
                 sidebarRow(title: "Actors Gallery", icon: "person.2.crop.square.stack", isSelected: selection == [.actorGallery]) {
                     selection = [.actorGallery]
+                    onApplyFilters()
                 }
-                
+
                 sidebarRow(title: "Tags Gallery", icon: "tag.square.fill", isSelected: selection == [.tagGallery]) {
                     selection = [.tagGallery]
+                    onApplyFilters()
                 }
             }
             
@@ -129,6 +135,7 @@ struct SidebarView: View {
                     ForEach(smartCollections) { sc in
                         sidebarRow(title: sc.name, icon: "folder.fill", isSelected: selection == [.smartCollection(sc.id, sc.name)]) {
                             selection = [.smartCollection(sc.id, sc.name)]
+                            onApplyFilters()
                         }
                         // Add context menu to delete
                         .contextMenu {

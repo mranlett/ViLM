@@ -50,6 +50,8 @@ struct AssetsGridView: View {
     let refreshID: UUID
     @Binding var filteredAssetContext: [Asset.ID]
     
+    @Environment(\.usesStackNavigation) private var usesStackNavigation
+    
     @Binding var pendingFilter: AssetFilterCriteria?
     @Binding var pendingSort: SortOption?
     @Binding var pendingSortAscending: Bool?
@@ -268,41 +270,7 @@ struct AssetsGridView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
                         ForEach(filteredAssets) { asset in
-#if os(iOS)
-                            if isEditMode {
-                                gridItem(for: asset)
-                                    .onTapGesture {
-                                        if selectedAssetIDs.contains(asset.id) {
-                                            selectedAssetIDs.remove(asset.id)
-                                        } else {
-                                            selectedAssetIDs.insert(asset.id)
-                                        }
-                                    }
-                            } else {
-                                NavigationLink(value: AppRoute.asset(asset.id, context: filteredAssetContext)) {
-                                    gridItem(for: asset)
-                                }
-                                .buttonStyle(.plain)
-                                .simultaneousGesture(TapGesture().onEnded {
-                                    selectedAssetIDs = [asset.id]
-                                })
-                            }
-#else
-                            Button(action: {
-                                if NSEvent.modifierFlags.contains(.command) {
-                                    if selectedAssetIDs.contains(asset.id) {
-                                        selectedAssetIDs.remove(asset.id)
-                                    } else {
-                                        selectedAssetIDs.insert(asset.id)
-                                    }
-                                } else {
-                                    selectedAssetIDs = [asset.id]
-                                }
-                            }) {
-                                gridItem(for: asset)
-                            }
-                            .buttonStyle(.plain)
-#endif
+                            interactiveGridItem(for: asset)
                         }
                         
                     }
@@ -521,6 +489,52 @@ struct AssetsGridView: View {
         let title = searchText.isEmpty ? "No Assets Found" : "No Results for \"\(searchText)\""
         let symbol = searchText.isEmpty ? "film" : "magnifyingglass"
         ContentUnavailableView(title, systemImage: symbol)
+    }
+    
+    @ViewBuilder
+    private func interactiveGridItem(for asset: Asset) -> some View {
+#if os(iOS)
+        if isEditMode {
+            gridItem(for: asset)
+                .onTapGesture {
+                    if selectedAssetIDs.contains(asset.id) {
+                        selectedAssetIDs.remove(asset.id)
+                    } else {
+                        selectedAssetIDs.insert(asset.id)
+                    }
+                }
+        } else if !usesStackNavigation {
+            Button(action: {
+                selectedAssetIDs = [asset.id]
+            }) {
+                gridItem(for: asset)
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: AppRoute.asset(asset.id, context: filteredAssetContext)) {
+                gridItem(for: asset)
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded {
+                selectedAssetIDs = [asset.id]
+            })
+        }
+#else
+        Button(action: {
+            if NSEvent.modifierFlags.contains(.command) {
+                if selectedAssetIDs.contains(asset.id) {
+                    selectedAssetIDs.remove(asset.id)
+                } else {
+                    selectedAssetIDs.insert(asset.id)
+                }
+            } else {
+                selectedAssetIDs = [asset.id]
+            }
+        }) {
+            gridItem(for: asset)
+        }
+        .buttonStyle(.plain)
+#endif
     }
     
     @ViewBuilder

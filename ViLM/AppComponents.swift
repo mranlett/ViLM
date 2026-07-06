@@ -5,6 +5,26 @@ import LibraryCore
 import CoreGraphics
 import ImageIO
 
+// MARK: - Navigation Mode Environment
+//
+// True when the view hierarchy lives inside the compact single-stack layout
+// (iPhone), where taps should push NavigationLinks. False in the split-view
+// layout, where taps should select into the detail pane.
+//
+// Views must NOT infer this from horizontalSizeClass: NavigationSplitView
+// columns report their own (compact) size class even when the window is
+// regular width, which sends taps down the wrong path.
+private struct UsesStackNavigationKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var usesStackNavigation: Bool {
+        get { self[UsesStackNavigationKey.self] }
+        set { self[UsesStackNavigationKey.self] = newValue }
+    }
+}
+
 // MARK: - Detail High-Res Grid (4x4 clickable frames)
 struct DetailGridView: View {
     let asset: Asset
@@ -13,24 +33,31 @@ struct DetailGridView: View {
     var onSelectTime: ((Double) -> Void)? = nil
 
     @State private var times: [Double] = Array(repeating: 0, count: 16)
+    @State private var computedAspectRatio: CGFloat = 16.0 / 9.0
 
     var body: some View {
         Group {
             if let url = libraryURL?.appendingPathComponent(asset.relativePath) {
                 let videoAsset = AVURLAsset(url: url)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
-                    ForEach(0..<16, id: \.self) { index in
-                        let start = times.indices.contains(index) ? times[index] : 0
+                VStack(spacing: 2) {
+                    ForEach(0..<4, id: \.self) { row in
+                        HStack(spacing: 2) {
+                            ForEach(0..<4, id: \.self) { col in
+                                let index = row * 4 + col
+                                let start = times.indices.contains(index) ? times[index] : 0
 
-                        FrameExtractView(
-                            videoAsset: videoAsset,
-                            timeSeconds: start
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard isInteractive else { return }
-                            onSelectTime?(start)
+                                FrameExtractView(
+                                    videoAsset: videoAsset,
+                                    timeSeconds: start,
+                                    aspectRatio: computedAspectRatio
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    guard isInteractive else { return }
+                                    onSelectTime?(start)
+                                }
+                            }
                         }
                     }
                 }
@@ -47,6 +74,20 @@ struct DetailGridView: View {
 
     private func computeTimes(for url: URL) async {
         let avAsset = AVURLAsset(url: url)
+        
+        if let track = try? await avAsset.loadTracks(withMediaType: .video).first,
+           let size = try? await track.load(.naturalSize),
+           let transform = try? await track.load(.preferredTransform) {
+            let transformedSize = size.applying(transform)
+            let width = abs(transformedSize.width)
+            let height = abs(transformedSize.height)
+            if height > 0 {
+                await MainActor.run {
+                    self.computedAspectRatio = width / height
+                }
+            }
+        }
+        
         guard let dur = try? await avAsset.load(.duration) else { return }
 
         let total = dur.seconds
@@ -66,6 +107,7 @@ struct DetailGridView: View {
 struct FrameExtractView: View {
     let videoAsset: AVAsset
     let timeSeconds: Double
+    var aspectRatio: CGFloat = 16.0 / 9.0
 
     @State private var frame: CGImage?
 
@@ -74,10 +116,10 @@ struct FrameExtractView: View {
             if let frame {
                 Image(decorative: frame, scale: 1.0, orientation: .up)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(aspectRatio, contentMode: .fit)
             } else {
                 Color.black
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .aspectRatio(aspectRatio, contentMode: .fit)
                     .overlay(ProgressView().controlSize(.small))
             }
         }
