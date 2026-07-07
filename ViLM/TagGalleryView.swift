@@ -7,23 +7,31 @@ struct TagGalleryView: View {
     let libraryURL: URL?
     
     @State private var tagProfiles: [String: EntityProfile] = [:]
-    
+
     @State private var alphaFilter: Character? = nil
-    
-    var allUniqueTags: [String] {
-        let allTags = assets.flatMap { $0.tags }
-        let actionTags = allTags.filter { $0.hasPrefix("tag:") }.map { String($0.dropFirst(4)) }
-        var unique = Set(actionTags)
-        
-        for key in tagProfiles.keys {
-            if key.hasPrefix("tag:") {
-                unique.insert(String(key.dropFirst(4)))
+
+    // Cached once per assets/profiles change instead of re-derived (and
+    // re-counted per tag) on every render.
+    @State private var allUniqueTags: [String] = []
+    @State private var tagCounts: [String: Int] = [:]
+
+    private func recomputeTags() {
+        var unique = Set<String>()
+        var counts = [String: Int]()
+        for asset in assets {
+            for tag in asset.tags where tag.hasPrefix("tag:") {
+                let name = String(tag.dropFirst(4))
+                unique.insert(name)
+                counts[name, default: 0] += 1
             }
         }
-        
-        return Array(unique).sorted()
+        for key in tagProfiles.keys where key.hasPrefix("tag:") {
+            unique.insert(String(key.dropFirst(4)))
+        }
+        allUniqueTags = unique.sorted()
+        tagCounts = counts
     }
-    
+
     var filteredTags: [String] {
         guard let letter = alphaFilter else { return allUniqueTags }
         return allUniqueTags.filter { $0.uppercased().hasPrefix(String(letter)) }
@@ -44,7 +52,7 @@ struct TagGalleryView: View {
                         }) {
                             TagGalleryItemView(
                                 tag: tag,
-                                assetsCount: assets.filter { $0.tags.contains("tag:\(tag)") }.count,
+                                assetsCount: tagCounts[tag] ?? 0,
                                 isSelected: isSelected
                             )
                         }
@@ -78,13 +86,14 @@ struct TagGalleryView: View {
             }
         }
         .onAppear {
+            recomputeTags()
             fetchProfiles()
         }
-        .onChange(of: assets.count) { old, new in
-            fetchProfiles()
+        .onChange(of: assets) { _, _ in
+            recomputeTags()
         }
     }
-    
+
     private func toggleSelection(item: SidebarItem) {
         if sidebarSelection.contains(item) {
             sidebarSelection.remove(item)
@@ -104,6 +113,7 @@ struct TagGalleryView: View {
                     tagProfiles[profile.id] = profile
                 }
             }
+            recomputeTags()
         } catch {
             print("Failed to fetch tag profiles: \(error)")
         }

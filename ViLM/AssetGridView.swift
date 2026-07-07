@@ -92,11 +92,68 @@ struct AssetsGridView: View {
     }
     
     // MARK: - Filter Logic
-    private var filteredAssets: [Asset] {
+
+    // Cached result of computeFilteredAssets(). The pipeline walks every
+    // asset and sorts; recomputing it inside `body` (which runs per keystroke
+    // and per selection change) does not scale, so it only reruns when one of
+    // its inputs changes — see the onChange modifiers on the grid.
+    @State private var displayedAssets: [Asset] = []
+
+    // Bundles the cheap-to-compare filter inputs for a single onChange.
+    private struct FilterInputs: Equatable {
+        let sidebarSelection: Set<SidebarItem>
+        let searchText: String
+        let filterCriteria: AssetFilterCriteria
+        let sortOption: SortOption
+        let sortAscending: Bool
+    }
+
+    private var filterInputs: FilterInputs {
+        FilterInputs(
+            sidebarSelection: sidebarSelection,
+            searchText: searchText,
+            filterCriteria: filterCriteria,
+            sortOption: sortOption,
+            sortAscending: sortAscending
+        )
+    }
+
+    // Everything the cached result depends on. When this changes the cache is
+    // rebuilt; file sizes only matter while sorting by size.
+    private struct RecomputeSignature: Equatable {
+        let inputs: FilterInputs
+        let assets: [Asset]
+        let actorProfiles: [String: EntityProfile]
+        let akaMap: [String: String]
+        let fileSizes: [Asset.ID: Int64]?
+    }
+
+    // Reloads file sizes when the library changes or size-sort is turned on.
+    private struct FileSizeTrigger: Equatable {
+        let assetCount: Int
+        let sortBySize: Bool
+    }
+
+    private var recomputeSignature: RecomputeSignature {
+        RecomputeSignature(
+            inputs: filterInputs,
+            assets: assets,
+            actorProfiles: actorProfiles,
+            akaMap: akaMap,
+            fileSizes: sortOption == .size ? fileSizes : nil
+        )
+    }
+
+    private func recomputeDisplayedAssets() {
+        displayedAssets = computeFilteredAssets()
+        filteredAssetContext = displayedAssets.map(\.id)
+    }
+
+    private func computeFilteredAssets() -> [Asset] {
         let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
-                case .dashboard, .allAssets, .actorGallery, .tagGallery, .smartCollection: return true
+                case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .smartCollection: return true
                 case .actor(let name): return mappedActors(for: asset).contains(name)
                 case .tag(let name): return asset.tags.contains("tag:\(name)")
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
@@ -193,10 +250,10 @@ struct AssetsGridView: View {
                 }
             }
             
-            if !searchText.isEmpty && !asset.fileName.localizedCaseInsensitiveContains(searchText) {
+            if !matchesSearch(asset, query: searchText) {
                 return false
             }
-            
+
             return true
         }
         
@@ -225,6 +282,7 @@ struct AssetsGridView: View {
         case .allAssets: return "All Assets"
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"
+        case .seriesGallery: return "Series Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -232,9 +290,9 @@ struct AssetsGridView: View {
         case .smartCollection(_, let name): return name
         }
     }
-    
-    // MARK: - Body
-    var body: some View {
+
+    // MARK: - Scroll Content
+    private var scrollContent: some View {
         ScrollView {
             VStack(spacing: 0) {
                 if sidebarSelection.count > 1 {
@@ -256,35 +314,40 @@ struct AssetsGridView: View {
                     .padding(.top)
                 } else if sidebarSelection.count == 1, let first = sidebarSelection.first, first != .allAssets {
                     ProfileGraphHeaderView(
-                        filteredAssets: filteredAssets,
+                        filteredAssets: displayedAssets,
                         sidebarSelection: $sidebarSelection,
                         currentSelection: first,
                         libraryURL: libraryURL
                     )
                     .padding(.top)
                 }
-                
-                if filteredAssets.isEmpty {
+
+                if displayedAssets.isEmpty {
                     emptyStateView // Use the helper view here
                         .padding(.top, 100)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
-                        ForEach(filteredAssets) { asset in
+                        ForEach(displayedAssets) { asset in
                             interactiveGridItem(for: asset)
                         }
-                        
+
                     }
                     .padding()
                 }
             }
         }
+    }
+
+    // MARK: - State-managed content
+    // Split from `body` so neither modifier chain is long enough to blow the
+    // Swift type-checker's budget.
+    private var stateManagedContent: some View {
+        scrollContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .id(refreshID)
-        .onChange(of: filteredAssets.map { $0.id }) { _, newIds in
-            filteredAssetContext = newIds
+        .onChange(of: recomputeSignature) { _, _ in
+            recomputeDisplayedAssets()
         }
         .onAppear {
-            filteredAssetContext = filteredAssets.map { $0.id }
             fetchActorProfiles()
         }
         .onChange(of: libraryURL) { _, _ in
@@ -358,10 +421,17 @@ struct AssetsGridView: View {
                 sortAscending = newAsc
                 pendingSortAscending = nil
             }
+            // Seed the cache; subsequent updates are driven by onChange.
+            recomputeDisplayedAssets()
         }
+    }
+
+    // MARK: - Body
+    var body: some View {
+        stateManagedContent
         .navigationTitle(sidebarSelectionTitle)
-        .navigationSubtitle("\(filteredAssets.count) items")
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search filenames...")
+        .navigationSubtitle("\(displayedAssets.count) items")
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
@@ -423,19 +493,26 @@ struct AssetsGridView: View {
         } message: {
             Text("Enter a name for this smart collection.")
         }
-        .task(id: assets.count) {
-            guard let url = libraryURL else { return }
-            var newSizes: [Asset.ID: Int64] = [:]
-            for asset in assets {
-                let fileURL = url.appendingPathComponent(asset.relativePath)
-                if let attr = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-                   let size = attr[.size] as? Int64 {
-                    newSizes[asset.id] = size
+        // File sizes are only used for size-sorting. Reading attributes for
+        // the whole library on the main actor stalls the UI (badly on
+        // network/USB volumes), so only load when size sort is active and do
+        // the I/O off the main thread.
+        .task(id: FileSizeTrigger(assetCount: assets.count, sortBySize: sortOption == .size)) {
+            guard sortOption == .size, !assets.isEmpty, let url = libraryURL else { return }
+            let paths: [(Asset.ID, String)] = assets.map {
+                ($0.id, url.appendingPathComponent($0.relativePath).path)
+            }
+            let newSizes = await Task.detached(priority: .utility) {
+                var sizes: [Asset.ID: Int64] = [:]
+                for (id, path) in paths {
+                    if let attr = try? FileManager.default.attributesOfItem(atPath: path),
+                       let size = attr[.size] as? Int64 {
+                        sizes[id] = size
+                    }
                 }
-            }
-            await MainActor.run {
-                self.fileSizes = newSizes
-            }
+                return sizes
+            }.value
+            fileSizes = newSizes
         }
     }
     
@@ -460,6 +537,37 @@ struct AssetsGridView: View {
         return Set(asset.actors.map { akaMap[$0] ?? $0 })
     }
 
+    // MARK: - Search
+
+    /// Every asset must match all whitespace-separated search terms; each term
+    /// may match any searchable field (filename, series/episode, notes,
+    /// actors, tags, studios, and each actor's bio and AKAs).
+    private func matchesSearch(_ asset: Asset, query: String) -> Bool {
+        let terms = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !terms.isEmpty else { return true }
+        let haystack = searchableStrings(for: asset)
+        return terms.allSatisfy { term in
+            haystack.contains { $0.localizedCaseInsensitiveContains(term) }
+        }
+    }
+
+    private func searchableStrings(for asset: Asset) -> [String] {
+        var strings: [String] = [asset.fileName]
+        if let videoName = asset.videoName { strings.append(videoName) }
+        if let episode = asset.episode { strings.append(episode) }
+        if let notes = asset.notes { strings.append(notes) }
+        strings.append(contentsOf: asset.actors)
+        strings.append(contentsOf: asset.actions)
+        strings.append(contentsOf: asset.studios)
+        for actor in mappedActors(for: asset) {
+            if let profile = actorProfiles["actor:\(actor)"] {
+                if let bio = profile.bio { strings.append(bio) }
+                strings.append(contentsOf: profile.akas)
+            }
+        }
+        return strings
+    }
+
     
     private func sidebarSelectionTitle(for item: SidebarItem) -> String {
         switch item {
@@ -467,6 +575,7 @@ struct AssetsGridView: View {
         case .allAssets: return "All"
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"
+        case .seriesGallery: return "Series Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -474,7 +583,7 @@ struct AssetsGridView: View {
         case .smartCollection(_, let name): return name
         }
     }
-    
+
     private func color(for item: SidebarItem) -> Color {
         switch item {
         case .actor: return .blue
@@ -542,9 +651,9 @@ struct AssetsGridView: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
                 if gridStyle == .singleFrame {
-                    VideoThumbnailView(asset: asset, libraryURL: libraryURL)
+                    VideoThumbnailView(asset: asset, libraryURL: libraryURL, refreshToken: refreshID)
                 } else {
-                    ContactSheetThumbnailView(asset: asset, libraryURL: libraryURL)
+                    ContactSheetThumbnailView(asset: asset, libraryURL: libraryURL, refreshToken: refreshID)
                 }
             }
             .overlay(statusOverlay(for: asset), alignment: .topTrailing)

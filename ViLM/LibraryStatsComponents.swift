@@ -10,7 +10,7 @@ struct StatRingView: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .stroke(Color(white: 0.9), lineWidth: 8)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 8)
                 
                 Circle()
                     .trim(from: 0, to: CGFloat(percentage))
@@ -24,11 +24,11 @@ struct StatRingView: View {
             
             Text(label)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(.primary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(Color.white)
+        .background(Color(PlatformSystemBackground))
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
     }
@@ -56,13 +56,13 @@ struct StatProgressBarRow: View {
                 if showChevron {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14))
-                        .foregroundColor(Color(white: 0.8))
+                        .foregroundColor(Color.secondary.opacity(0.4))
                 }
             }
             
             Text("\(value) \(valueLabel) · \(missing) \(missingLabel)")
                 .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .foregroundColor(.primary)
             
             GeometryReader { geometry in
                 HStack(spacing: 2) {
@@ -100,7 +100,7 @@ struct StatBarChartRow: View {
             if let index = index {
                 Text("\(index)")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.primary)
                     .frame(width: 20, alignment: .leading)
             }
             
@@ -118,7 +118,7 @@ struct StatBarChartRow: View {
                     }
                     if maxCount - count > 0 {
                         Rectangle()
-                            .fill(Color(white: 0.9))
+                            .fill(Color.secondary.opacity(0.2))
                             .frame(width: max(0, geometry.size.width * CGFloat(1 - percentage) - 1))
                     }
                 }
@@ -128,7 +128,7 @@ struct StatBarChartRow: View {
             
             Text("\(count)")
                 .font(.system(size: 13))
-                .foregroundColor(.secondary)
+                .foregroundColor(.primary)
                 .frame(width: 30, alignment: .trailing)
         }
         .padding(.vertical, 8)
@@ -170,12 +170,15 @@ struct ActorsWithoutTagsView: View {
     var body: some View {
         List {
             ForEach(profiles) { profile in
+                // The selection handler expects a bare actor name; the stored
+                // id carries an "actor:" prefix that must be stripped.
+                let actorName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
                 HStack {
-                    Text(profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id)
+                    Text(actorName)
                         .font(.system(size: 17))
                     Spacer()
                     Button("Add Tags") {
-                        onSelect?(profile.id)
+                        onSelect?(actorName)
                     }
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.blue)

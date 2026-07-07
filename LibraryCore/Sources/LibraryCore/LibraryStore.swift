@@ -5,23 +5,48 @@ public class LibraryStore {
     private let dbQueue: DatabaseQueue
     public let libraryURL: URL
 
+    // Opening a fresh SQLite connection and running the migrator on every
+    // `LibraryStore(at:)` is expensive, and the app constructs stores ad hoc
+    // in dozens of places (per rating tap, tag edit, fetch, …). Cache one
+    // connection per database path: subsequent stores for the same library
+    // reuse it and skip migration. A shared connection also avoids
+    // "database is locked" errors from multiple connections contending.
+    // Access is serialized by cacheLock, so opt out of Swift 6's global-state
+    // isolation check.
+    nonisolated(unsafe) private static var queueCache: [String: DatabaseQueue] = [:]
+    private static let cacheLock = NSLock()
+
     public init(at url: URL) throws {
         self.libraryURL = url
+        let dbPath = url.appendingPathComponent(".catalog").appendingPathComponent("catalog.sqlite").path
+
+        LibraryStore.cacheLock.lock()
+        defer { LibraryStore.cacheLock.unlock() }
+
+        if let cached = LibraryStore.queueCache[dbPath] {
+            self.dbQueue = cached
+            return
+        }
+
         let catalogURL = url.appendingPathComponent(".catalog")
         try FileManager.default.createDirectory(at: catalogURL, withIntermediateDirectories: true)
-
-        let dbPath = catalogURL.appendingPathComponent("catalog.sqlite").path
 
         let config: Configuration = {
             var c = Configuration()
             c.prepareDatabase { db in
-                try db.execute(sql: "PRAGMA journal_mode = DELETE")
+                // WAL improves write throughput (fewer fsyncs) and allows a
+                // read to proceed during a write. SQLite silently keeps the
+                // prior mode if the filesystem can't support WAL, so this is
+                // safe on network/USB volumes.
+                try db.execute(sql: "PRAGMA journal_mode = WAL")
             }
             return c
         }()
 
-        self.dbQueue = try DatabaseQueue(path: dbPath, configuration: config)
+        let queue = try DatabaseQueue(path: dbPath, configuration: config)
+        self.dbQueue = queue
         try migrate()
+        LibraryStore.queueCache[dbPath] = queue
     }
 
 
@@ -276,6 +301,21 @@ public class LibraryStore {
     public func deleteAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
             _ = try asset.delete(db)
+        }
+    }
+
+    /// Standardizes a series name: every asset whose `videoName` is one of
+    /// `oldNames` is updated to `newName`. Used to merge freeform variations
+    /// (casing, stray whitespace) of the same series into one canonical name.
+    public func renameSeries(from oldNames: Set<String>, to newName: String) throws {
+        try dbQueue.write { db in
+            let assets = try Asset.fetchAll(db)
+            for var asset in assets {
+                if let current = asset.videoName, oldNames.contains(current), current != newName {
+                    asset.videoName = newName
+                    try asset.update(db)
+                }
+            }
         }
     }
 

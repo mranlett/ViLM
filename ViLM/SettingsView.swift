@@ -10,6 +10,7 @@ struct SettingsView: View {
     var onOpenLibrary: (() -> Void)?
     var onCheckForChanges: (() -> Void)?
     var onAuditFileName: (() -> Void)?
+    var onFindDuplicates: (() -> Void)?
     var onTagCleanup: (() -> Void)?
     var onSelectAsset: ((Asset.ID) -> Void)?
     var onSelectActor: ((String) -> Void)?
@@ -72,7 +73,15 @@ struct SettingsView: View {
                         Label("File Name Audit", systemImage: "text.magnifyingglass")
                     }
                     .buttonStyle(.plain)
-                    
+
+                    Button(action: {
+                        dismiss()
+                        onFindDuplicates?()
+                    }) {
+                        Label("Find Duplicates", systemImage: "square.on.square.dashed")
+                    }
+                    .buttonStyle(.plain)
+
                     Button(action: {
                         dismiss()
                         onTagCleanup?()

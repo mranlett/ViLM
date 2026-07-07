@@ -57,7 +57,7 @@ struct LibraryStatsView: View {
                         // Header details
                         Text("\(totalFilms) films · \(totalActors) actor profiles · \(totalTags) unique tags")
                             .font(.system(size: 14))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 18)
                         
@@ -74,11 +74,11 @@ struct LibraryStatsView: View {
                                     .font(.system(size: 24, weight: .bold))
                                 Text("Unique Tags")
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.primary)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.vertical, 14)
-                            .background(Color.white)
+                            .background(Color(PlatformSystemBackground))
                             .cornerRadius(20)
                             .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
                         }
@@ -88,7 +88,7 @@ struct LibraryStatsView: View {
                         // Films Section
                         Text("FILMS")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
@@ -118,7 +118,7 @@ struct LibraryStatsView: View {
                             StatProgressBarRow(title: "Thumbnails", value: filmsWithThumbnails.count, missing: filmsWithoutThumbnails.count, valueLabel: "have thumbnail", missingLabel: "missing", showChevron: false)
                         }
                         .padding(.horizontal, 16)
-                        .background(Color.white)
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(20)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 30)
@@ -126,7 +126,7 @@ struct LibraryStatsView: View {
                         // Actors Section
                         Text("ACTORS")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
@@ -167,7 +167,7 @@ struct LibraryStatsView: View {
                             .padding(.vertical, 12)
                         }
                         .padding(.horizontal, 16)
-                        .background(Color.white)
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(20)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 16)
@@ -175,7 +175,7 @@ struct LibraryStatsView: View {
                         // Top Actors By Image Count
                         Text("TOP ACTORS BY IMAGE COUNT")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
@@ -189,7 +189,7 @@ struct LibraryStatsView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                        .background(Color.white)
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(20)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 30)
@@ -197,7 +197,7 @@ struct LibraryStatsView: View {
                         // Tags Section
                         Text("TAGS")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
@@ -219,7 +219,7 @@ struct LibraryStatsView: View {
                                 Spacer()
                                 Text("\(filmTagsCount) >")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.primary)
                             }
                             .padding(.vertical, 12)
                             
@@ -231,7 +231,7 @@ struct LibraryStatsView: View {
                                 Spacer()
                                 Text("\(actorTagsCount) >")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.primary)
                             }
                             .padding(.vertical, 12)
                             
@@ -243,26 +243,26 @@ struct LibraryStatsView: View {
                                 Spacer()
                                 Text("\(sharedTagsCount) >")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.primary)
                             }
                             .padding(.vertical, 12)
                         }
                         .padding(.horizontal, 16)
-                        .background(Color.white)
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(20)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 8)
                         
                         Text("Film and actor tag pools overlap — shared tags are used on both.")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 24)
                         
                         // Top Tags By Usage
                         Text("TOP TAGS BY USAGE")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
@@ -276,14 +276,14 @@ struct LibraryStatsView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                        .background(Color.white)
+                        .background(Color(PlatformSystemBackground))
                         .cornerRadius(20)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 40)
                     }
                     .padding(.top, 10)
                 }
-                .background(Color(white: 0.95).edgesIgnoringSafeArea(.all))
+                .background(Color(PlatformSystemGroupedBackground).edgesIgnoringSafeArea(.all))
             }
         }
         .navigationTitle("Library Statistics")

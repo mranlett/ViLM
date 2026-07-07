@@ -6,6 +6,15 @@ import UIKit
 import AppKit
 #endif
 
+// Shared decoded-image cache. Without this, every ProfileImageView instance
+// decodes independently — so the full-screen gallery browser (whose
+// wrap-around sentinels are separate instances showing the same photo) flashes
+// placeholders and snaps abruptly. Lives outside the generic view because
+// generic types can't hold static stored properties. Thread-safe NSCache.
+private enum ProfileImageCache {
+    nonisolated(unsafe) static let shared = NSCache<NSString, PlatformImage>()
+}
+
 struct ProfileImageView<Content: View, Placeholder: View>: View {
     let libraryURL: URL?
     let entityId: String
@@ -13,7 +22,7 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     let isGallery: Bool
     let content: (Image) -> Content
     let placeholder: () -> Placeholder
-    
+
     @State private var localImage: Image?
     
     init(libraryURL: URL?, entityId: String, photoUrl: String?, isGallery: Bool = false, @ViewBuilder content: @escaping (Image) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
@@ -27,8 +36,8 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     
     var body: some View {
         Group {
-            if let localImage = localImage {
-                content(localImage)
+            if let image = displayImage {
+                content(image)
             } else {
                 placeholder()
             }
@@ -36,6 +45,35 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         .task(id: photoUrl ?? "") {
             await resolveLocalImage()
         }
+    }
+
+    // Prefer already-loaded state, then a synchronous cache hit so a page that
+    // was decoded elsewhere (e.g. the gallery strip) renders immediately
+    // instead of flashing the placeholder before `.task` runs.
+    private var displayImage: Image? {
+        if let localImage { return localImage }
+        if let url = resolvedFileURL,
+           let cached = ProfileImageCache.shared.object(forKey: url.path as NSString) {
+            return Image(platformImage: cached)
+        }
+        return nil
+    }
+
+    // The primary on-disk location for this photo (no I/O), mirroring the
+    // filename logic in resolveLocalImage. Used for synchronous cache lookups.
+    private var resolvedFileURL: URL? {
+        guard let libraryURL else { return nil }
+        let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        let fileName: String
+        if isGallery, let urlString = photoUrl, urlString != "local://primary" {
+            let hashData = SHA256.hash(data: Data(urlString.utf8))
+            let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
+            fileName = "\(safeId)_\(hashString).jpg"
+        } else {
+            fileName = "\(safeId).jpg"
+        }
+        return profilesDir.appendingPathComponent(fileName)
     }
     
     private func resolveLocalImage() async {
@@ -103,8 +141,8 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
             }
             
             try data.write(to: fileURL)
-            
-            if let image = await createImage(from: data) {
+
+            if let image = await decodeAndCache(from: data, cacheKey: fileURL.path as NSString) {
                 setLocalImage(image)
             }
         } catch {
@@ -118,23 +156,26 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     }
     
     private func loadImageAsync(from url: URL) async -> Image? {
+        let key = url.path as NSString
+        if let cached = ProfileImageCache.shared.object(forKey: key) {
+            return Image(platformImage: cached)
+        }
         // For local file URLs, Data(contentsOf:) is reliable and we don't need URLSession complexity
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return await createImage(from: data)
+        return await decodeAndCache(from: data, cacheKey: key)
     }
-    
-    private func createImage(from data: Data) async -> Image? {
+
+    private func decodeAndCache(from data: Data, cacheKey: NSString?) async -> Image? {
         await Task.detached {
             #if os(iOS)
-            if let uiImage = UIImage(data: data) {
-                return Image(uiImage: uiImage)
-            }
+            guard let image = UIImage(data: data) else { return nil }
             #else
-            if let nsImage = NSImage(data: data) {
-                return Image(nsImage: nsImage)
-            }
+            guard let image = NSImage(data: data) else { return nil }
             #endif
-            return nil
+            if let cacheKey {
+                ProfileImageCache.shared.setObject(image, forKey: cacheKey)
+            }
+            return Image(platformImage: image)
         }.value
     }
     

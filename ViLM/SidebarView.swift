@@ -32,88 +32,77 @@ struct SidebarView: View {
         }
     }
     
-    // MARK: - Computed Properties
-    
-    var allUniqueActors: [String] {
-        let allTags = assets.flatMap { $0.tags }
-        let actorTags = allTags.filter { $0.hasPrefix("actor:") }.map { String($0.dropFirst(6)) }
-        var unique = Set(actorTags.map { akaMap[$0] ?? $0 })
-        
-        for profile in profiles where profile.id.hasPrefix("actor:") {
-            unique.insert(String(profile.id.dropFirst(6)))
-        }
-        return Array(unique).sorted()
-    }
-    
-    var allUniqueTags: [String] {
-        let allTags = assets.flatMap { $0.tags }
-        let actionTags = allTags.filter { $0.hasPrefix("tag:") }.map { String($0.dropFirst(4)) }
-        var unique = Set(actionTags)
-        
-        for profile in profiles where profile.id.hasPrefix("tag:") {
-            unique.insert(String(profile.id.dropFirst(4)))
-        }
-        return Array(unique).sorted()
-    }
-    
-    var allUniqueStudios: [String] {
-        let allTags = assets.flatMap { $0.tags }
-        let studioTags = allTags.filter { $0.hasPrefix("studio:") }.map { String($0.dropFirst(7)) }
-        var unique = Set(studioTags)
-        
-        for profile in profiles where profile.id.hasPrefix("studio:") {
-            unique.insert(String(profile.id.dropFirst(7)))
-        }
-        return Array(unique).sorted()
-    }
-    
-    var actorCounts: [String: Int] {
-        var counts = [String: Int]()
+    // MARK: - Cached Derived Data
+    //
+    // The sidebar re-renders on every selection toggle. Deriving these by
+    // flat-mapping the whole library each render (six passes) does not scale,
+    // so they are computed once whenever `assets` or the profiles change.
+    @State private var allUniqueActors: [String] = []
+    @State private var allUniqueTags: [String] = []
+    @State private var allUniqueStudios: [String] = []
+    @State private var actorCounts: [String: Int] = [:]
+    @State private var tagCounts: [String: Int] = [:]
+    @State private var studioCounts: [String: Int] = [:]
+    @State private var reviewProgress: Double = 0
+    @State private var unreviewedCount: Int = 0
+
+    private func recomputeDerivedData() {
+        var actorSet = Set<String>()
+        var tagSet = Set<String>()
+        var studioSet = Set<String>()
+        var newActorCounts = [String: Int]()
+        var newTagCounts = [String: Int]()
+        var newStudioCounts = [String: Int]()
+        var reviewedCount = 0
+        var unreviewed = 0
+
         for asset in assets {
-            var countedForAsset = Set<String>()
-            for tag in asset.tags where tag.hasPrefix("actor:") {
-                let name = String(tag.dropFirst(6))
-                let mapped = akaMap[name] ?? name
-                countedForAsset.insert(mapped)
+            if asset.status == .reviewed { reviewedCount += 1 }
+            if asset.status == .unreviewed { unreviewed += 1 }
+
+            var actorsInAsset = Set<String>()
+            for tag in asset.tags {
+                if tag.hasPrefix("actor:") {
+                    let mapped = akaMap[String(tag.dropFirst(6))] ?? String(tag.dropFirst(6))
+                    actorSet.insert(mapped)
+                    actorsInAsset.insert(mapped)
+                } else if tag.hasPrefix("tag:") {
+                    let name = String(tag.dropFirst(4))
+                    tagSet.insert(name)
+                    newTagCounts[name, default: 0] += 1
+                } else if tag.hasPrefix("studio:") {
+                    let name = String(tag.dropFirst(7))
+                    studioSet.insert(name)
+                    newStudioCounts[name, default: 0] += 1
+                }
             }
-            for mapped in countedForAsset {
-                counts[mapped, default: 0] += 1
+            // Count each actor once per asset (handles duplicate AKA mappings).
+            for actor in actorsInAsset {
+                newActorCounts[actor, default: 0] += 1
             }
         }
-        return counts
+
+        // Profiles may exist without any assets referencing them yet.
+        for profile in profiles {
+            if profile.id.hasPrefix("actor:") {
+                actorSet.insert(String(profile.id.dropFirst(6)))
+            } else if profile.id.hasPrefix("tag:") {
+                tagSet.insert(String(profile.id.dropFirst(4)))
+            } else if profile.id.hasPrefix("studio:") {
+                studioSet.insert(String(profile.id.dropFirst(7)))
+            }
+        }
+
+        allUniqueActors = actorSet.sorted()
+        allUniqueTags = tagSet.sorted()
+        allUniqueStudios = studioSet.sorted()
+        actorCounts = newActorCounts
+        tagCounts = newTagCounts
+        studioCounts = newStudioCounts
+        unreviewedCount = unreviewed
+        reviewProgress = assets.isEmpty ? 0 : Double(reviewedCount) / Double(assets.count)
     }
 
-    var tagCounts: [String: Int] {
-        var counts = [String: Int]()
-        for asset in assets {
-            for tag in asset.tags where tag.hasPrefix("tag:") {
-                counts[String(tag.dropFirst(4)), default: 0] += 1
-            }
-        }
-        return counts
-    }
-
-    var studioCounts: [String: Int] {
-        var counts = [String: Int]()
-        for asset in assets {
-            for tag in asset.tags where tag.hasPrefix("studio:") {
-                counts[String(tag.dropFirst(7)), default: 0] += 1
-            }
-        }
-        return counts
-    }
-    
-    // Stats for progress tracking
-    private var reviewProgress: Double {
-        guard !assets.isEmpty else { return 0 }
-        let reviewed = assets.filter { $0.status == .reviewed }.count
-        return Double(reviewed) / Double(assets.count)
-    }
-
-    private var unreviewedCount: Int {
-        assets.filter { $0.status == .unreviewed }.count
-    }
-    
     // MARK: - Body
     
     var body: some View {
@@ -138,6 +127,11 @@ struct SidebarView: View {
 
                 sidebarRow(title: "Tags Gallery", icon: "tag.square.fill", isSelected: selection == [.tagGallery]) {
                     selection = [.tagGallery]
+                    onApplyFilters()
+                }
+
+                sidebarRow(title: "Series Gallery", icon: "rectangle.stack.fill", isSelected: selection == [.seriesGallery]) {
+                    selection = [.seriesGallery]
                     onApplyFilters()
                 }
             }
@@ -209,7 +203,11 @@ struct SidebarView: View {
         }
         .navigationTitle("ViLM")
         .onAppear {
+            recomputeDerivedData()
             fetchProfiles()
+        }
+        .onChange(of: assets) { _, _ in
+            recomputeDerivedData()
         }
         .onChange(of: libraryURL) { _, _ in
             fetchProfiles()
@@ -239,6 +237,7 @@ struct SidebarView: View {
                 await MainActor.run {
                     self.profiles = allProfiles
                     self.akaMap = newAkaMap
+                    self.recomputeDerivedData()
                 }
             } catch {
                 print("Failed to fetch profiles in sidebar: \(error)")
@@ -295,7 +294,7 @@ struct SidebarView: View {
                 Button(action: {
                     // Filters apply on the assets grid; drop any section
                     // selection so this always lands on the filtered grid.
-                    selection.subtract([.dashboard, .actorGallery, .tagGallery])
+                    selection.subtract([.dashboard, .actorGallery, .tagGallery, .seriesGallery])
                     onApplyFilters()
                 }) {
                     Text("Apply Filters & View Assets")

@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public struct Asset: Identifiable, Codable, FetchableRecord, PersistableRecord, Sendable {
+public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, PersistableRecord, Sendable {
     public let id: UUID
     public var relativePath: String
     public var fileName: String

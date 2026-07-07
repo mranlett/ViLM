@@ -1,5 +1,6 @@
 import SwiftUI
 import LibraryCore
+import CryptoKit
 
 struct ProfileGraphHeaderView: View {
     let filteredAssets: [Asset]
@@ -272,13 +273,7 @@ struct ProfileGraphHeaderView: View {
 
     // MARK: - Full Screen Photo Browser
 
-    /// Paged full-screen photo viewer that wraps around endlessly.
-    ///
-    /// SwiftUI's paged TabView cannot wrap natively, so sentinel copies of the
-    /// last and first photos are placed before/after the real pages. When a
-    /// swipe settles on a sentinel, the selection is repositioned to the
-    /// matching real page with animations disabled — invisible to the user
-    /// because the two pages show the same photo.
+    /// Full-screen photo viewer with endless wrap-around swiping.
     private struct FullScreenPhotoBrowser: View {
         let libraryURL: URL?
         let entityId: String
@@ -287,45 +282,20 @@ struct ProfileGraphHeaderView: View {
         let initialIdentifier: String
         let onClose: () -> Void
 
-        @State private var pageIndex: Int = 0
-
-        // Wrapping only makes sense with more than one photo, and the
-        // sentinel trick relies on the iOS paged style.
-        private var wraps: Bool {
-#if os(iOS)
-            identifiers.count > 1
-#else
-            false
-#endif
-        }
-
-        // Real pages are tagged 1...count when wrapping (0 and count+1 are
-        // the sentinels), 0-based otherwise.
-        private var currentPhotoNumber: Int {
-            let index = wraps ? pageIndex - 1 : pageIndex
-            return min(max(index, 0), identifiers.count - 1) + 1
-        }
+        @State private var index: Int = 0
+        // Full-size images preloaded up front and keyed by identifier, so the
+        // pager's neighbouring pages render their photo as they slide in
+        // instead of showing the black background until they become active.
+        @State private var images: [String: Image] = [:]
 
         var body: some View {
             NavigationStack {
-                TabView(selection: $pageIndex) {
-                    if wraps, let last = identifiers.last {
-                        photoPage(for: last).tag(0)
-                    }
-                    ForEach(Array(identifiers.enumerated()), id: \.offset) { index, identifier in
-                        photoPage(for: identifier).tag(wraps ? index + 1 : index)
-                    }
-                    if wraps, let first = identifiers.first {
-                        photoPage(for: first).tag(identifiers.count + 1)
-                    }
+                WrappingPhotoPager(count: identifiers.count, index: $index) { i in
+                    photoPage(for: identifiers[i])
                 }
-#if os(iOS)
-                // Dots would count the sentinel pages; the title shows the
-                // position instead.
-                .tabViewStyle(.page(indexDisplayMode: .never))
-#endif
                 .background(Color.black)
-                .navigationTitle(identifiers.count > 1 ? "\(currentPhotoNumber) of \(identifiers.count)" : "")
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(identifiers.count > 1 ? "\(index + 1) of \(identifiers.count)" : "")
 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
 #endif
@@ -334,35 +304,144 @@ struct ProfileGraphHeaderView: View {
                         Button("Close") { onClose() }
                     }
                 }
-                .onChange(of: pageIndex) { _, newValue in
-                    guard wraps else { return }
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    if newValue == 0 {
-                        withTransaction(transaction) { pageIndex = identifiers.count }
-                    } else if newValue == identifiers.count + 1 {
-                        withTransaction(transaction) { pageIndex = 1 }
-                    }
-                }
                 .onAppear {
-                    let realIndex = identifiers.firstIndex(of: initialIdentifier) ?? 0
-                    pageIndex = wraps ? realIndex + 1 : realIndex
+                    index = identifiers.firstIndex(of: initialIdentifier) ?? 0
                 }
+                .task { await preloadImages() }
             }
         }
 
+        @ViewBuilder
         private func photoPage(for identifier: String) -> some View {
-            let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
-            let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
-
-            return ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+            if let image = images[identifier] {
                 image
                     .resizable()
                     .scaledToFit()
-            } placeholder: {
-                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Fallback for anything not yet on disk (e.g. a gallery URL not
+                // downloaded yet); ProfileImageView will fetch it.
+                let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+                let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
+                ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                } placeholder: {
+                    ProgressView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+
+        // Resolves the on-disk file for an identifier (no I/O), matching the
+        // naming scheme ProfileImageView writes with.
+        private func fileURL(for identifier: String) -> URL? {
+            guard let libraryURL else { return nil }
+            let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+            let dir = libraryURL.appendingPathComponent(".catalog/profiles")
+            let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+            if isGallery, identifier != "local://primary" {
+                let hash = SHA256.hash(data: Data(identifier.utf8)).compactMap { String(format: "%02x", $0) }.joined()
+                return dir.appendingPathComponent("\(safeId)_\(hash).jpg")
+            }
+            return dir.appendingPathComponent("\(safeId).jpg")
+        }
+
+        private func preloadImages() async {
+            // Load the initially-shown photo first so it appears fastest, then
+            // the rest so neighbours are ready before the first swipe.
+            let start = identifiers.firstIndex(of: initialIdentifier) ?? 0
+            let ordered = (0..<identifiers.count).map { identifiers[(start + $0) % identifiers.count] }
+            for identifier in ordered {
+                if images[identifier] != nil { continue }
+                guard let url = fileURL(for: identifier),
+                      FileManager.default.fileExists(atPath: url.path) else { continue }
+                let image = await Task.detached { () -> Image? in
+                    guard let data = try? Data(contentsOf: url),
+                          let platformImage = PlatformImage(data: data) else { return nil }
+                    return Image(platformImage: platformImage)
+                }.value
+                if let image { images[identifier] = image }
+            }
+        }
+    }
+
+    /// A three-page carousel that wraps endlessly with genuinely seamless
+    /// transitions.
+    ///
+    /// Rather than fighting `TabView`'s page style (which animates the large
+    /// index jump when snapping past a sentinel), this renders exactly three
+    /// pages — previous, current, next — and drives a manual drag offset.
+    /// After a swipe animates the neighbour to center, `index` is updated and
+    /// the offset reset in the animation's completion handler. Because the
+    /// newly-centered page shows the identical photo at the identical screen
+    /// position, the recenter is invisible.
+    private struct WrappingPhotoPager<Content: View>: View {
+        let count: Int
+        @Binding var index: Int
+        @ViewBuilder let content: (Int) -> Content
+
+        @State private var dragOffset: CGFloat = 0
+        @State private var isSettling = false
+
+        var body: some View {
+            GeometryReader { geo in
+                let w = max(geo.size.width, 1)
+                Group {
+                    if count <= 1 {
+                        content(wrapped(index))
+                            .frame(width: w, height: geo.size.height)
+                    } else {
+                        HStack(spacing: 0) {
+                            content(wrapped(index - 1)).frame(width: w, height: geo.size.height)
+                            content(wrapped(index)).frame(width: w, height: geo.size.height)
+                            content(wrapped(index + 1)).frame(width: w, height: geo.size.height)
+                        }
+                        .offset(x: -w + dragOffset)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    guard !isSettling else { return }
+                                    dragOffset = value.translation.width
+                                }
+                                .onEnded { value in
+                                    guard !isSettling else { return }
+                                    let threshold = w * 0.25
+                                    if value.translation.width <= -threshold {
+                                        settle(step: 1, width: w)
+                                    } else if value.translation.width >= threshold {
+                                        settle(step: -1, width: w)
+                                    } else {
+                                        withAnimation(.easeOut(duration: 0.2)) { dragOffset = 0 }
+                                    }
+                                }
+                        )
+                    }
+                }
+                .frame(width: w, height: geo.size.height)
+                .clipped()
+                .contentShape(Rectangle())
+            }
+        }
+
+        private func wrapped(_ i: Int) -> Int {
+            guard count > 0 else { return 0 }
+            return ((i % count) + count) % count
+        }
+
+        private func settle(step: Int, width w: CGFloat) {
+            isSettling = true
+            withAnimation(.easeOut(duration: 0.25)) {
+                // step +1 slides content left to reveal the next page; -1 right.
+                dragOffset = -CGFloat(step) * w
+            } completion: {
+                // Recenter onto the now-visible page with no animation. Same
+                // pixels at the same position, so nothing appears to move.
+                index = wrapped(index + step)
+                dragOffset = 0
+                isSettling = false
+            }
         }
     }
     
@@ -372,7 +451,7 @@ struct ProfileGraphHeaderView: View {
         case .studio(let name): return "\(name) Studio Graph"
         case .tag(let name): return "Tag Graph: \(name)"
         case .series(let name): return "Series Graph: \(name)"
-        case .dashboard, .allAssets, .actorGallery, .tagGallery, .smartCollection: return ""
+        case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .smartCollection: return ""
         }
     }
     

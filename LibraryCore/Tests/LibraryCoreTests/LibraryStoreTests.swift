@@ -165,6 +165,32 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(destination.bio, "existing bio", "an existing destination profile must not be overwritten")
     }
 
+    // MARK: - Series Rename
+
+    func testRenameSeriesMergesVariants() throws {
+        var a = Asset(relativePath: "a.mp4", fileName: "a.mp4"); a.videoName = "the office"
+        var b = Asset(relativePath: "b.mp4", fileName: "b.mp4"); b.videoName = "The Office "
+        var c = Asset(relativePath: "c.mp4", fileName: "c.mp4"); c.videoName = "Unrelated"
+        try store.saveAsset(a); try store.saveAsset(b); try store.saveAsset(c)
+        // saveAsset is insert-only and doesn't persist videoName, so set it via update.
+        for var asset in try store.fetchAllAssets() {
+            switch asset.relativePath {
+            case "a.mp4": asset.videoName = "the office"
+            case "b.mp4": asset.videoName = "The Office "
+            case "c.mp4": asset.videoName = "Unrelated"
+            default: break
+            }
+            try store.updateAsset(asset)
+        }
+
+        try store.renameSeries(from: ["the office", "The Office "], to: "The Office")
+
+        let byPath = Dictionary(uniqueKeysWithValues: try store.fetchAllAssets().map { ($0.relativePath, $0) })
+        XCTAssertEqual(byPath["a.mp4"]?.videoName, "The Office")
+        XCTAssertEqual(byPath["b.mp4"]?.videoName, "The Office")
+        XCTAssertEqual(byPath["c.mp4"]?.videoName, "Unrelated", "unrelated series must be untouched")
+    }
+
     // MARK: - Smart Collections
 
     func testSmartCollectionRoundTripAndOrdering() throws {

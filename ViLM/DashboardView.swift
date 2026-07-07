@@ -1,6 +1,7 @@
 import SwiftUI
 import LibraryCore
 import Charts
+import ImageIO
 
 #if os(iOS)
 import UIKit
@@ -40,73 +41,67 @@ struct DashboardView: View {
     @State private var profileImageFileNames: Set<String> = []
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
-    
-    private var totalActors: Int {
-        let allTags = assets.flatMap { $0.tags }
-        let actorTags = allTags.filter { $0.hasPrefix("actor:") }
-        return Set(actorTags).union(actorProfiles.keys).count
-    }
-    
-    private var totalTags: Int {
-        let allTags = assets.flatMap { $0.tags }
-        let regularTags = allTags.filter { $0.hasPrefix("tag:") }
-        return Set(regularTags).count
-    }
-    
-    private var recentlyAdded: [Asset] {
-        Array(assets.sorted { $0.createdAt > $1.createdAt }.prefix(10))
-    }
-    
-    private var unreviewed: [Asset] {
-        Array(assets.filter { $0.status == .unreviewed }.prefix(10))
-    }
-    
-    private var recentlyAddedActors: [String] {
-        let sortedProfiles = actorProfiles.values.sorted { 
-            ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
-        }
-        return Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
-    }
-    
-    private var actorsNeedingAttention: [String] {
-        var needsAttention: [String] = []
-        for profile in actorProfiles.values {
-            let actorName = String(profile.id.dropFirst(6))
-            let safeId = profile.id.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-            let exactMatch = profileImageFileNames.contains("\(safeId).jpg")
-            let prefixMatch = profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
-            let hasLocalPhoto = exactMatch || prefixMatch
-            let hasPhoto = hasLocalPhoto || profile.photoUrl != nil
-            
-            if !hasPhoto {
-                needsAttention.append(actorName)
-            }
-            if needsAttention.count >= 10 { break } // limit to 10
-        }
-        return needsAttention
-    }
-    
-    private var growthData: [(date: Date, count: Int)] {
+
+    // Cached derived stats. Recomputed only when assets or the loaded
+    // profiles/images change, rather than re-sorting/re-bucketing the whole
+    // library on every render of the dashboard.
+    @State private var totalActors: Int = 0
+    @State private var totalTags: Int = 0
+    @State private var recentlyAdded: [Asset] = []
+    @State private var unreviewed: [Asset] = []
+    @State private var recentlyAddedActors: [String] = []
+    @State private var actorsNeedingAttention: [String] = []
+    @State private var growthData: [(date: Date, count: Int)] = []
+
+    private func recomputeStats() {
+        var actorTagSet = Set<String>()
+        var tagSet = Set<String>()
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
         var countsByDay: [Date: Int] = [:]
-        
+
         for asset in assets {
+            for tag in asset.tags {
+                if tag.hasPrefix("actor:") { actorTagSet.insert(tag) }
+                else if tag.hasPrefix("tag:") { tagSet.insert(tag) }
+            }
             if asset.createdAt >= thirtyDaysAgo {
                 let startOfDay = Calendar.current.startOfDay(for: asset.createdAt)
                 countsByDay[startOfDay, default: 0] += 1
             }
         }
-        
+
+        totalActors = actorTagSet.union(actorProfiles.keys).count
+        totalTags = tagSet.count
+        recentlyAdded = Array(assets.sorted { $0.createdAt > $1.createdAt }.prefix(10))
+        unreviewed = Array(assets.filter { $0.status == .unreviewed }.prefix(10))
+
+        let sortedProfiles = actorProfiles.values.sorted {
+            ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+        }
+        recentlyAddedActors = Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
+
+        var needsAttention: [String] = []
+        for profile in actorProfiles.values {
+            let safeId = profile.id.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+            let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg")
+                || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
+            let hasPhoto = hasLocalPhoto || profile.photoUrl != nil
+            if !hasPhoto {
+                needsAttention.append(String(profile.id.dropFirst(6)))
+            }
+            if needsAttention.count >= 10 { break }
+        }
+        actorsNeedingAttention = needsAttention
+
         var cumulative = 0
-        var result: [(Date, Int)] = []
+        var result: [(date: Date, count: Int)] = []
         for i in 0...30 {
             let day = Calendar.current.date(byAdding: .day, value: i, to: thirtyDaysAgo)!
             let startOfDay = Calendar.current.startOfDay(for: day)
             cumulative += countsByDay[startOfDay] ?? 0
             result.append((startOfDay, cumulative))
         }
-        
-        return result
+        growthData = result
     }
     
     var body: some View {
@@ -119,7 +114,7 @@ struct DashboardView: View {
                         .bold()
                     Text("Here's what's new in your library")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.primary)
                 }
                 .padding(.horizontal)
                 .padding(.top, 10)
@@ -137,10 +132,11 @@ struct DashboardView: View {
                     HStack {
                         Text("Library Growth")
                             .font(.headline)
+                            .foregroundColor(.primary)
                         Spacer()
                         Text("Last 30 days")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                     }
                     
                     let data = growthData
@@ -172,7 +168,7 @@ struct DashboardView: View {
                     HStack {
                         Text("30d ago")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                         Spacer()
                         Text("+\(data.last?.count ?? 0) added")
                             .font(.caption2)
@@ -181,7 +177,7 @@ struct DashboardView: View {
                         Spacer()
                         Text("Today")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                     }
                 }
                 .padding()
@@ -370,8 +366,12 @@ struct DashboardView: View {
         // MODIFICATION: [2026-07-05 22:52:00 UTC] Removed .navigationBarHidden(true) to restore back button and added navigationTitle
         .navigationTitle("Dashboard")
         .onAppear {
+            recomputeStats()
             loadActorProfiles()
             loadProfileImages()
+        }
+        .onChange(of: assets) { _, _ in
+            recomputeStats()
         }
     }
     
@@ -458,17 +458,19 @@ struct DashboardView: View {
                     dict[p.id] = p
                 }
                 actorProfiles = dict
+                recomputeStats()
             } catch {
                 print("Failed to load profiles: \(error)")
             }
         }
     }
-    
+
     private func loadProfileImages() {
         guard let url = libraryURL else { return }
         let profilesDir = url.appendingPathComponent(".catalog/profiles")
         if let contents = try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path) {
             profileImageFileNames = Set(contents)
+            recomputeStats()
         }
     }
 }
@@ -580,11 +582,13 @@ struct ActorCircleCard: View {
     let profile: EntityProfile?
     let profileImageFileNames: Set<String>
     let libraryURL: URL?
-    
+
+    @State private var loadedImage: PlatformImage?
+
     var body: some View {
         VStack(spacing: 6) {
             Group {
-                if let image = getProfileImage() {
+                if let image = loadedImage {
                     Image(platformImage: image)
                         .resizable()
                         .scaledToFill()
@@ -599,47 +603,79 @@ struct ActorCircleCard: View {
             }
             .frame(width: 72, height: 72)
             .clipShape(Circle())
-            
+
             Text(actorName)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
                 .frame(width: 78)
-            
+
             if let date = profile?.createdAt {
                 Text(timeAgo(since: date))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
         }
-    }
-    
-    private func getProfileImage() -> PlatformImage? {
-        guard let url = libraryURL else { return nil }
-        let safeId = "actor:\(actorName)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let profilesDir = url.appendingPathComponent(".catalog/profiles")
-        let exactMatch = "\(safeId).jpg"
-        let prefixMatch = "\(safeId)_"
-        
-        var targetFile: String?
-        if profileImageFileNames.contains(exactMatch) {
-            targetFile = exactMatch
-        } else if let match = profileImageFileNames.first(where: { $0.hasPrefix(prefixMatch) }) {
-            targetFile = match
+        .task(id: actorName) {
+            loadedImage = await ProfileAvatarLoader.image(
+                actorName: actorName,
+                fileNames: profileImageFileNames,
+                libraryURL: libraryURL,
+                maxPixelSize: 150
+            )
         }
-        
-        if let target = targetFile {
-            let fileURL = profilesDir.appendingPathComponent(target)
-            if let data = try? Data(contentsOf: fileURL) {
-                return PlatformImage(data: data)
-            }
-        }
-        return nil
     }
-    
+
     private func timeAgo(since date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Profile Avatar Loader
+//
+// Resolves and decodes an actor's local profile image off the main thread,
+// downsampled to display size and cached. Used by the dashboard's actor
+// carousels/rows where sync decoding in `body` stalled scrolling.
+enum ProfileAvatarLoader {
+    private static let cache = NSCache<NSString, PlatformImage>()
+
+    static func image(actorName: String, fileNames: Set<String>, libraryURL: URL?, maxPixelSize: Int) async -> PlatformImage? {
+        guard let url = libraryURL else { return nil }
+        let safeId = "actor:\(actorName)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let exactMatch = "\(safeId).jpg"
+        let prefixMatch = "\(safeId)_"
+
+        let targetFile: String?
+        if fileNames.contains(exactMatch) {
+            targetFile = exactMatch
+        } else if let match = fileNames.first(where: { $0.hasPrefix(prefixMatch) }) {
+            targetFile = match
+        } else {
+            targetFile = nil
+        }
+        guard let target = targetFile else { return nil }
+
+        let fileURL = url.appendingPathComponent(".catalog/profiles").appendingPathComponent(target)
+        return await Task.detached(priority: .userInitiated) {
+            let key = "\(fileURL.path)|\(maxPixelSize)" as NSString
+            if let cached = cache.object(forKey: key) { return cached }
+
+            guard let src = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            ]
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+#if os(iOS)
+            let image = UIImage(cgImage: cg)
+#else
+            let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+#endif
+            cache.setObject(image, forKey: key)
+            return image
+        }.value
     }
 }
 
@@ -648,11 +684,13 @@ struct ActorAttentionRow: View {
     let profile: EntityProfile?
     let profileImageFileNames: Set<String>
     let libraryURL: URL?
-    
+
+    @State private var loadedImage: PlatformImage?
+
     var body: some View {
         HStack(spacing: 12) {
             Group {
-                if let image = getProfileImage() {
+                if let image = loadedImage {
                     Image(platformImage: image)
                         .resizable()
                         .scaledToFill()
@@ -689,47 +727,21 @@ struct ActorAttentionRow: View {
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
         .background(Color(PlatformSystemBackground))
+        .task(id: actorName) {
+            loadedImage = await ProfileAvatarLoader.image(
+                actorName: actorName,
+                fileNames: profileImageFileNames,
+                libraryURL: libraryURL,
+                maxPixelSize: 100
+            )
+        }
     }
-    
-    private var hasPhoto: Bool {
-        getProfileImage() != nil
-    }
-    
-    private var hasBio: Bool {
-        !(profile?.bio ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-    }
-    
-    private var hasTags: Bool {
-        !(profile?.tags ?? []).isEmpty
-    }
-    
+
     private var missingLabel: String {
         return "No profile photo"
     }
-    
+
     private var actionLabel: String {
         return "Add Photo"
-    }
-    private func getProfileImage() -> PlatformImage? {
-        guard let url = libraryURL else { return nil }
-        let safeId = "actor:\(actorName)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let profilesDir = url.appendingPathComponent(".catalog/profiles")
-        let exactMatch = "\(safeId).jpg"
-        let prefixMatch = "\(safeId)_"
-        
-        var targetFile: String?
-        if profileImageFileNames.contains(exactMatch) {
-            targetFile = exactMatch
-        } else if let match = profileImageFileNames.first(where: { $0.hasPrefix(prefixMatch) }) {
-            targetFile = match
-        }
-        
-        if let target = targetFile {
-            let fileURL = profilesDir.appendingPathComponent(target)
-            if let data = try? Data(contentsOf: fileURL) {
-                return PlatformImage(data: data)
-            }
-        }
-        return nil
     }
 }

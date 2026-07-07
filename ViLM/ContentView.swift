@@ -12,6 +12,7 @@ enum SidebarItem: Hashable {
     case allAssets
     case actorGallery
     case tagGallery
+    case seriesGallery
     case actor(String)
     case tag(String)
     case studio(String)
@@ -47,6 +48,7 @@ struct ContentView: View {
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
+    @State private var isShowingDuplicateDetection = false
 
 #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -138,6 +140,7 @@ struct ContentView: View {
                     onOpenLibrary: openLibrary,
                     onCheckForChanges: validateLibrary,
                     onAuditFileName: { isShowingFileNameAudit = true },
+                    onFindDuplicates: { isShowingDuplicateDetection = true },
                     onTagCleanup: { isShowingTagCleanup = true },
                     onSelectAsset: { assetID in
                         isShowingSettings = false
@@ -172,6 +175,23 @@ struct ContentView: View {
             .sheet(isPresented: $isShowingFileNameAudit) {
                 if let url = selectedLibraryURL {
                     FileNameAuditView(
+                        libraryURL: url,
+                        assets: assets,
+                        onRefresh: {
+                            do {
+                                let store = try LibraryStore(at: url)
+                                self.assets = try store.fetchAllAssets()
+                                self.gridRefreshID = UUID()
+                            } catch {
+                                print("Refresh failed: \(error)")
+                            }
+                        }
+                    )
+                }
+            }
+            .sheet(isPresented: $isShowingDuplicateDetection) {
+                if let url = selectedLibraryURL {
+                    DuplicateDetectionView(
                         libraryURL: url,
                         assets: assets,
                         onRefresh: {
@@ -325,6 +345,12 @@ struct ContentView: View {
             )
         } else if sidebarSelection.contains(.tagGallery) {
             TagGalleryView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                libraryURL: selectedLibraryURL
+            )
+        } else if sidebarSelection.contains(.seriesGallery) {
+            SeriesGalleryView(
                 assets: assets,
                 sidebarSelection: $sidebarSelection,
                 libraryURL: selectedLibraryURL
@@ -659,15 +685,24 @@ struct ContentView: View {
 #endif
                     }
 
-                    // Generate images in background task to not block UI updates
+                    // Generate images in background task to not block UI updates.
                     Task {
+                        // Refreshing the grid after every single thumbnail
+                        // thrashes the UI on large imports. Coalesce to at most
+                        // one refresh every ~1.5s; the per-thumbnail views pick
+                        // up newly-generated files on each refresh tick.
+                        var lastRefresh = Date.distantPast
+                        let refreshInterval: TimeInterval = 1.5
+
                         for asset in initialAssets {
                             try? await service.generateContactSheet(for: asset, libraryURL: url)
                             try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
 
-                            // Incremental refresh
-                            await MainActor.run {
-                                self.gridRefreshID = UUID()
+                            if Date().timeIntervalSince(lastRefresh) >= refreshInterval {
+                                lastRefresh = Date()
+                                await MainActor.run {
+                                    self.gridRefreshID = UUID()
+                                }
                             }
                         }
 

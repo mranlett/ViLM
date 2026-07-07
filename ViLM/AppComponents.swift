@@ -142,54 +142,50 @@ struct FrameExtractView: View {
     }
 }
 
-// MARK: - Single Frame Thumbnail View (local file thumbnail)
-struct VideoThumbnailView: View {
-    let asset: Asset
-    let libraryURL: URL?
+// MARK: - Thumbnail Loader
+//
+// Loads grid thumbnails off the main thread, downsampled at decode time to
+// roughly their display size, and memory-cached. Grid cells re-render often
+// (search keystrokes, selection changes); decoding full-size JPEGs on the
+// main thread per render does not scale to large libraries.
+enum ThumbnailLoader {
+    private static let cache = NSCache<NSString, CGImage>()  // thread-safe
 
-    var body: some View {
-        VStack(alignment: .leading) {
-            if let libraryURL {
-                // POINT TO THE SINGLE THUMBNAIL FOLDER
-                let imageURL = libraryURL
-                    .appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg")
+    /// Cache key includes the file's modification date so regenerated
+    /// thumbnails (e.g. "Set as Main Thumbnail") are picked up.
+    static func image(from url: URL, maxPixelSize: Int) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+            let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let key = "\(url.path)|\(modified)|\(maxPixelSize)" as NSString
 
-                if let cgImage = loadCGImage(from: imageURL) {
-                    Image(decorative: cgImage, scale: 1.0, orientation: .up)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 180)
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 180)
-                        .overlay(ProgressView())
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-            }
+            if let cached = cache.object(forKey: key) { return cached }
 
-            Text(asset.fileName)
-                .font(.caption)
-                .lineLimit(1)
-        }
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            ]
+            guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+            cache.setObject(image, forKey: key)
+            return image
+        }.value
     }
 }
 
-// MARK: - Grid Thumbnail View (local file contact sheet)
-struct ContactSheetThumbnailView: View {
-    let asset: Asset
-    let libraryURL: URL?
+// MARK: - Async Thumbnail Image (shared cell body)
+private struct AsyncThumbnailImage: View {
+    let imageURL: URL
+    let maxPixelSize: Int
+    // Bump to re-check for a file that didn't exist yet (during generation)
+    var refreshToken: UUID? = nil
+
+    @State private var cgImage: CGImage?
 
     var body: some View {
-        if let libraryURL {
-            // IMPORTANT: aligns with ContactSheetService output folder
-            let imageURL = libraryURL
-                .appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
-
-            if let cgImage = loadCGImage(from: imageURL) {
+        Group {
+            if let cgImage {
                 Image(decorative: cgImage, scale: 1.0, orientation: .up)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -204,6 +200,53 @@ struct ContactSheetThumbnailView: View {
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
+        }
+        .task(id: "\(imageURL.path)|\(refreshToken?.uuidString ?? "")") {
+            if let image = await ThumbnailLoader.image(from: imageURL, maxPixelSize: maxPixelSize) {
+                cgImage = image
+            }
+        }
+    }
+}
+
+// MARK: - Single Frame Thumbnail View (local file thumbnail)
+struct VideoThumbnailView: View {
+    let asset: Asset
+    let libraryURL: URL?
+    var refreshToken: UUID? = nil
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            if let libraryURL {
+                // POINT TO THE SINGLE THUMBNAIL FOLDER
+                AsyncThumbnailImage(
+                    imageURL: libraryURL.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg"),
+                    maxPixelSize: 700,
+                    refreshToken: refreshToken
+                )
+            }
+
+            Text(asset.fileName)
+                .font(.caption)
+                .lineLimit(1)
+        }
+    }
+}
+
+// MARK: - Grid Thumbnail View (local file contact sheet)
+struct ContactSheetThumbnailView: View {
+    let asset: Asset
+    let libraryURL: URL?
+    var refreshToken: UUID? = nil
+
+    var body: some View {
+        if let libraryURL {
+            // IMPORTANT: aligns with ContactSheetService output folder
+            AsyncThumbnailImage(
+                imageURL: libraryURL.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg"),
+                maxPixelSize: 1100,
+                refreshToken: refreshToken
+            )
         }
     }
 }
@@ -328,9 +371,3 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - Cross-platform image loader (ImageIO)
-private func loadCGImage(from url: URL) -> CGImage? {
-    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    return CGImageSourceCreateImageAtIndex(src, 0, nil)
-}
