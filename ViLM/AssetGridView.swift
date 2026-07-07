@@ -46,6 +46,7 @@ struct AssetsGridView: View {
     let missingAssetIDs: Set<Asset.ID>
     @AppStorage("assetGridStyle") private var gridStyle: GridStyle = .singleFrame
     @State private var isEditMode: Bool = false
+    @State private var isShowingHelp = false
     let libraryURL: URL?
     let refreshID: UUID
     @Binding var filteredAssetContext: [Asset.ID]
@@ -500,6 +501,12 @@ struct AssetsGridView: View {
         .navigationSubtitle("\(displayedAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
         .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
             ToolbarItem(placement: .primaryAction) {
                 HStack {
                     Menu {
@@ -565,6 +572,9 @@ struct AssetsGridView: View {
         .sheet(isPresented: $isShowingFilterBuilder) {
             FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: actorProfiles)
         }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: currentHelpTopicID)
+        }
         .alert("Save Smart Collection", isPresented: $isShowingSaveCollection) {
             TextField("Collection Name", text: $newCollectionName)
             Button("Cancel", role: .cancel) { newCollectionName = "" }
@@ -622,6 +632,21 @@ struct AssetsGridView: View {
         guard sidebarSelection.count == 1, let first = sidebarSelection.first else { return false }
         if case .series = first { return true }
         return false
+    }
+
+    // This view is reused as the actor/studio/tag/series profile page
+    // (via EntityProfileRouteView), so point Help at the right topic
+    // depending on what's actually being shown.
+    private var currentHelpTopicID: String {
+        if sidebarSelection.count == 1, let first = sidebarSelection.first {
+            switch first {
+            case .actor, .studio, .tag, .series:
+                return HelpContent.actorProfile.id
+            default:
+                break
+            }
+        }
+        return HelpContent.allAssets.id
     }
 
     // MARK: - Season grouping

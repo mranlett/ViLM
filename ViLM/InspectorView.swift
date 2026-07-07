@@ -60,6 +60,7 @@ struct SingleInspectorView: View {
     @State private var isShowingRenameDialog = false
     @State private var suggestedRenameValue = ""
     @State private var showDeleteConfirmation = false
+    @State private var isShowingHelp = false
     
     private var currentIndex: Int? {
         contextAssetIDs.firstIndex(of: asset.id)
@@ -470,6 +471,15 @@ struct SingleInspectorView: View {
                 }
                 .help("Toggle Full Screen")
             }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.videoDetails.id)
         }
     }
 

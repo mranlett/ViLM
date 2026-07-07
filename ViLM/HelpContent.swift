@@ -24,9 +24,145 @@ struct HelpTopic: Identifiable {
 /// browsable from the table of contents.
 enum HelpContent {
     static let topics: [HelpTopic] = [
+        dashboard,
+        allAssets,
+        actorGallery,
+        tagGallery,
         seriesGallery,
+        videoDetails,
+        actorProfile,
         settings,
     ]
+
+    static let dashboard = HelpTopic(
+        id: "dashboard",
+        title: "Dashboard",
+        summary: "Your library's home base — quick stats, what's new, and shortcuts to videos and actors that need attention.",
+        items: [
+            .init(label: "Stat cards",
+                  description: "Your total video count, total known actors, and total unique tags at a glance."),
+            .init(label: "Library Growth chart",
+                  description: "How many videos you've added over the last 30 days, so you can see your library growing over time."),
+            .init(label: "Recently Added",
+                  description: "Your newest videos. Tap one to open it, or tap See All to view every video sorted by date added."),
+            .init(label: "Unreviewed",
+                  description: "Videos you haven't marked as reviewed yet. Tap a thumbnail to open the video, or tap Mark Reviewed right on the card to check it off without opening it. Tap See All to view every unreviewed video."),
+            .init(label: "Recently Added Actors",
+                  description: "Your newest actor profiles. Tap one to open their profile, or tap See All to view every actor sorted by date added."),
+            .init(label: "Actors Needing Attention",
+                  description: "Actors missing a profile photo. Tap one to open their profile and fill it in. Tap See All for the fuller list, which also includes actors missing a bio or tags."),
+        ]
+    )
+
+    static let allAssets = HelpTopic(
+        id: "allAssets",
+        title: "All Assets",
+        summary: "The main way to browse your video library — search, filter, sort, and open videos.",
+        items: [
+            .init(label: "Search bar",
+                  description: "Searches filenames, series names, episode titles, notes, actor names (including aliases and bios), tags, and studios. You can type multiple words — each word can match a different field, so \"jane beach\" finds a video where \"jane\" is an actor and \"beach\" is in the title."),
+            .init(label: "Filter button",
+                  description: "Opens detailed filters — review status, minimum rating, and specific actors, tags, studios, or actor details like hair color, gender, and country — to narrow the grid down. You can save your current filters as the default, or save them as a named Smart Collection in the sidebar."),
+            .init(label: "Sort menu",
+                  description: "Choose Series Order (season, then episode, then date), Name, Date Added, or File Size, and flip between ascending and descending."),
+            .init(label: "View Options",
+                  description: "Switch each thumbnail between a single poster frame and a contact-sheet grid of frames, and choose how many videos appear per row (Auto, 1, 2, or 3)."),
+            .init(label: "Save Collection",
+                  description: "Appears once a filter is active — saves the current filter (and whatever actor/tag/studio you're viewing) as a Smart Collection you can jump back to from the sidebar."),
+            .init(label: "Select (iPhone)",
+                  description: "Turns on multi-select so you can tap several videos, then Edit Selected to change tags, reviewed status, or series/season for all of them at once."),
+            .init(label: "Filter chips",
+                  description: "When you're viewing more than one actor, tag, studio, or series at once, each appears as a removable chip at the top of the grid."),
+        ]
+    )
+
+    static let actorGallery = HelpTopic(
+        id: "actorGallery",
+        title: "Actor Gallery",
+        summary: "Browse, search, and manage your cast of actors.",
+        items: [
+            .init(label: "Search bar",
+                  description: "Searches actor names and their aliases (AKAs)."),
+            .init(label: "A–Z picker",
+                  description: "Jump straight to actors whose name starts with a given letter."),
+            .init(label: "Sort menu",
+                  description: "Sort actors alphabetically or by number of videos, ascending or descending."),
+            .init(label: "Filter button",
+                  description: "Filter actors by gender, hair color, country, or actor tags."),
+            .init(label: "Select",
+                  description: "Turns on multi-select so you can tap several actors, then Edit to bulk-apply shared tags or details to all of them at once, or View Matches to see their combined videos."),
+            .init(label: "Export to CSV",
+                  description: "Saves every actor's name, bio, photo URL, home page, gender, hair color, birth year, and country to a spreadsheet file you can edit in Excel or Numbers. This is text only — it doesn't move actual photo files, just the photo's URL if one is set."),
+            .init(label: "Import from CSV",
+                  description: "Reads a CSV file (in the format Export produces) and updates matching actors. Only fills in the fields the CSV has a value for — a blank cell leaves whatever's already there untouched, and tags, gallery photos, and aliases are always preserved, since this format doesn't carry them."),
+        ]
+    )
+
+    static let tagGallery = HelpTopic(
+        id: "tagGallery",
+        title: "Tag Gallery",
+        summary: "Browse every tag used across your library.",
+        items: [
+            .init(label: "A–Z picker",
+                  description: "Jump straight to tags starting with a given letter."),
+            .init(label: "Tag cards",
+                  description: "Tap a tag to select it (you can select more than one); each card shows how many videos use that tag."),
+            .init(label: "View Matches",
+                  description: "Appears once you've selected one or more tags — switches to the All Assets grid filtered to videos with those tags."),
+        ]
+    )
+
+    static let videoDetails = HelpTopic(
+        id: "videoDetails",
+        title: "Video Details",
+        summary: "Everything about one video: playback, metadata, tags, and file management. Selecting more than one video at once shows a batch-edit version instead, for changing shared details across all of them together.",
+        items: [
+            .init(label: "Frame grid",
+                  description: "Tap or drag across the thumbnail grid to seek the player to that point in the video."),
+            .init(label: "Player controls",
+                  description: "Show or hide the inline player, pop it out into its own window (Mac), or play from the start."),
+            .init(label: "Reviewed toggle",
+                  description: "Marks the video as reviewed or unreviewed."),
+            .init(label: "Rating stars",
+                  description: "Tap a star to set a 1–5 star rating; tap the same star again to clear the rating."),
+            .init(label: "Notes",
+                  description: "A free-text field for your own notes — saved as you type."),
+            .init(label: "Series Name, Season/Movie #, Episode #, Episode Title",
+                  description: "Set which series this video belongs to, its season or movie number, its episode number, and an optional episode title. A preview underneath shows exactly how this will sort and file."),
+            .init(label: "Tags, Actors, Studios",
+                  description: "Add, rename, or remove entries in each category. Typing shows matching existing values to reuse, plus suggestions guessed from the filename. Tapping an existing tag/actor/studio jumps to its own page."),
+            .init(label: "Rename File",
+                  description: "Appears when the filename doesn't match what your metadata suggests it should be — lets you rename the file to match."),
+            .init(label: "Missing file handling",
+                  description: "If a video's file can't be found on disk, shows a Remove Missing File button that deletes just the library record (the file itself is already gone, so there's nothing to move)."),
+            .init(label: "Previous / Next",
+                  description: "Step through the same list of videos you arrived from, without going back to the grid."),
+            .init(label: "Full-screen toggle",
+                  description: "Expands the detail pane to fill the window."),
+            .init(label: "Delete Video",
+                  description: "In the Danger Zone section — moves the video file and its metadata to the Trash. Recoverable from the Trash, but not undoable within the app."),
+            .init(label: "Batch edit (multiple videos selected)",
+                  description: "Toggle reviewed status for all selected videos at once, add or remove tags shared across the whole selection, and set the same Series Name or Season number for every selected video. Episode number and episode title are edited one video at a time, since those are usually unique per video."),
+        ]
+    )
+
+    static let actorProfile = HelpTopic(
+        id: "actorProfile",
+        title: "Actor Profile",
+        summary: "An actor's full profile: photo, bio, details, and every video they appear in.",
+        items: [
+            .init(label: "Explore Related Links",
+                  description: "A collapsible section (closed by default) showing studios, co-actors, tags, and series connected to this actor — tap any of them to jump straight there."),
+            .init(label: "Profile photo",
+                  description: "Tap it to browse a full-screen gallery of every photo you've added for this actor. Swipe left or right to move between photos, including wrapping from the last photo back to the first."),
+            .init(label: "Ellipsis menu",
+                  description: "Rename Globally changes this actor's name everywhere in your library at once. Edit Bio opens the full details form. Delete Profile removes the actor's profile — only available once they have no videos left."),
+            .init(label: "Edit Bio form",
+                  description: "Add a profile photo and gallery photos (by pasting an image URL), bio, home page, gender, hair color, birth year, country of origin (this adds a flag emoji automatically), tags, and aliases (AKAs) used to automatically match old filenames to this actor."),
+            .init(label: "Filmography",
+                  description: "Every video featuring this actor, shown as a grid — tap one to open it."),
+        ]
+    )
 
     static let seriesGallery = HelpTopic(
         id: "seriesGallery",

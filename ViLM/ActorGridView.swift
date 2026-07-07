@@ -31,6 +31,7 @@ struct ActorGridView: View {
     @State private var filterCriteria = ActorFilterCriteria()
     @State private var isShowingFilterBuilder = false
     @State private var isSelectionMode = false
+    @State private var isShowingHelp = false
     @State private var searchText = ""
     
     var uniqueGenders: [String] {
@@ -329,6 +330,15 @@ struct ActorGridView: View {
                     Image(systemName: "ellipsis.circle")
                 }
             }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.actorGallery.id)
         }
         .fileExporter(
             isPresented: $isShowingExportPicker,
@@ -532,7 +542,7 @@ struct ActorGridView: View {
             let profile = actorProfiles["actor:\(actor)"]
             let name = escapeCSV(actor)
             let bio = escapeCSV(profile?.bio ?? "")
-            let photoUrl = escapeCSV("")
+            let photoUrl = escapeCSV(profile?.photoUrl ?? "")
             let homePage = escapeCSV(profile?.homePage ?? "")
             let gender = escapeCSV(profile?.gender ?? "")
             let hairColor = escapeCSV(profile?.hairColor ?? "")
@@ -572,32 +582,34 @@ struct ActorGridView: View {
                 if columns.count >= 4 {
                     let name = columns[0]
                     if name.isEmpty { continue }
-                    
-                    let bio = columns[1].isEmpty ? nil : columns[1]
-                    let photoUrl = columns[2].isEmpty ? nil : columns[2]
-                    let homePage = columns[3].isEmpty ? nil : columns[3]
-                    
-                    var gender: String? = nil
-                    var hairColor: String? = nil
-                    var birthYear: Int? = nil
-                    var country: String? = nil
-                    
-                    if columns.count >= 8 {
-                        gender = columns[4].isEmpty ? nil : columns[4]
-                        hairColor = columns[5].isEmpty ? nil : columns[5]
-                        birthYear = Int(columns[6])
-                        country = columns[7].isEmpty ? nil : columns[7]
+
+                    let entityId = "actor:\(name)"
+                    // Merge into whatever's already there rather than replacing
+                    // the profile wholesale. A CSV row is usually a partial
+                    // edit — a handful of fields filled in for many actors at
+                    // once — so a blank cell must leave the existing value
+                    // alone, and tags/gallery photos/AKAs (which this CSV
+                    // format doesn't even represent) must always survive.
+                    let existing = try? store.fetchEntityProfile(for: entityId)
+
+                    func cell(_ index: Int) -> String? {
+                        guard index < columns.count, !columns[index].isEmpty else { return nil }
+                        return columns[index]
                     }
-                    
+
                     let profile = EntityProfile(
-                        id: "actor:\(name)",
-                        bio: bio,
-                        photoUrl: photoUrl,
-                        homePage: homePage,
-                        gender: gender,
-                        hairColor: hairColor,
-                        birthYear: birthYear,
-                        countryOfOrigin: country
+                        id: entityId,
+                        bio: cell(1) ?? existing?.bio,
+                        photoUrl: cell(2) ?? existing?.photoUrl,
+                        homePage: cell(3) ?? existing?.homePage,
+                        gender: cell(4) ?? existing?.gender,
+                        hairColor: cell(5) ?? existing?.hairColor,
+                        birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
+                        countryOfOrigin: cell(7) ?? existing?.countryOfOrigin,
+                        tags: existing?.tags ?? [],
+                        galleryUrls: existing?.galleryUrls ?? [],
+                        akas: existing?.akas ?? [],
+                        createdAt: existing?.createdAt ?? Date()
                     )
                     try store.saveEntityProfile(profile)
                 }

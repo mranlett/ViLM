@@ -52,6 +52,7 @@ struct DashboardView: View {
     @State private var recentlyAddedActors: [String] = []
     @State private var actorsNeedingAttention: [String] = []
     @State private var growthData: [(date: Date, count: Int)] = []
+    @State private var isShowingHelp = false
 
     private func recomputeStats() {
         var actorTagSet = Set<String>()
@@ -365,6 +366,17 @@ struct DashboardView: View {
         .background(Color(PlatformSystemGroupedBackground))
         // MODIFICATION: [2026-07-05 22:52:00 UTC] Removed .navigationBarHidden(true) to restore back button and added navigationTitle
         .navigationTitle("Dashboard")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.dashboard.id)
+        }
         .onAppear {
             recomputeStats()
             loadActorProfiles()

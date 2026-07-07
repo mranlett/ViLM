@@ -9,6 +9,7 @@ struct TagGalleryView: View {
     @State private var tagProfiles: [String: EntityProfile] = [:]
 
     @State private var alphaFilter: Character? = nil
+    @State private var isShowingHelp = false
 
     // Cached once per assets/profiles change instead of re-derived (and
     // re-counted per tag) on every render.
@@ -84,6 +85,15 @@ struct TagGalleryView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.tagGallery.id)
         }
         .onAppear {
             recomputeTags()

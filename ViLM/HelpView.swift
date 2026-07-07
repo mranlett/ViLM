@@ -12,44 +12,62 @@ struct HelpView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                List {
-                    Section("Contents") {
-                        ForEach(HelpContent.topics) { topic in
-                            Button(topic.title) {
-                                withAnimation { proxy.scrollTo(topic.id, anchor: .top) }
-                            }
-                        }
-                    }
-
-                    ForEach(HelpContent.topics) { topic in
-                        Section {
-                            Text(topic.summary)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .padding(.vertical, 4)
-
-                            ForEach(topic.items) { item in
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.label)
-                                        .font(.subheadline)
-                                        .fontWeight(.semibold)
-                                    Text(item.description)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                ScrollView {
+                    // Plain ScrollView + LazyVStack rather than List: a List's
+                    // internal representation doesn't reliably expose a
+                    // `Section` as one identifiable view, so `ScrollViewReader`
+                    // can't resolve `.id()` scroll targets attached to a
+                    // Section — jump-to-section silently no-ops. Attaching the
+                    // id directly to a plain VStack here works reliably.
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Contents")
+                                .font(.headline)
+                            ForEach(HelpContent.topics) { topic in
+                                Button(topic.title) {
+                                    withAnimation { proxy.scrollTo(topic.id, anchor: .top) }
                                 }
-                                .padding(.vertical, 2)
+                                .font(.subheadline)
                             }
-                        } header: {
-                            Text(topic.title)
                         }
-                        .id(topic.id)
+                        .padding(.horizontal)
+
+                        Divider()
+
+                        ForEach(HelpContent.topics) { topic in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(topic.title)
+                                    .font(.title3.bold())
+                                Text(topic.summary)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+
+                                ForEach(topic.items) { item in
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.label)
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                        Text(item.description)
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                            .padding(.horizontal)
+                            .id(topic.id)
+
+                            Divider()
+                        }
                     }
+                    .padding(.vertical)
                 }
                 .onAppear {
                     if let initialTopicID {
-                        // Defer slightly so the List has laid out before we scroll.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            proxy.scrollTo(initialTopicID, anchor: .top)
+                        // Defer until after the sheet's presentation animation
+                        // and initial layout pass complete.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            withAnimation { proxy.scrollTo(initialTopicID, anchor: .top) }
                         }
                     }
                 }
