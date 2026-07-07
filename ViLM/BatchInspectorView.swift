@@ -9,9 +9,23 @@ struct BatchInspectorView: View {
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
     @State private var activeCategory = "tag"
-    
+
+    @State private var batchSeriesName = ""
+    @State private var batchSeason = ""
+
     private var selectedAssets: [Asset] {
         assets.filter { selectedAssetIDs.contains($0.id) }
+    }
+
+    // Prefill values shared by every selected video, else empty/nil.
+    private var commonVideoName: String? {
+        let first = selectedAssets.first?.videoName
+        return selectedAssets.allSatisfy { $0.videoName == first } ? first : nil
+    }
+
+    private var commonSeason: Int? {
+        let first = selectedAssets.first?.seasonNumber
+        return selectedAssets.allSatisfy { $0.seasonNumber == first } ? first : nil
     }
     
     private var commonStudios: [String] {
@@ -51,9 +65,13 @@ struct BatchInspectorView: View {
                     Label("Toggle Reviewed Status for All", systemImage: "checkmark.seal.fill")
                 }
                 .buttonStyle(.bordered)
-                
+
                 Divider()
-                
+
+                seriesSection
+
+                Divider()
+
                 Text("Shared Tags")
                     .font(.headline)
                     .foregroundColor(.secondary)
@@ -71,6 +89,66 @@ struct BatchInspectorView: View {
         .frame(minWidth: 300)
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
+        }
+        .onAppear {
+            batchSeriesName = commonVideoName ?? ""
+            batchSeason = commonSeason.map(String.init) ?? ""
+        }
+    }
+
+    private var seriesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Series").font(.headline).foregroundColor(.secondary)
+
+            Text("Series Name").font(.subheadline).foregroundColor(.secondary)
+            HStack {
+                TextField("Series name for all", text: $batchSeriesName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Apply") { applySeriesName() }
+                    .buttonStyle(.bordered)
+            }
+
+            Text("Season / Movie #").font(.subheadline).foregroundColor(.secondary)
+            HStack {
+                TextField("Season for all", text: $batchSeason)
+                    .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                    .keyboardType(.numberPad)
+#endif
+                Button("Apply") { applySeason() }
+                    .buttonStyle(.bordered)
+            }
+
+            Text("Applies to all \(selectedAssetIDs.count) selected videos. Episode number and title are edited per-video.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func applySeriesName() {
+        let name = batchSeriesName.trimmingCharacters(in: .whitespacesAndNewlines)
+        applyToAll { $0.videoName = name.isEmpty ? nil : name }
+    }
+
+    private func applySeason() {
+        let season = Int(batchSeason.trimmingCharacters(in: .whitespaces))
+        applyToAll { $0.seasonNumber = season }
+    }
+
+    private func applyToAll(_ mutate: (inout Asset) -> Void) {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            for var asset in selectedAssets {
+                mutate(&asset)
+                try store.updateAsset(asset)
+                if let index = assets.firstIndex(where: { $0.id == asset.id }) {
+                    assets[index] = asset
+                }
+            }
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+        } catch {
+            print("Batch series update failed: \(error)")
         }
     }
     

@@ -10,6 +10,7 @@ struct SeriesGalleryView: View {
 
     @State private var alphaFilter: Character? = nil
     @State private var isShowingCleanup = false
+    @State private var isShowingHelp = false
 
     // Cached once per assets change rather than re-derived every render.
     @State private var allSeries: [String] = []
@@ -71,11 +72,20 @@ struct SeriesGalleryView: View {
                     }
                 }
             }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+            }
         }
         .sheet(isPresented: $isShowingCleanup) {
             if let url = libraryURL {
                 SeriesCleanupView(libraryURL: url, assets: assets)
             }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.seriesGallery.id)
         }
         .onAppear { recompute() }
         .onChange(of: assets) { _, _ in recompute() }

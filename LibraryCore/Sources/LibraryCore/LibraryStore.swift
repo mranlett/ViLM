@@ -145,7 +145,16 @@ public class LibraryStore {
                 t.add(column: "akas", .text).notNull().defaults(to: "[]")
             }
         }
-        
+
+        // --- NEW: Migration v12 adds structured season/episode numbers.
+        // The existing `episode` text column is repurposed as the episode title.
+        migrator.registerMigration("v12") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "season_number", .integer)
+                t.add(column: "episode_number", .integer)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     

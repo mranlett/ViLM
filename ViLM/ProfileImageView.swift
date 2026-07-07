@@ -1,5 +1,5 @@
 import SwiftUI
-import CryptoKit
+import LibraryCore
 #if os(iOS)
 import UIKit
 #else
@@ -63,34 +63,19 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     // filename logic in resolveLocalImage. Used for synchronous cache lookups.
     private var resolvedFileURL: URL? {
         guard let libraryURL else { return nil }
-        let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        let fileName: String
-        if isGallery, let urlString = photoUrl, urlString != "local://primary" {
-            let hashData = SHA256.hash(data: Data(urlString.utf8))
-            let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
-            fileName = "\(safeId)_\(hashString).jpg"
-        } else {
-            fileName = "\(safeId).jpg"
-        }
+        let fileName = ProfileImageNaming.fileName(for: entityId, token: photoUrl, isGallery: isGallery)
         return profilesDir.appendingPathComponent(fileName)
     }
-    
+
     private func resolveLocalImage() async {
         guard let libraryURL = libraryURL else { return }
-        
-        let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+
+        let safeId = ProfileImageNaming.safeId(for: entityId)
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        
-        let fileName: String
-        if isGallery, let urlString = photoUrl, urlString != "local://primary" {
-            let hashData = SHA256.hash(data: Data(urlString.utf8))
-            let hashString = hashData.compactMap { String(format: "%02x", $0) }.joined()
-            fileName = "\(safeId)_\(hashString).jpg"
-        } else {
-            fileName = "\(safeId).jpg"
-        }
-        
+
+        let fileName = ProfileImageNaming.fileName(for: entityId, token: photoUrl, isGallery: isGallery)
+
         let fileURL = profilesDir.appendingPathComponent(fileName)
         
         // 1. Check if the primary image file exists

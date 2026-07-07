@@ -44,7 +44,7 @@ struct AssetsGridView: View {
     @Binding var searchText: String
     @Binding var selectedAssetIDs: Set<Asset.ID>
     let missingAssetIDs: Set<Asset.ID>
-    @State private var gridStyle: GridStyle = .singleFrame
+    @AppStorage("assetGridStyle") private var gridStyle: GridStyle = .singleFrame
     @State private var isEditMode: Bool = false
     let libraryURL: URL?
     let refreshID: UUID
@@ -63,6 +63,7 @@ struct AssetsGridView: View {
     @State private var akaMap: [String: String] = [:]
     
     enum SortOption: String, CaseIterable {
+        case seriesOrder = "Series Order"
         case name = "Name"
         case date = "Date Added"
         case size = "File Size"
@@ -86,7 +87,7 @@ struct AssetsGridView: View {
     
     @State private var filterCriteria = AssetFilterCriteria()
     
-    enum GridStyle {
+    enum GridStyle: String {
         case singleFrame
         case contactSheet
     }
@@ -98,6 +99,8 @@ struct AssetsGridView: View {
     // and per selection change) does not scale, so it only reruns when one of
     // its inputs changes — see the onChange modifiers on the grid.
     @State private var displayedAssets: [Asset] = []
+    // Seasons the user has collapsed in the grouped series view (nil season = Int.min).
+    @State private var collapsedSeasons: Set<Int> = []
 
     // Bundles the cheap-to-compare filter inputs for a single onChange.
     private struct FilterInputs: Equatable {
@@ -260,6 +263,8 @@ struct AssetsGridView: View {
         return filtered.sorted { a, b in
             let compare: Bool
             switch sortOption {
+            case .seriesOrder:
+                compare = seriesOrderIsAscending(a, b)
             case .name:
                 compare = a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
             case .date:
@@ -271,6 +276,21 @@ struct AssetsGridView: View {
             }
             return sortAscending ? compare : !compare
         }
+    }
+
+    /// Ordering within a series: season, then episode, then date added, then
+    /// filename. A missing season is treated as Season 1 (an unnumbered entry
+    /// is the original); a missing episode sorts last within its season so
+    /// numbered episodes lead. Used by the "Series Order" sort.
+    private func seriesOrderIsAscending(_ a: Asset, _ b: Asset) -> Bool {
+        let sa = a.seasonNumber ?? 1
+        let sb = b.seasonNumber ?? 1
+        if sa != sb { return sa < sb }
+        let ea = a.episodeNumber ?? Int.max
+        let eb = b.episodeNumber ?? Int.max
+        if ea != eb { return ea < eb }
+        if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
+        return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
     }
     
     // MARK: - Title Logic
@@ -325,8 +345,10 @@ struct AssetsGridView: View {
                 if displayedAssets.isEmpty {
                     emptyStateView // Use the helper view here
                         .padding(.top, 100)
+                } else if showSeasonSections {
+                    seasonSectionedGrid
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 20) {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
                         ForEach(displayedAssets) { asset in
                             interactiveGridItem(for: asset)
                         }
@@ -336,6 +358,47 @@ struct AssetsGridView: View {
                 }
             }
         }
+    }
+
+    private var seasonSectionedGrid: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(seasonSections) { section in
+                let isCollapsed = collapsedSeasons.contains(section.id)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if isCollapsed {
+                            collapsedSeasons.remove(section.id)
+                        } else {
+                            collapsedSeasons.insert(section.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(seasonLabel(section.season))
+                            .font(.headline)
+                        Text("\(section.assets.count) video\(section.assets.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.top, 8)
+                }
+                .buttonStyle(.plain)
+
+                if !isCollapsed {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(section.assets) { asset in
+                            interactiveGridItem(for: asset)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
     }
 
     // MARK: - State-managed content
@@ -407,6 +470,10 @@ struct AssetsGridView: View {
                 if !handledBySidebar {
                     filterCriteria = defaultFilterCriteria
                 }
+                // Viewing a single series defaults to episode order.
+                if isSingleSeriesSelected {
+                    sortOption = .seriesOrder
+                }
                 hasLoadedDefaults = true
             }
             if let newFilter = pendingFilter {
@@ -458,8 +525,22 @@ struct AssetsGridView: View {
                             Label("Save Collection", systemImage: "folder.badge.plus")
                         }
                     }
-                    
-                    gridStylePicker
+
+                    Menu {
+                        Picker("Preview", selection: $gridStyle) {
+                            Label("Poster frame", systemImage: "photo").tag(GridStyle.singleFrame)
+                            Label("Contact sheet", systemImage: "square.grid.3x3").tag(GridStyle.contactSheet)
+                        }
+                        Divider()
+                        Picker("Columns", selection: $gridColumnCount) {
+                            Text("Auto").tag(0)
+                            Text("1 per row").tag(1)
+                            Text("2 per row").tag(2)
+                            Text("3 per row").tag(3)
+                        }
+                    } label: {
+                        Label("View Options", systemImage: "square.grid.2x2")
+                    }
                 }
             }
 #if os(iOS)
@@ -535,6 +616,68 @@ struct AssetsGridView: View {
     
     private func mappedActors(for asset: Asset) -> Set<String> {
         return Set(asset.actors.map { akaMap[$0] ?? $0 })
+    }
+
+    private var isSingleSeriesSelected: Bool {
+        guard sidebarSelection.count == 1, let first = sidebarSelection.first else { return false }
+        if case .series = first { return true }
+        return false
+    }
+
+    // MARK: - Season grouping
+
+    private struct SeasonSection: Identifiable {
+        let season: Int
+        let assets: [Asset]
+        var id: Int { season }
+    }
+
+    // A missing season number is treated as Season 1.
+    private func effectiveSeason(_ asset: Asset) -> Int { asset.seasonNumber ?? 1 }
+
+    /// Split the (already series-ordered) assets into contiguous season groups.
+    private var seasonSections: [SeasonSection] {
+        var sections: [SeasonSection] = []
+        var currentSeason: Int? = nil
+        var bucket: [Asset] = []
+        for asset in displayedAssets {
+            let season = effectiveSeason(asset)
+            if currentSeason == nil {
+                currentSeason = season
+                bucket = [asset]
+            } else if currentSeason == season {
+                bucket.append(asset)
+            } else {
+                sections.append(SeasonSection(season: currentSeason!, assets: bucket))
+                currentSeason = season
+                bucket = [asset]
+            }
+        }
+        if let s = currentSeason, !bucket.isEmpty {
+            sections.append(SeasonSection(season: s, assets: bucket))
+        }
+        return sections
+    }
+
+    /// Group into season sections only when it adds value: a single series,
+    /// sorted by Series Order, with more than one distinct season present.
+    private var showSeasonSections: Bool {
+        guard isSingleSeriesSelected, sortOption == .seriesOrder else { return false }
+        return Set(displayedAssets.map(effectiveSeason)).count > 1
+    }
+
+    private func seasonLabel(_ season: Int) -> String {
+        "Season \(season)"
+    }
+
+    // 0 = auto (fit by width); 1/2/3 = fixed column count. Persisted.
+    @AppStorage("assetGridColumns") private var gridColumnCount: Int = 0
+
+    private var gridColumns: [GridItem] {
+        if gridColumnCount <= 0 {
+            return [GridItem(.adaptive(minimum: 180), spacing: 16)]
+        }
+        return Array(repeating: GridItem(.flexible(), spacing: 16), count: gridColumnCount)
     }
 
     // MARK: - Search
@@ -657,12 +800,17 @@ struct AssetsGridView: View {
                 }
             }
             .overlay(statusOverlay(for: asset), alignment: .topTrailing)
-            
-            Text(asset.fileName)
+            .overlay(episodeBadge(for: asset), alignment: .topLeading)
+
+            Text(gridLabel(for: asset))
                 .font(.caption)
-                .lineLimit(1)
+                .lineLimit(isSingleSeriesSelected ? 2 : 1)
                 .foregroundStyle(.primary)
         }
+        // Fill the column and left-align so every card is the same width — the
+        // title wraps within the card and the image can't be pushed off-center
+        // by a title wider than the thumbnail.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(4)
         .background(selectedAssetIDs.contains(asset.id) ? Color.blue.opacity(0.15) : Color.clear)
         .cornerRadius(8)
@@ -670,14 +818,33 @@ struct AssetsGridView: View {
     }
     
     
-    private var gridStylePicker: some View {
-        Picker("Grid Style", selection: $gridStyle) {
-            Label("Single", systemImage: "photo").tag(GridStyle.singleFrame)
-            Label("Grid", systemImage: "square.grid.3x3.fill").tag(GridStyle.contactSheet)
+    // Episode-number badge, shown only within a single-series view so it does
+    // not clutter the All Assets grid.
+    @ViewBuilder
+    private func episodeBadge(for asset: Asset) -> some View {
+        if isSingleSeriesSelected, let ep = asset.episodeNumber {
+            Text("E\(ep)")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.ultraThinMaterial, in: Capsule())
+                .foregroundStyle(.primary)
+                .padding(6)
         }
-        .pickerStyle(.segmented)
     }
-    
+
+    // Within a series, prefer the episode title so that metadata is visible;
+    // otherwise fall back to the filename.
+    private func gridLabel(for asset: Asset) -> String {
+        if isSingleSeriesSelected,
+           let title = asset.episode?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return title
+        }
+        return asset.fileName
+    }
+
     private func statusOverlay(for asset: Asset) -> some View {
         Group {
             if missingAssetIDs.contains(asset.id) {

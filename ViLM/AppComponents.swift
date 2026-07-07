@@ -149,7 +149,8 @@ struct FrameExtractView: View {
 // (search keystrokes, selection changes); decoding full-size JPEGs on the
 // main thread per render does not scale to large libraries.
 enum ThumbnailLoader {
-    private static let cache = NSCache<NSString, CGImage>()  // thread-safe
+    // NSCache is internally thread-safe; opt out of Swift 6 global-state isolation.
+    nonisolated(unsafe) private static let cache = NSCache<NSString, CGImage>()
 
     /// Cache key includes the file's modification date so regenerated
     /// thumbnails (e.g. "Set as Main Thumbnail") are picked up.
@@ -175,6 +176,9 @@ enum ThumbnailLoader {
 }
 
 // MARK: - Async Thumbnail Image (shared cell body)
+// Fills the available width and takes its height from the image's own aspect
+// ratio, so it scales cleanly as the column width changes (more/fewer columns,
+// resized panes) with no fixed-height letterbox bars.
 private struct AsyncThumbnailImage: View {
     let imageURL: URL
     let maxPixelSize: Int
@@ -182,41 +186,44 @@ private struct AsyncThumbnailImage: View {
     var refreshToken: UUID? = nil
 
     @State private var cgImage: CGImage?
+    @State private var aspect: CGFloat = 16.0 / 9.0
 
     var body: some View {
         Group {
             if let cgImage {
                 Image(decorative: cgImage, scale: 1.0, orientation: .up)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 180)
-                    .background(Color.black)
+                    .aspectRatio(aspect, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             } else {
-                Rectangle()
+                RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.3))
-                    .frame(height: 180)
+                    .aspectRatio(aspect, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                     .overlay(ProgressView())
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
             }
         }
         .task(id: "\(imageURL.path)|\(refreshToken?.uuidString ?? "")") {
             if let image = await ThumbnailLoader.image(from: imageURL, maxPixelSize: maxPixelSize) {
                 cgImage = image
+                aspect = CGFloat(image.width) / CGFloat(max(image.height, 1))
             }
         }
     }
 }
 
 // MARK: - Single Frame Thumbnail View (local file thumbnail)
+// Renders only the poster image. Callers supply their own title/overlays; an
+// internal title here would duplicate that and, when long, widen the card and
+// push corner overlays off the image.
 struct VideoThumbnailView: View {
     let asset: Asset
     let libraryURL: URL?
     var refreshToken: UUID? = nil
 
     var body: some View {
-        VStack(alignment: .leading) {
+        Group {
             if let libraryURL {
                 // POINT TO THE SINGLE THUMBNAIL FOLDER
                 AsyncThumbnailImage(
@@ -225,10 +232,6 @@ struct VideoThumbnailView: View {
                     refreshToken: refreshToken
                 )
             }
-
-            Text(asset.fileName)
-                .font(.caption)
-                .lineLimit(1)
         }
     }
 }

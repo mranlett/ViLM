@@ -11,10 +11,15 @@ struct SettingsView: View {
     var onCheckForChanges: (() -> Void)?
     var onAuditFileName: (() -> Void)?
     var onFindDuplicates: (() -> Void)?
+    var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
+    var onExportActorLibrary: (() -> Void)?
+    var onImportActorLibrary: (() -> Void)?
     var onSelectAsset: ((Asset.ID) -> Void)?
     var onSelectActor: ((String) -> Void)?
-    
+
+    @State private var isShowingHelp = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -47,6 +52,11 @@ struct SettingsView: View {
                     } label: {
                         Label("Library Statistics", systemImage: "chart.bar.doc.horizontal")
                     }
+
+                    Button(action: { isShowingHelp = true }) {
+                        Label("Help", systemImage: "questionmark.circle")
+                    }
+                    .buttonStyle(.plain)
                 }
                 
                 Section(header: Text("Library Management")) {
@@ -84,9 +94,35 @@ struct SettingsView: View {
 
                     Button(action: {
                         dismiss()
+                        onMigrateEpisodes?()
+                    }) {
+                        Label("Migrate Episode Info", systemImage: "arrow.triangle.branch")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        dismiss()
                         onTagCleanup?()
                     }) {
                         Label("Tag & Actor Cleanup", systemImage: "paintbrush")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Section(header: Text("Actor Library Merge"), footer: Text("Move enriched actor bios and photos from another library (e.g. a portable copy) into this one without losing existing work.")) {
+                    Button(action: {
+                        dismiss()
+                        onExportActorLibrary?()
+                    }) {
+                        Label("Export Actor Library For Merge", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        dismiss()
+                        onImportActorLibrary?()
+                    }) {
+                        Label("Import and Merge Actor Library", systemImage: "square.and.arrow.down")
                     }
                     .buttonStyle(.plain)
                 }
@@ -96,11 +132,20 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: { isShowingHelp = true }) {
+                        Image(systemName: "questionmark.circle")
+                    }
+                    .help("Help")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
                 }
+            }
+            .sheet(isPresented: $isShowingHelp) {
+                HelpView(initialTopicID: HelpContent.settings.id)
             }
         }
         .frame(minWidth: 300, minHeight: 300)

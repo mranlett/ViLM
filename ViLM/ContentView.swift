@@ -49,6 +49,9 @@ struct ContentView: View {
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
     @State private var isShowingDuplicateDetection = false
+    @State private var isShowingEpisodeBackfill = false
+    @State private var isShowingActorLibraryExport = false
+    @State private var isShowingActorLibraryImport = false
 
 #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -141,35 +144,12 @@ struct ContentView: View {
                     onCheckForChanges: validateLibrary,
                     onAuditFileName: { isShowingFileNameAudit = true },
                     onFindDuplicates: { isShowingDuplicateDetection = true },
+                    onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                     onTagCleanup: { isShowingTagCleanup = true },
-                    onSelectAsset: { assetID in
-                        isShowingSettings = false
-#if os(iOS)
-                        if horizontalSizeClass == .compact {
-                            sidebarSelection = [.allAssets]
-                            selectedAssetIDs = [assetID]
-                            navigationPath = [.browse, .asset(assetID, context: filteredAssetContext)]
-                            return
-                        }
-#endif
-                        sidebarSelection = [.allAssets]
-                        selectedAssetIDs = [assetID]
-                        columnVisibility = .all
-                    },
-                    onSelectActor: { actorID in
-                        isShowingSettings = false
-#if os(iOS)
-                        if horizontalSizeClass == .compact {
-                            sidebarSelection = [.actorGallery]
-                            selectedAssetIDs.removeAll()
-                            navigationPath = [.browse, .entityProfile(category: "actor", name: actorID)]
-                            return
-                        }
-#endif
-                        selectedAssetIDs.removeAll()
-                        sidebarSelection = [.actor(actorID)]
-                        columnVisibility = .all
-                    }
+                    onExportActorLibrary: { isShowingActorLibraryExport = true },
+                    onImportActorLibrary: { isShowingActorLibraryImport = true },
+                    onSelectAsset: settingsDidSelectAsset,
+                    onSelectActor: settingsDidSelectActor
                 )
             }
             .sheet(isPresented: $isShowingFileNameAudit) {
@@ -204,6 +184,23 @@ struct ContentView: View {
                             }
                         }
                     )
+                }
+            }
+            .sheet(isPresented: $isShowingEpisodeBackfill) {
+                if let url = selectedLibraryURL {
+                    EpisodeBackfillView(libraryURL: url, assets: assets)
+                }
+            }
+            .sheet(isPresented: $isShowingActorLibraryExport) {
+                if let url = selectedLibraryURL {
+                    ActorLibraryExportView(libraryURL: url)
+                }
+            }
+            .sheet(isPresented: $isShowingActorLibraryImport) {
+                if let url = selectedLibraryURL {
+                    ActorLibraryImportView(libraryURL: url, onRefresh: {
+                        NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+                    })
                 }
             }
             .sheet(isPresented: $isShowingTagCleanup) {
@@ -419,6 +416,42 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    // MARK: - Settings Deep Links
+    //
+    // Extracted from the SettingsView(...) call site — inlining these as
+    // closures there pushed the surrounding expression past the Swift
+    // type-checker's time budget.
+
+    private func settingsDidSelectAsset(_ assetID: Asset.ID) {
+        isShowingSettings = false
+#if os(iOS)
+        if horizontalSizeClass == .compact {
+            sidebarSelection = [.allAssets]
+            selectedAssetIDs = [assetID]
+            navigationPath = [.browse, .asset(assetID, context: filteredAssetContext)]
+            return
+        }
+#endif
+        sidebarSelection = [.allAssets]
+        selectedAssetIDs = [assetID]
+        columnVisibility = .all
+    }
+
+    private func settingsDidSelectActor(_ actorID: String) {
+        isShowingSettings = false
+#if os(iOS)
+        if horizontalSizeClass == .compact {
+            sidebarSelection = [.actorGallery]
+            selectedAssetIDs.removeAll()
+            navigationPath = [.browse, .entityProfile(category: "actor", name: actorID)]
+            return
+        }
+#endif
+        selectedAssetIDs.removeAll()
+        sidebarSelection = [.actor(actorID)]
+        columnVisibility = .all
     }
 
     // MARK: - Library Logic

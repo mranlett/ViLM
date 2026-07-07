@@ -11,9 +11,11 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public var externalLink: String?
     public var notes: String?
     public var rating: Int?
-    public var videoName: String?
-    public var episode: String?
-    
+    public var videoName: String?          // Series Name
+    public var seasonNumber: Int?          // Season / Movie number (Star Wars 3, MWC Season 4)
+    public var episodeNumber: Int?         // Episode number
+    public var episode: String?            // Episode Title (freeform, e.g. "Valentine's Day")
+
     public static let databaseTableName = "assets"
 
     public enum ReviewStatus: String, Codable, Sendable {
@@ -31,6 +33,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 notes: String? = nil,
                 rating: Int? = nil,
                 videoName: String? = nil,
+                seasonNumber: Int? = nil,
+                episodeNumber: Int? = nil,
                 episode: String? = nil) {
         self.id = id
         self.relativePath = relativePath
@@ -42,6 +46,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.notes = notes
         self.rating = rating
         self.videoName = videoName
+        self.seasonNumber = seasonNumber
+        self.episodeNumber = episodeNumber
         self.episode = episode
     }
     
@@ -60,6 +66,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
         self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         self.videoName = try container.decodeIfPresent(String.self, forKey: .videoName)
+        self.seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
+        self.episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
         
         // Enhanced tag decoding
@@ -85,6 +93,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case notes
         case rating
         case videoName = "video_name"
+        case seasonNumber = "season_number"
+        case episodeNumber = "episode_number"
         case episode
     }
 }
@@ -101,6 +111,8 @@ extension Asset {
         container["notes"] = notes
         container["rating"] = rating
         container["video_name"] = videoName
+        container["season_number"] = seasonNumber
+        container["episode_number"] = episodeNumber
         container["episode"] = episode
         
         // Encode tags array to JSON String for SQLite storage
@@ -136,21 +148,27 @@ extension Asset {
             .sorted()
     }
 
+    /// The human-readable series/episode block used in display and filenames:
+    /// Series Name, a bare Season/Movie number, "Episode N", and the episode
+    /// title — joined by spaces, skipping any field that is empty.
+    public var seriesTitleBlock: String {
+        var parts: [String] = []
+        if let v = videoName, !v.isEmpty { parts.append(v) }
+        if let s = seasonNumber { parts.append("\(s)") }
+        if let e = episodeNumber { parts.append("Episode \(e)") }
+        if let t = episode?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { parts.append(t) }
+        return parts.joined(separator: " ")
+    }
+
     public var suggestedFileNameFromTags: String? {
         let actorsPart = actors.joined(separator: ", ")
         let tagsPart = actions.joined(separator: ", ")
         let studiosPart = studios.joined(separator: ", ")
-        
-        var videoPartComponents: [String] = []
-        if let v = videoName, !v.isEmpty { videoPartComponents.append(v) }
-        if let e = episode, !e.isEmpty { videoPartComponents.append(e) }
-        let videoPart = videoPartComponents.joined(separator: " ")
-        
-        // Priority 1: Actors
-        // Priority 2: Video Part
-        // Priority 3: Tags
-        // Priority 4: Studios
-        
+
+        let videoPart = seriesTitleBlock
+
+        // Section priority (kept when the name must be shortened):
+        // 1: Actors  2: Series/Episode block  3: Tags  4: Studios
         var components = [actorsPart, videoPart, tagsPart, studiosPart].filter { !$0.isEmpty }
         if components.isEmpty { return nil }
         

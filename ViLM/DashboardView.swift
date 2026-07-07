@@ -638,13 +638,14 @@ struct ActorCircleCard: View {
 // downsampled to display size and cached. Used by the dashboard's actor
 // carousels/rows where sync decoding in `body` stalled scrolling.
 enum ProfileAvatarLoader {
-    private static let cache = NSCache<NSString, PlatformImage>()
+    // NSCache is internally thread-safe; opt out of Swift 6 global-state isolation.
+    nonisolated(unsafe) private static let cache = NSCache<NSString, PlatformImage>()
 
     static func image(actorName: String, fileNames: Set<String>, libraryURL: URL?, maxPixelSize: Int) async -> PlatformImage? {
         guard let url = libraryURL else { return nil }
-        let safeId = "actor:\(actorName)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let exactMatch = "\(safeId).jpg"
-        let prefixMatch = "\(safeId)_"
+        let entityId = "actor:\(actorName)"
+        let exactMatch = ProfileImageNaming.primaryFileName(for: entityId)
+        let prefixMatch = ProfileImageNaming.galleryFilePrefix(for: entityId)
 
         let targetFile: String?
         if fileNames.contains(exactMatch) {

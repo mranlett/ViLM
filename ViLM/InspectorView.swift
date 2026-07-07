@@ -274,7 +274,7 @@ struct SingleInspectorView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Video / Series Name").font(.subheadline).foregroundColor(.secondary)
+                        Text("Series Name").font(.subheadline).foregroundColor(.secondary)
                         TextField("e.g. Movie Name or TV Show", text: Binding(
                             get: { asset.videoName ?? "" },
                             set: { newValue in
@@ -286,9 +286,43 @@ struct SingleInspectorView: View {
                         .textFieldStyle(.roundedBorder)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Episode Info").font(.subheadline).foregroundColor(.secondary)
-                        TextField("e.g. Season 2 Episode 3", text: Binding(
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Season / Movie #").font(.subheadline).foregroundColor(.secondary)
+                            TextField("e.g. 2", text: Binding(
+                                get: { asset.seasonNumber.map(String.init) ?? "" },
+                                set: { newValue in
+                                    var updatedAsset = asset
+                                    updatedAsset.seasonNumber = Int(newValue.trimmingCharacters(in: .whitespaces))
+                                    if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                            .keyboardType(.numberPad)
+#endif
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Episode #").font(.subheadline).foregroundColor(.secondary)
+                            TextField("e.g. 12", text: Binding(
+                                get: { asset.episodeNumber.map(String.init) ?? "" },
+                                set: { newValue in
+                                    var updatedAsset = asset
+                                    updatedAsset.episodeNumber = Int(newValue.trimmingCharacters(in: .whitespaces))
+                                    if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+#if os(iOS)
+                            .keyboardType(.numberPad)
+#endif
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Episode Title").font(.subheadline).foregroundColor(.secondary)
+                        TextField("e.g. Valentine's Day (optional)", text: Binding(
                             get: { asset.episode ?? "" },
                             set: { newValue in
                                 var updatedAsset = asset
@@ -297,6 +331,12 @@ struct SingleInspectorView: View {
                             }
                         ))
                         .textFieldStyle(.roundedBorder)
+                    }
+
+                    if !asset.seriesTitleBlock.isEmpty {
+                        Text("Sorts and files as: \(asset.seriesTitleBlock)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
 
                     Divider()

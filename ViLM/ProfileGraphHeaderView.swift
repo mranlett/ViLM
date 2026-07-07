@@ -1,6 +1,5 @@
 import SwiftUI
 import LibraryCore
-import CryptoKit
 
 struct ProfileGraphHeaderView: View {
     let filteredAssets: [Asset]
@@ -13,6 +12,19 @@ struct ProfileGraphHeaderView: View {
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
     @State private var newGlobalName = ""
+    @State private var isExpanded: Bool
+
+    init(filteredAssets: [Asset], sidebarSelection: Binding<Set<SidebarItem>>, currentSelection: SidebarItem, libraryURL: URL?) {
+        self.filteredAssets = filteredAssets
+        self._sidebarSelection = sidebarSelection
+        self.currentSelection = currentSelection
+        self.libraryURL = libraryURL
+        // A series graph is purely a jumping-off point (no photo/bio), so it
+        // defaults closed. Actor/studio profiles carry a photo and bio worth
+        // showing, so they default open.
+        let isSeries: Bool = { if case .series = currentSelection { return true }; return false }()
+        _isExpanded = State(initialValue: !isSeries)
+    }
     
     private var relatedStudios: [String] {
         let studios = filteredAssets.flatMap { $0.studios }
@@ -64,20 +76,29 @@ struct ProfileGraphHeaderView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(titleText)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    
-                    if let profile = entityProfile, !profile.akas.isEmpty {
-                        Text("AKA: \(profile.akas.joined(separator: ", "))")
+            HStack(alignment: .top) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Explore Related Links")
+                                .font(.headline)
+                            Text(exploreSubtitle)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+
                 Spacer()
-                
+
                 Menu {
                     if let name = currentName {
                         Button {
@@ -112,7 +133,14 @@ struct ProfileGraphHeaderView: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
             }
-            
+
+            if isExpanded {
+            if let profile = entityProfile, !profile.akas.isEmpty {
+                Text("AKA: \(profile.akas.joined(separator: ", "))")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
             if let profile = entityProfile {
                 HStack(alignment: .top, spacing: 16) {
                     Button(action: {
@@ -220,6 +248,7 @@ struct ProfileGraphHeaderView: View {
                 tagSection(title: "Video Series", items: relatedSeries, color: .orange, isAdditive: true) { item in
                     .series(item)
                 }
+            }
             }
         }
         .padding()
@@ -338,14 +367,10 @@ struct ProfileGraphHeaderView: View {
         // naming scheme ProfileImageView writes with.
         private func fileURL(for identifier: String) -> URL? {
             guard let libraryURL else { return nil }
-            let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
             let dir = libraryURL.appendingPathComponent(".catalog/profiles")
             let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
-            if isGallery, identifier != "local://primary" {
-                let hash = SHA256.hash(data: Data(identifier.utf8)).compactMap { String(format: "%02x", $0) }.joined()
-                return dir.appendingPathComponent("\(safeId)_\(hash).jpg")
-            }
-            return dir.appendingPathComponent("\(safeId).jpg")
+            let fileName = ProfileImageNaming.fileName(for: entityId, token: identifier, isGallery: isGallery)
+            return dir.appendingPathComponent(fileName)
         }
 
         private func preloadImages() async {
@@ -357,12 +382,13 @@ struct ProfileGraphHeaderView: View {
                 if images[identifier] != nil { continue }
                 guard let url = fileURL(for: identifier),
                       FileManager.default.fileExists(atPath: url.path) else { continue }
-                let image = await Task.detached { () -> Image? in
-                    guard let data = try? Data(contentsOf: url),
-                          let platformImage = PlatformImage(data: data) else { return nil }
-                    return Image(platformImage: platformImage)
+                // Decode off the main thread, but build the SwiftUI Image on the
+                // main actor (its initializer is main-actor isolated).
+                let platformImage = await Task.detached { () -> PlatformImage? in
+                    guard let data = try? Data(contentsOf: url) else { return nil }
+                    return PlatformImage(data: data)
                 }.value
-                if let image { images[identifier] = image }
+                if let platformImage { images[identifier] = Image(platformImage: platformImage) }
             }
         }
     }
@@ -445,14 +471,12 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
-    private var titleText: String {
-        switch currentSelection {
-        case .actor(let name): return "\(name)'s Profile Graph"
-        case .studio(let name): return "\(name) Studio Graph"
-        case .tag(let name): return "Tag Graph: \(name)"
-        case .series(let name): return "Series Graph: \(name)"
-        case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .smartCollection: return ""
+    // Framed as an invitation to explore, not a set of active filters.
+    private var exploreSubtitle: String {
+        if let name = currentName, !name.isEmpty {
+            return "Actors, studios, and tags connected to \(name)"
         }
+        return "Actors, studios, and tags"
     }
     
     private var currentEntityId: String? {
