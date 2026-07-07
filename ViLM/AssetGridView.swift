@@ -501,12 +501,6 @@ struct AssetsGridView: View {
         .navigationSubtitle("\(displayedAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: { isShowingHelp = true }) {
-                    Image(systemName: "questionmark.circle")
-                }
-                .help("Help")
-            }
             ToolbarItem(placement: .primaryAction) {
                 HStack {
                     Menu {
@@ -544,6 +538,10 @@ struct AssetsGridView: View {
                             Text("1 per row").tag(1)
                             Text("2 per row").tag(2)
                             Text("3 per row").tag(3)
+                        }
+                        Divider()
+                        Button(action: { isShowingHelp = true }) {
+                            Label("Help", systemImage: "questionmark.circle")
                         }
                     } label: {
                         Label("View Options", systemImage: "square.grid.2x2")

@@ -151,17 +151,20 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     }
 
     private func decodeAndCache(from data: Data, cacheKey: NSString?) async -> Image? {
-        await Task.detached {
+        // Decode off the main thread, but build the SwiftUI Image on the main
+        // actor (its initializer is main-actor isolated).
+        let platformImage: PlatformImage? = await Task.detached {
             #if os(iOS)
-            guard let image = UIImage(data: data) else { return nil }
+            return UIImage(data: data)
             #else
-            guard let image = NSImage(data: data) else { return nil }
+            return NSImage(data: data)
             #endif
-            if let cacheKey {
-                ProfileImageCache.shared.setObject(image, forKey: cacheKey)
-            }
-            return Image(platformImage: image)
         }.value
+        guard let platformImage else { return nil }
+        if let cacheKey {
+            ProfileImageCache.shared.setObject(platformImage, forKey: cacheKey)
+        }
+        return Image(platformImage: platformImage)
     }
     
     private func findAnyExistingImage(in directory: URL, for safeId: String) -> URL? {

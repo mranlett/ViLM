@@ -15,6 +15,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public var seasonNumber: Int?          // Season / Movie number (Star Wars 3, MWC Season 4)
     public var episodeNumber: Int?         // Episode number
     public var episode: String?            // Episode Title (freeform, e.g. "Valentine's Day")
+    public var playCount: Int              // Number of distinct viewing sessions
+    public var lastPlayedAt: Date?         // When the video was last played
 
     public static let databaseTableName = "assets"
 
@@ -35,7 +37,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 videoName: String? = nil,
                 seasonNumber: Int? = nil,
                 episodeNumber: Int? = nil,
-                episode: String? = nil) {
+                episode: String? = nil,
+                playCount: Int = 0,
+                lastPlayedAt: Date? = nil) {
         self.id = id
         self.relativePath = relativePath
         self.fileName = fileName
@@ -49,6 +53,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.episode = episode
+        self.playCount = playCount
+        self.lastPlayedAt = lastPlayedAt
     }
     
     public init(from decoder: Decoder) throws {
@@ -69,6 +75,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         self.episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
+        self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
+        self.lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         
         // Enhanced tag decoding
         var decodedTags: [String] = []
@@ -96,6 +104,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case seasonNumber = "season_number"
         case episodeNumber = "episode_number"
         case episode
+        case playCount = "play_count"
+        case lastPlayedAt = "last_played_at"
     }
 }
 
@@ -114,7 +124,9 @@ extension Asset {
         container["season_number"] = seasonNumber
         container["episode_number"] = episodeNumber
         container["episode"] = episode
-        
+        container["play_count"] = playCount
+        container["last_played_at"] = lastPlayedAt
+
         // Encode tags array to JSON String for SQLite storage
         if let jsonData = try? JSONEncoder().encode(tags),
            let jsonString = String(data: jsonData, encoding: .utf8) {

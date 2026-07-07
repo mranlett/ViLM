@@ -66,6 +66,22 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(fetched.studios, ["Acme"])
     }
 
+    func testPlayCountDefaultsToZeroAndPersists() throws {
+        try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
+        var asset = try XCTUnwrap(store.fetchAllAssets().first)
+        XCTAssertEqual(asset.playCount, 0)
+        XCTAssertNil(asset.lastPlayedAt)
+
+        let playedAt = Date()
+        asset.playCount += 1
+        asset.lastPlayedAt = playedAt
+        try store.updateAsset(asset)
+
+        let fetched = try XCTUnwrap(store.fetchAllAssets().first)
+        XCTAssertEqual(fetched.playCount, 1)
+        XCTAssertNotNil(fetched.lastPlayedAt)
+    }
+
     func testDeleteAsset() throws {
         try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
         let asset = try XCTUnwrap(store.fetchAllAssets().first)

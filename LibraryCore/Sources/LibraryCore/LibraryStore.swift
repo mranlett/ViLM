@@ -155,6 +155,14 @@ public class LibraryStore {
             }
         }
 
+        // --- NEW: Migration v13 adds play count / last played tracking ---
+        migrator.registerMigration("v13") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "play_count", .integer).notNull().defaults(to: 0)
+                t.add(column: "last_played_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     

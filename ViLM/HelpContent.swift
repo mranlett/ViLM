@@ -127,6 +127,8 @@ enum HelpContent {
                   description: "Tap a star to set a 1–5 star rating; tap the same star again to clear the rating."),
             .init(label: "Notes",
                   description: "A free-text field for your own notes — saved as you type."),
+            .init(label: "Play count",
+                  description: "Shows how many times you've played the video and when you last watched it, once you've played it at least once. Counts once per visit to the video, not once per seek — scrubbing around while watching doesn't inflate the count."),
             .init(label: "Series Name, Season/Movie #, Episode #, Episode Title",
                   description: "Set which series this video belongs to, its season or movie number, its episode number, and an optional episode title. A preview underneath shows exactly how this will sort and file."),
             .init(label: "Tags, Actors, Studios",

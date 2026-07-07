@@ -91,6 +91,10 @@ struct SingleInspectorView: View {
     @State private var duration: Double = 1
     @State private var playback = VideoPlaybackController()
     @State private var isShowingPlayer = false
+    // Counts at most once per viewing session (reset when the parent view's
+    // .id(asset.id) gives us a fresh instance for a different video), so
+    // scrubbing around the same video several times isn't several "plays."
+    @State private var hasRecordedPlayThisSession = false
 
     // iOS/Mac shared progress flags
     @State private var isSavingThumb = false
@@ -127,6 +131,7 @@ struct SingleInspectorView: View {
 
                     if let url = videoURL() {
                         if !missingAssetIDs.contains(asset.id) {
+                            recordPlayIfNeeded()
                             playback.load(url: url, startSeconds: t, autoplay: true)
                         }
                     }
@@ -236,6 +241,7 @@ struct SingleInspectorView: View {
                     Button("Play From Start") {
                         if let url = videoURL() {
                             isShowingPlayer = true
+                            recordPlayIfNeeded()
                             playback.load(url: url, startSeconds: 0, autoplay: true)
                         }
                     }
@@ -271,6 +277,12 @@ struct SingleInspectorView: View {
                     Label("Added: \(asset.createdAt.formatted(date: .abbreviated, time: .omitted))", systemImage: "calendar")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+
+                    if asset.playCount > 0 {
+                        Label(playCountSummary, systemImage: "play.circle")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
 
                     Divider()
 
@@ -393,6 +405,7 @@ struct SingleInspectorView: View {
                     Button {
                         if let url = videoURL() {
                             isShowingPlayer = true
+                            recordPlayIfNeeded()
                             playback.load(url: url, startSeconds: scrubTime, autoplay: true)
                         }
                     } label: {
@@ -924,6 +937,21 @@ struct SingleInspectorView: View {
         guard let url = libraryURL else { return }
         var updated = asset
         updated.tags.removeAll { $0 == "\(category):\(value)" }
+        updateAsset(updated, at: url)
+    }
+
+    private var playCountSummary: String {
+        let timesText = "Played \(asset.playCount) time\(asset.playCount == 1 ? "" : "s")"
+        guard let lastPlayedAt = asset.lastPlayedAt else { return timesText }
+        return "\(timesText), last on \(lastPlayedAt.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    private func recordPlayIfNeeded() {
+        guard !hasRecordedPlayThisSession, let url = libraryURL else { return }
+        hasRecordedPlayThisSession = true
+        var updated = asset
+        updated.playCount += 1
+        updated.lastPlayedAt = Date()
         updateAsset(updated, at: url)
     }
 
