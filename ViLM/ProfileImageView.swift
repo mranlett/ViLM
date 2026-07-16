@@ -1,3 +1,9 @@
+// ProfileImageView.swift
+// Async profile-photo view: resolves an entity's photo from the on-disk
+// cache (primary or hashed gallery file), downloading validated bytes from
+// the photo URL when missing. Decoded images are shared through a bounded
+// NSCache.
+
 import SwiftUI
 import LibraryCore
 #if os(iOS)

@@ -1,3 +1,7 @@
+// LibraryScanner.swift
+// Walks a library folder for video files and registers unseen ones as assets
+// (INSERT OR IGNORE, so re-scans are cheap and non-destructive).
+
 import Foundation
 
 public class LibraryScanner {
@@ -31,7 +35,7 @@ public class LibraryScanner {
                 let relativePath: String
                 if filePath.hasPrefix(rootPath) {
                     var rel = String(filePath.dropFirst(rootPath.count))
-                    if rel.hasPrefix("/") { rel.removeFirst() } // ✅ remove leading slash
+                    if rel.hasPrefix("/") { rel.removeFirst() } // store paths relative to the library root
                     relativePath = rel
                 } else {
                     // Fallback: just use lastPathComponent
@@ -44,9 +48,8 @@ public class LibraryScanner {
                     fileName: fileURL.lastPathComponent
                 )
                 
-                // Write to the SQLite database
+                // saveAsset is INSERT OR IGNORE, so re-scanning known files is a no-op.
                 try store.saveAsset(asset)
-                print("Registered: \(asset.fileName)")
             }
         }
     }

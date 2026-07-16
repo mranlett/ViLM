@@ -1,3 +1,8 @@
+// FaceFingerprintService.swift
+// Face detection and visual-similarity fingerprints via stock Vision APIs,
+// with a content-hash-keyed disk cache under .catalog/facePrints. See the
+// class doc comment for the important recognition-vs-similarity caveat.
+
 import Vision
 import CoreGraphics
 import Foundation

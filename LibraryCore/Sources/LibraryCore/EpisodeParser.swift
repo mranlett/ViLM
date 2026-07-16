@@ -1,3 +1,8 @@
+// EpisodeParser.swift
+// Parses legacy freeform episode text ("12", "Episode 12", "S2E3", "2x12",
+// "2 Episode 12", ...) into structured season/episode numbers with a
+// confidence flag for the migration tool's review step.
+
 import Foundation
 
 /// Parses freeform legacy "Episode Info" text into structured season/episode

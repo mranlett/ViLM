@@ -1,3 +1,7 @@
+// TagSuggester.swift
+// Guesses candidate tags from a video's filename (delimiter splitting plus
+// known-token matching) for the Video Details tag suggestions.
+
 import Foundation
 
 public struct TagSuggester {

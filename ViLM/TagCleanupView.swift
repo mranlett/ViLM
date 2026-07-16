@@ -1,3 +1,7 @@
+// TagCleanupView.swift
+// Settings tool: merges duplicate tags across the library and deletes
+// orphaned entity profiles that no longer match any video.
+
 import SwiftUI
 import LibraryCore
 

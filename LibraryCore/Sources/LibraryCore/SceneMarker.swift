@@ -1,3 +1,8 @@
+// SceneMarker.swift
+// A named, jumpable timestamp within a video. Rows cascade-delete with their
+// video (see the scene_markers migration and PRAGMA foreign_keys in
+// LibraryStore).
+
 import Foundation
 import GRDB
 

@@ -1,3 +1,8 @@
+// DuplicateDetectionView.swift
+// Settings tool: groups videos by exact file size (confirmed by duration) to
+// find likely duplicates, and deletes user-selected copies from disk and the
+// library.
+
 import SwiftUI
 import LibraryCore
 import AVFoundation

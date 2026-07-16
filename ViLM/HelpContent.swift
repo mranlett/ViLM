@@ -1,3 +1,8 @@
+// HelpContent.swift
+// All in-app help copy, one HelpTopic per screen. Add a topic here when a
+// screen gains controls worth explaining; screens deep-link to their topic
+// via HelpView(initialTopicID:).
+
 import Foundation
 
 /// A single help topic, matching one screen or feature area of the app.

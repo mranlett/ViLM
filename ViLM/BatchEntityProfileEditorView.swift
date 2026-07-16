@@ -1,3 +1,8 @@
+// BatchEntityProfileEditorView.swift
+// Bulk actor editing: applies gender, hair color, country, and additional
+// tags to every selected actor's profile in one save, merging into each
+// actor's existing record.
+
 import SwiftUI
 import LibraryCore
 

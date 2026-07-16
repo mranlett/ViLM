@@ -1,3 +1,8 @@
+// Asset.swift
+// The core video record: file identity, review status, rating, notes,
+// prefixed tag list (actor:/tag:/studio:), structured series fields, play
+// tracking, and the metadata-driven suggested filename.
+
 import Foundation
 import GRDB
 

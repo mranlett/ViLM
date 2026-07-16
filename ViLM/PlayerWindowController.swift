@@ -1,3 +1,7 @@
+// PlayerWindowController.swift
+// macOS-only controller that hosts the popout player in its own NSWindow and
+// tracks its lifecycle.
+
 import AppKit
 import SwiftUI
 import AVKit

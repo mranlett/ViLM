@@ -1,3 +1,8 @@
+// SettingsView.swift
+// The Settings sheet: startup preference, Library Statistics and Help entry
+// points, the library-management tools, and Actor Library Merge - each tool
+// opens via a callback owned by ContentView.
+
 import SwiftUI
 import LibraryCore
 

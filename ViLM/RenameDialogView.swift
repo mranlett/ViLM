@@ -1,3 +1,7 @@
+// RenameDialogView.swift
+// Confirmation dialog for renaming a video file to its metadata-suggested
+// name, showing old and new names side by side.
+
 import SwiftUI
 import LibraryCore
 #if os(macOS)

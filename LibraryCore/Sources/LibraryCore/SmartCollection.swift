@@ -1,3 +1,6 @@
+// SmartCollection.swift
+// A saved sidebar filter: name plus the JSON-encoded criteria to re-apply.
+
 import Foundation
 import GRDB
 

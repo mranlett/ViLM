@@ -1,3 +1,8 @@
+// ContactSheetLayout.swift
+// The grid geometry of a generated contact sheet, shared between the writer
+// (ContactSheetService) and readers (face suggestion analysis) so cached
+// sheets are always read back with the boundaries they were drawn with.
+
 import CoreGraphics
 
 /// The grid geometry of a generated contact sheet — how many cells, how big,

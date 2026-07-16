@@ -1,3 +1,7 @@
+// FileNameAuditView.swift
+// Settings tool: compares each video's filename against the name its metadata
+// suggests (suggestedFileNameFromTags) and batch-renames the mismatches.
+
 import SwiftUI
 import LibraryCore
 

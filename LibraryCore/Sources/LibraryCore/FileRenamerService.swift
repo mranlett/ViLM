@@ -1,3 +1,6 @@
+// FileRenamerService.swift
+// Renames a video file on disk and updates its asset record to match.
+
 import Foundation
 
 public class FileRenamerService {

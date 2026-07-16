@@ -1,3 +1,7 @@
+// CSVDocument.swift
+// Minimal FileDocument for plain-text CSV, used by the Actor Gallery's
+// export/import tools.
+
 import SwiftUI
 import UniformTypeIdentifiers
 

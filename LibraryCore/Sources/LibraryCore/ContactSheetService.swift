@@ -1,3 +1,8 @@
+// ContactSheetService.swift
+// Generates and caches the per-video images under .catalog/: single
+// thumbnails, 4x3 contact sheets, and scene-marker preview frames, all via
+// AVAssetImageGenerator.
+
 import AVFoundation
 import CoreGraphics
 import Foundation

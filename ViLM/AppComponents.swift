@@ -1,3 +1,9 @@
+// AppComponents.swift
+// Shared building blocks used across screens: the usesStackNavigation
+// environment key, AppErrorReporter (error toast plumbing), the 4x4 clickable
+// frame grid (DetailGridView/FrameExtractView), the downsampling thumbnail
+// loader and grid-cell thumbnail views, TagBubble, and FlowLayout.
+
 import SwiftUI
 import AVFoundation
 import AVKit

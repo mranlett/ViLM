@@ -1,3 +1,8 @@
+// LibraryStore.swift
+// The SQLite (GRDB) persistence layer: one cached connection per library,
+// schema migrations v1-v14, and all CRUD for assets, entity profiles, smart
+// collections, scene markers, plus global tag/series rename operations.
+
 import Foundation
 import GRDB
 
@@ -73,7 +78,7 @@ public class LibraryStore {
     private func migrate() throws {
         var migrator = DatabaseMigrator()
         
-        // Your existing v1
+        // v1: initial schema — the assets table.
         migrator.registerMigration("v1") { db in
             try db.create(table: "assets") { t in
                 t.column("id", .text).primaryKey()
@@ -84,7 +89,7 @@ public class LibraryStore {
             }
         }
         
-        // --- NEW: Migration v2 adds the tags column ---
+        // v2: adds the tags column
         migrator.registerMigration("v2") { db in
             // We add the column as a text field that defaults to an empty JSON array
             try db.alter(table: "assets") { t in
@@ -111,7 +116,7 @@ public class LibraryStore {
             }
         }
         
-        // --- NEW: Migration v5 adds video name and episode tracking ---
+        // v5: adds video name and episode tracking
         migrator.registerMigration("v5") { db in
             try db.alter(table: "assets") { t in
                 t.add(column: "video_name", .text)
@@ -119,7 +124,7 @@ public class LibraryStore {
             }
         }
         
-        // --- NEW: Migration v6 adds actor metadata ---
+        // v6: adds actor metadata
         migrator.registerMigration("v6") { db in
             try db.alter(table: "entity_profiles") { t in
                 t.add(column: "gender", .text)
@@ -129,27 +134,27 @@ public class LibraryStore {
             }
         }
         
-        // --- NEW: Migration v7 adds actor tags ---
+        // v7: adds actor tags
         migrator.registerMigration("v7") { db in
             try db.alter(table: "entity_profiles") { t in
                 t.add(column: "tags", .text).notNull().defaults(to: "[]")
             }
         }
         
-        // --- NEW: Migration v8 adds gallery URLs ---
+        // v8: adds gallery URLs
         migrator.registerMigration("v8") { db in
             try db.alter(table: "entity_profiles") { t in
                 t.add(column: "gallery_urls", .text).notNull().defaults(to: "[]")
             }
         }
         
-        // --- NEW: Migration v9 adds created_at ---
+        // v9: adds created_at
         migrator.registerMigration("v9") { db in
             try db.alter(table: "entity_profiles") { t in
                 t.add(column: "created_at", .datetime)
             }
         }
-        // --- NEW: Migration v10 adds smart collections ---
+        // v10: adds smart collections
         migrator.registerMigration("v10") { db in
             try db.create(table: "smart_collections") { t in
                 t.column("id", .text).primaryKey()
@@ -159,14 +164,14 @@ public class LibraryStore {
             }
         }
         
-        // --- NEW: Migration v11 adds akas to entity profiles ---
+        // v11: adds akas to entity profiles
         migrator.registerMigration("v11") { db in
             try db.alter(table: "entity_profiles") { t in
                 t.add(column: "akas", .text).notNull().defaults(to: "[]")
             }
         }
 
-        // --- NEW: Migration v12 adds structured season/episode numbers.
+        // v12: adds structured season/episode numbers.
         // The existing `episode` text column is repurposed as the episode title.
         migrator.registerMigration("v12") { db in
             try db.alter(table: "assets") { t in
@@ -175,7 +180,7 @@ public class LibraryStore {
             }
         }
 
-        // --- NEW: Migration v13 adds play count / last played tracking ---
+        // v13: adds play count / last played tracking
         migrator.registerMigration("v13") { db in
             try db.alter(table: "assets") { t in
                 t.add(column: "play_count", .integer).notNull().defaults(to: 0)
@@ -183,10 +188,10 @@ public class LibraryStore {
             }
         }
 
-        // --- NEW: Migration v14 adds scene markers (named, jumpable
-        // timestamps within a video). ON DELETE CASCADE means a marker is
-        // automatically removed the moment its video is deleted, regardless
-        // of which of the app's several delete paths did it.
+        // v14: adds scene markers (named, jumpable timestamps within a
+        // video). ON DELETE CASCADE means a marker is automatically removed
+        // the moment its video is deleted, regardless of which of the app's
+        // several delete paths did it.
         migrator.registerMigration("v14") { db in
             try db.create(table: "scene_markers") { t in
                 t.column("id", .text).primaryKey()

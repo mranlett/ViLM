@@ -1,3 +1,8 @@
+// ActorInspectorView.swift
+// Detail-pane content when multiple actors are selected in the split view:
+// hosts the single-profile editor (one actor) or the batch profile editor
+// (several), persisting saves back through LibraryStore.
+
 import SwiftUI
 import LibraryCore
 

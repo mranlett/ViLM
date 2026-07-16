@@ -1,3 +1,8 @@
+// SidebarView.swift
+// The sidebar: fixed sections (Dashboard, All Assets, galleries), saved
+// Smart Collections, and quick actor/tag/studio lists derived from the
+// library (cached, recomputed on data changes).
+
 import SwiftUI
 import LibraryCore
 

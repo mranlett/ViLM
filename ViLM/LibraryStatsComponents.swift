@@ -1,3 +1,8 @@
+// LibraryStatsComponents.swift
+// Reusable pieces of the Library Statistics page: completion rings, progress
+// bar rows, top-N bar chart rows, and the drill-down lists for films/actors
+// missing a given field.
+
 import SwiftUI
 import LibraryCore
 

@@ -1,3 +1,8 @@
+// SuggestActorsView.swift
+// The Suggest Actors sheet in Video Details: scans the video's contact sheet
+// for faces and lists visually-similar actors (face crop, name, similarity
+// percent). Suggestions only - nothing is tagged until the user taps Add.
+
 import SwiftUI
 import LibraryCore
 

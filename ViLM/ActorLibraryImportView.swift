@@ -1,3 +1,8 @@
+// ActorLibraryImportView.swift
+// Settings tool: reads a .vilmactors package, shows a preview-before-commit
+// merge plan (new/updated actors, new/duplicate photos), and applies it via
+// LibraryStore.applyActorMerge. Nothing is written until Apply.
+
 import SwiftUI
 import LibraryCore
 

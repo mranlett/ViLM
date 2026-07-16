@@ -1,3 +1,7 @@
+// HelpView.swift
+// The browsable Help screen: table of contents plus every topic's controls,
+// with declarative jump-to-section scrolling.
+
 import SwiftUI
 
 /// A single browsable help document, organized by screen. Present with

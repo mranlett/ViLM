@@ -1,3 +1,7 @@
+// PlayerView.swift
+// Platform wrappers around the native video player surface (AVPlayerView on
+// macOS, VideoPlayer elsewhere).
+
 import SwiftUI
 import AVKit
 

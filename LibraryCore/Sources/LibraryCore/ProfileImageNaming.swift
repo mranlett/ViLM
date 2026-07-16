@@ -1,3 +1,8 @@
+// ProfileImageNaming.swift
+// Single source of truth for profile-photo file naming under
+// .catalog/profiles (primary vs hashed gallery files) and the SHA-256
+// helpers used as cache keys throughout.
+
 import Foundation
 import CryptoKit
 

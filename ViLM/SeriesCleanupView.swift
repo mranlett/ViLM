@@ -1,3 +1,8 @@
+// SeriesCleanupView.swift
+// The Standardize Series tool: groups series names that match after
+// normalizing case/whitespace and merges the variants into a chosen
+// canonical spelling.
+
 import SwiftUI
 import LibraryCore
 

@@ -1,42 +1,11 @@
+// AssetGridView.swift
+// The All Assets grid: the search/filter/sort pipeline (cached in
+// displayedAssets, recomputed only when inputs change), season-grouped series
+// view, the Videos/Actors results toggle, multi-select editing, and smart
+// collection saving.
+
 import SwiftUI
 import LibraryCore
-
-struct AssetFilterCriteria: Equatable, Codable {
-    enum Logic: String, CaseIterable, Equatable, Codable { case and = "AND", or = "OR" }
-    enum ReviewStatusFilter: String, CaseIterable, Equatable, Codable { case all = "All", reviewed = "Reviewed", unreviewed = "Unreviewed" }
-
-    var reviewStatus: ReviewStatusFilter = .all
-    var minRating: Int? = nil
-    
-    var actorsLogic: Logic = .and
-    var selectedActors: Set<String> = []
-    
-    var tagsLogic: Logic = .and
-    var selectedTags: Set<String> = []
-    
-    var studiosLogic: Logic = .and
-    var selectedStudios: Set<String> = []
-    
-    // NEW: Actor metadata filters
-    var actorTagsLogic: Logic = .and
-    var selectedActorTags: Set<String> = []
-    
-    var actorHairColorsLogic: Logic = .or
-    var selectedActorHairColors: Set<String> = []
-    
-    var actorGendersLogic: Logic = .or
-    var selectedActorGenders: Set<String> = []
-    var actorCountriesLogic: Logic = .or
-    var selectedActorCountries: Set<String> = []
-    
-    var isEmpty: Bool {
-        reviewStatus == .all && minRating == nil && 
-        selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
-        selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
-    }
-    
-    public init() {}
-}
 
 struct AssetsGridView: View {
     let assets: [Asset]

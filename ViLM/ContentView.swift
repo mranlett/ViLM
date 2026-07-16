@@ -1,3 +1,9 @@
+// ContentView.swift
+// The app's root view: owns the library lifecycle (security scope, bookmark,
+// scan), the shared asset/profile caches every screen reads, the
+// compact-vs-split navigation architecture, all feature sheets, Settings
+// deep-link sequencing, and the global error toast.
+
 import SwiftUI
 import LibraryCore
 import UniformTypeIdentifiers
@@ -6,7 +12,9 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
-// Ensure this is outside the struct so other files can access it
+// The sidebar's selection vocabulary — fixed sections plus dynamic
+// actor/tag/studio/series/smart-collection entries. Top-level because
+// nearly every screen filters or navigates by it.
 enum SidebarItem: Hashable {
     case dashboard
     case allAssets
@@ -78,7 +86,8 @@ struct ContentView: View {
     @State private var navigationPath: [AppRoute] = []
 #endif
 
-    // ✅ Keep security scope open for the active library
+    // Security-scoped access to the active library folder, held open for
+    // the whole session (see beginSecurityScope).
     @State private var activeSecurityScopedURL: URL?
     @State private var hasActiveSecurityScope: Bool = false
 
@@ -730,7 +739,7 @@ struct ContentView: View {
         }
     }
 
-    // ✅ Keep security scope open as long as this library is selected
+    // Keeps security-scoped access open as long as this library is selected.
     private func beginSecurityScope(for url: URL) {
         // Stop previous if different
         if let current = activeSecurityScopedURL, current != url, hasActiveSecurityScope {
@@ -753,7 +762,7 @@ struct ContentView: View {
             hasActiveSecurityScope = true
         } else {
             // Not always fatal on macOS; on iOS it often means you picked something non-scoped
-            print("⚠️ startAccessingSecurityScopedResource() returned false for: \(url)")
+            print("startAccessingSecurityScopedResource() returned false for: \(url)")
         }
     }
 
@@ -780,7 +789,7 @@ struct ContentView: View {
 #else
             let url = try URL(
                 resolvingBookmarkData: bookmarkData,
-                options: [], // ✅ iOS: no .withSecurityScope
+                options: [], // iOS bookmarks don't use .withSecurityScope
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
@@ -807,7 +816,7 @@ struct ContentView: View {
 #endif
             }
 
-            // ✅ keep scope open for ongoing access
+            // Keep the scope open for ongoing access.
             beginSecurityScope(for: url)
 
             let store = try LibraryStore(at: url)
@@ -828,7 +837,7 @@ struct ContentView: View {
     }
 
     func processFolder(at url: URL) {
-        // ✅ keep scope open for the life of the active library (no defer stop)
+        // Scope stays open for the life of the active library (no defer stop).
         beginSecurityScope(for: url)
 
         let catalogURL = url.appendingPathComponent(".catalog")
@@ -907,7 +916,6 @@ struct ContentView: View {
                         await MainActor.run {
                             self.assets = finalAssets
                             self.gridRefreshID = UUID()
-                            print("✅ UI Refreshed with generated images.")
                         }
                     }
                 } catch {
@@ -1000,56 +1008,3 @@ private struct LibraryFolderPicker: UIViewControllerRepresentable {
     }
 }
 #endif
-
-// MARK: - EntityProfileRouteView
-struct EntityProfileRouteView: View {
-    let category: String
-    let name: String
-    let assets: [Asset]
-    let libraryURL: URL?
-    let gridRefreshID: UUID
-    let entityProfiles: [String: EntityProfile]
-    let akaMap: [String: String]
-    @State private var localSelection: Set<SidebarItem>
-    @State private var searchText = ""
-    @State private var selectedAssetIDs: Set<Asset.ID> = []
-    @State private var missingAssetIDs: Set<Asset.ID> = []
-    @State private var filteredAssetContext: [Asset.ID] = []
-
-    init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID, entityProfiles: [String: EntityProfile] = [:], akaMap: [String: String] = [:]) {
-        self.category = category
-        self.name = name
-        self.assets = assets
-        self.libraryURL = libraryURL
-        self.gridRefreshID = gridRefreshID
-        self.entityProfiles = entityProfiles
-        self.akaMap = akaMap
-
-        let item: SidebarItem
-        switch category {
-        case "actor": item = .actor(name)
-        case "studio": item = .studio(name)
-        case "series": item = .series(name)
-        default: item = .tag(name)
-        }
-        self._localSelection = State(initialValue: [item])
-    }
-
-    var body: some View {
-        AssetsGridView(
-            assets: assets,
-            sidebarSelection: $localSelection,
-            searchText: $searchText,
-            selectedAssetIDs: $selectedAssetIDs,
-            missingAssetIDs: missingAssetIDs,
-            libraryURL: libraryURL,
-            refreshID: gridRefreshID,
-            filteredAssetContext: $filteredAssetContext,
-            entityProfiles: entityProfiles,
-            akaMap: akaMap,
-            pendingFilter: .constant(nil),
-            pendingSort: .constant(nil),
-            pendingSortAscending: .constant(nil)
-        )
-    }
-}

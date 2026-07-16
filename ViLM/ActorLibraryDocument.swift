@@ -1,3 +1,8 @@
+// ActorLibraryDocument.swift
+// FileDocument wrapper for .vilmactors packages - the self-contained JSON
+// container (profiles + base64 photos) produced and consumed by the Actor
+// Library Merge feature in Settings.
+
 import SwiftUI
 import UniformTypeIdentifiers
 import LibraryCore

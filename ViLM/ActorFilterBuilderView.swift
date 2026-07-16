@@ -1,3 +1,8 @@
+// ActorFilterBuilderView.swift
+// The Actor Gallery's advanced-filter sheet: gender, hair color, country,
+// actor tags, video-count and age ranges, with AND/OR logic where it applies.
+// Edits an ActorFilterCriteria binding owned by ActorGridView.
+
 import SwiftUI
 import LibraryCore
 

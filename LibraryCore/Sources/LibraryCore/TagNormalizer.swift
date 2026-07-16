@@ -1,3 +1,7 @@
+// TagNormalizer.swift
+// Canonicalizes tag values and full prefixed tags (trimming, capitalization)
+// so the same tag typed differently converges to one spelling.
+
 import Foundation
 
 public struct TagNormalizer {

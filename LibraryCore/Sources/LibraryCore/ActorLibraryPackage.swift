@@ -1,3 +1,8 @@
+// ActorLibraryPackage.swift
+// Actor Library Merge: the .vilmactors export format (profiles + photo bytes)
+// and the plan/apply merge into a destination library - scalar fields
+// overwrite on match, photos are additive and deduplicated by content hash.
+
 import Foundation
 
 /// A single photo file bundled with an actor library export. `sourceToken` is

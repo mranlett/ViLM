@@ -1,3 +1,9 @@
+// ActorFaceSuggestionService.swift
+// On-device face-based actor suggestion: rebuildFaceIndex caches a Vision
+// fingerprint per actor photo (content-hash keyed), and suggestActors matches
+// faces found in a video's contact sheet against those fingerprints. Results
+// are heuristic visual similarity, never automatic identification.
+
 import Vision
 import CoreGraphics
 import Foundation

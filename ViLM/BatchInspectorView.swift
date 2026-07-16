@@ -1,3 +1,7 @@
+// BatchInspectorView.swift
+// Bulk video editing for a multi-selection: toggle reviewed status, add or
+// remove shared tags, and set Series Name/Season across all selected videos.
+
 import SwiftUI
 import LibraryCore
 

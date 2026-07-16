@@ -1,3 +1,8 @@
+// EntityProfile.swift
+// The profile record for an actor/studio/tag/series entity: bio, photo URL,
+// demographics, tags, gallery photo tokens, and AKAs. Ids are prefixed
+// ("actor:Name").
+
 import Foundation
 import GRDB
 

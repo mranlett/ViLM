@@ -1,3 +1,8 @@
+// EpisodeBackfillView.swift
+// Settings tool: parses legacy freeform episode text ("2 Episode 12", "S2E3",
+// ...) into the structured season/episode fields via EpisodeParser, with a
+// preview-and-confirm table that flags ambiguous rows.
+
 import SwiftUI
 import LibraryCore
 

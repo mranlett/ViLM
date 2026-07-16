@@ -1,3 +1,7 @@
+// AlphaPickerView.swift
+// Horizontal A-Z letter strip used by the Actor and Tag galleries to jump to
+// names starting with a given letter; tapping the active letter clears it.
+
 import SwiftUI
 
 struct AlphaPickerView: View {

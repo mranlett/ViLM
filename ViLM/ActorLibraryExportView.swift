@@ -1,3 +1,8 @@
+// ActorLibraryExportView.swift
+// Settings tool: packages every actor profile and its cached photos into a
+// single .vilmactors file for merging into another library copy
+// (LibraryStore.exportActorLibrary does the heavy lifting).
+
 import SwiftUI
 import LibraryCore
 

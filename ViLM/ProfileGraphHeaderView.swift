@@ -1,3 +1,8 @@
+// ProfileGraphHeaderView.swift
+// The header shown on an entity's profile page: collapsible related-links
+// explorer (studios, co-actors, tags, series), the photo strip and
+// full-screen pinch-zoomable photo browser, and the rename/edit/delete menu.
+
 import SwiftUI
 import LibraryCore
 

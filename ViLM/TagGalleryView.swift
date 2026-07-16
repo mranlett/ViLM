@@ -1,3 +1,8 @@
+// TagGalleryView.swift
+// The Tag Gallery: every tag in the library (film tags, actor-profile tags,
+// or both) as scope-color-coded cards with match counts; selecting tags
+// filters the asset grid.
+
 import SwiftUI
 import LibraryCore
 

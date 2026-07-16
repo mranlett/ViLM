@@ -1,3 +1,7 @@
+// SeriesGalleryView.swift
+// The Series Gallery: every series (video name) as a card with its video
+// count; selecting one opens its filtered asset grid.
+
 import SwiftUI
 import LibraryCore
 

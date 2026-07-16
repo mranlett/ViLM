@@ -1,3 +1,7 @@
+// PlayerPopoutView.swift
+// Content view for the macOS popout player window: title bar plus an
+// AVPlayer-backed PlayerView.
+
 import SwiftUI
 import AVKit
 

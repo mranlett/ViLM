@@ -1,3 +1,8 @@
+// RebuildFaceIndexView.swift
+// Settings tool: scans every actor's photos and caches a Vision face
+// fingerprint per photo (content-hash keyed), powering Suggest Actors in
+// Video Details. Safe to re-run; unchanged photos are skipped.
+
 import SwiftUI
 import LibraryCore
 

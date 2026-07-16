@@ -1,3 +1,8 @@
+// FilterBuilderView.swift
+// The All Assets advanced-filter sheet: review status, minimum rating, and
+// AND/OR actor/tag/studio pickers plus actor-metadata filters. Edits an
+// AssetFilterCriteria binding owned by AssetsGridView.
+
 import SwiftUI
 import LibraryCore
 

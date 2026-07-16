@@ -1,3 +1,9 @@
+// EntityProfileEditorView.swift
+// The Edit Bio form for an actor/studio profile: photo gallery management
+// (add by URL, choose primary, delete), bio, home page, demographics, tags,
+// and AKAs. Persistence is the caller's job via onSave; photo downloads are
+// validated before they touch disk.
+
 import SwiftUI
 import LibraryCore
 import CryptoKit

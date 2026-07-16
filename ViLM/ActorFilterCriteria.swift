@@ -1,3 +1,8 @@
+// ActorFilterCriteria.swift
+// The advanced-filter model for the Actor Gallery: quick maintenance filters
+// (missing photo/gender/needs-attention), demographic filters, tag sets, and
+// sort options. Codable so a filter can be persisted as the default.
+
 import Foundation
 
 struct ActorFilterCriteria: Equatable, Codable {

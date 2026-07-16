@@ -1,3 +1,8 @@
+// LibraryStatsView.swift
+// The Library Statistics page: film/actor/tag completeness stats with
+// drill-down navigation, top actors by image count, and tag usage - all
+// computed off the main thread from a full library scan.
+
 import SwiftUI
 import LibraryCore
 

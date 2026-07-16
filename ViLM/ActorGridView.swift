@@ -1,3 +1,8 @@
+// ActorGridView.swift
+// The Actor Gallery screen: searchable (debounced), A-Z and criteria-filtered
+// grid of actor cards, with multi-select batch editing and the CSV
+// export/import maintenance tools.
+
 import SwiftUI
 import LibraryCore
 import UniformTypeIdentifiers
@@ -395,8 +400,8 @@ struct ActorGridView: View {
             defaultFilename: "Actors.csv"
         ) { result in
             switch result {
-            case .success(let url):
-                print("Exported to \(url)")
+            case .success:
+                break
             case .failure(let error):
                 print("Export failed: \(error.localizedDescription)")
             }

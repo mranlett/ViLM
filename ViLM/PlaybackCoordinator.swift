@@ -1,3 +1,7 @@
+// PlaybackCoordinator.swift
+// Small observable wrapper pairing a VideoPlaybackController with
+// show/hide-player UI state.
+
 import Foundation
 import Combine
 import AVFoundation

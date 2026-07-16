@@ -1,3 +1,7 @@
+// CountryFlagHelper.swift
+// Maps a country name (or ISO-style prefix) to its flag emoji; used when
+// saving an actor's country of origin so the flag renders alongside it.
+
 import Foundation
 
 struct CountryFlagHelper {

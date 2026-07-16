@@ -1,3 +1,8 @@
+// VideoPlaybackController.swift
+// Observable AVPlayer wrapper: loads an item, defers seeks until the item is
+// ready (early seeks get ignored by AVFoundation), clamps to duration, and
+// persists the mute preference.
+
 import Foundation
 import AVFoundation
 import AVKit
@@ -35,7 +40,7 @@ final class VideoPlaybackController {
                 case .readyToPlay:
                     await self.applyPendingSeekIfNeeded()
                 case .failed:
-                    print("❌ AVPlayerItem failed: \(item.error?.localizedDescription ?? "unknown error")")
+                    print("AVPlayerItem failed: \(item.error?.localizedDescription ?? "unknown error")")
                 case .unknown:
                     break
                 @unknown default:

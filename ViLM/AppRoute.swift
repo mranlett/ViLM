@@ -1,3 +1,8 @@
+// AppRoute.swift
+// Navigation destinations for the app's NavigationStacks - one shared route
+// enum so compact (iPhone) and split-view (iPad/macOS) layouts push the same
+// screens.
+
 import Foundation
 
 enum AppRoute: Hashable {
