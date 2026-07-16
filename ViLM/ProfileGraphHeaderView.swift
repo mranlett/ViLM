@@ -201,12 +201,12 @@ struct ProfileGraphHeaderView: View {
                 }
             }
             
-            if let profile = entityProfile, !profile.galleryUrls.isEmpty {
+            if let profile = entityProfile, !galleryOnlyTokens(for: profile).isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Photo Gallery").font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(profile.galleryUrls, id: \.self) { url in
+                            ForEach(galleryOnlyTokens(for: profile), id: \.self) { url in
                                 Button(action: {
                                     selectedFullImageIdentifier = url
                                 }) {
@@ -275,13 +275,7 @@ struct ProfileGraphHeaderView: View {
             set: { if !$0 { selectedFullImageIdentifier = nil } }
         )) {
             if let profile = entityProfile {
-                let allImageIdentifiers: [String] = {
-                    var list = ["primary"]
-                    for url in profile.galleryUrls where url != profile.photoUrl {
-                        list.append(url)
-                    }
-                    return list
-                }()
+                let allImageIdentifiers = ["primary"] + galleryOnlyTokens(for: profile)
 
                 FullScreenPhotoBrowser(
                     libraryURL: libraryURL,
@@ -298,6 +292,16 @@ struct ProfileGraphHeaderView: View {
     
     struct IdentifiableString: Identifiable {
         let id: String
+    }
+
+    // Gallery entries that are actually *additional* photos. Tokens equal to
+    // the primary URL, and the local://primary placeholder, both resolve to
+    // the primary photo file — listing them alongside the header photo (or
+    // as extra pages in the full-screen browser) showed the primary twice.
+    private func galleryOnlyTokens(for profile: EntityProfile) -> [String] {
+        profile.galleryUrls.filter {
+            $0 != profile.photoUrl && $0 != ProfileImageNaming.localPrimaryToken
+        }
     }
 
     // MARK: - Full Screen Photo Browser
@@ -342,25 +346,31 @@ struct ProfileGraphHeaderView: View {
 
         @ViewBuilder
         private func photoPage(for identifier: String) -> some View {
-            if let image = images[identifier] {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Fallback for anything not yet on disk (e.g. a gallery URL not
-                // downloaded yet); ProfileImageView will fetch it.
-                let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
-                let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
-                ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+            ZoomablePhoto {
+                if let image = images[identifier] {
                     image
                         .resizable()
                         .scaledToFit()
-                } placeholder: {
-                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    // Fallback for anything not yet on disk (e.g. a gallery URL not
+                    // downloaded yet); ProfileImageView will fetch it.
+                    let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+                    let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
+                    ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+                        image
+                            .resizable()
+                            .scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            // Fresh zoom state per photo — otherwise the pager's fixed three
+            // HStack slots would carry over a stale scale as `index` changes
+            // which photo occupies a given slot.
+            .id(identifier)
         }
 
         // Resolves the on-disk file for an identifier (no I/O), matching the
@@ -390,6 +400,44 @@ struct ProfileGraphHeaderView: View {
                 }.value
                 if let platformImage { images[identifier] = Image(platformImage: platformImage) }
             }
+        }
+    }
+
+    /// Pinch-to-zoom for a single full-screen photo. Deliberately scoped to
+    /// zoom-in-place (no panning): the pager's own swipe-to-advance uses a
+    /// plain one-finger `DragGesture`, and a competing one-finger pan gesture
+    /// here would fight it for recognition. Pinch (two fingers) and
+    /// double-tap don't overlap with that at all, so they're safe to attach
+    /// with `.simultaneousGesture` without touching the pager's gesture.
+    private struct ZoomablePhoto<Content: View>: View {
+        @ViewBuilder let content: () -> Content
+
+        @State private var scale: CGFloat = 1
+        @State private var lastScale: CGFloat = 1
+
+        private let minScale: CGFloat = 1
+        private let maxScale: CGFloat = 5
+
+        var body: some View {
+            content()
+                .scaleEffect(scale)
+                .simultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            scale = min(max(lastScale * value, minScale), maxScale)
+                        }
+                        .onEnded { _ in
+                            lastScale = scale
+                        }
+                )
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            scale = 1
+                            lastScale = 1
+                        }
+                    }
+                )
         }
     }
 
@@ -512,18 +560,24 @@ struct ProfileGraphHeaderView: View {
             let store = try LibraryStore(at: url)
             try store.saveEntityProfile(profile)
             self.entityProfile = profile
+            // "ReloadAssets" is this app's general "library data changed"
+            // signal — every view sharing the centralized profile cache
+            // listens for it, not just asset lists.
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch {
             print("Failed to save profile: \(error)")
+            AppErrorReporter.report("Couldn't save the profile: \(error.localizedDescription)")
         }
     }
-    
+
     private func deleteProfile() {
         guard let url = libraryURL, let id = currentEntityId else { return }
         do {
             let store = try LibraryStore(at: url)
             try store.deleteEntityProfile(for: id)
             self.entityProfile = nil
-            
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+
             // Navigate back to the appropriate gallery
             let parts = id.split(separator: ":", maxSplits: 1)
             guard parts.count == 2 else { return }
@@ -537,6 +591,7 @@ struct ProfileGraphHeaderView: View {
             }
         } catch {
             print("Failed to delete profile: \(error)")
+            AppErrorReporter.report("Couldn't delete the profile: \(error.localizedDescription)")
         }
     }
     
@@ -565,6 +620,7 @@ struct ProfileGraphHeaderView: View {
             NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch {
             print("Failed to rename globally: \(error)")
+            AppErrorReporter.report("Couldn't rename across the library: \(error.localizedDescription)")
         }
     }
     

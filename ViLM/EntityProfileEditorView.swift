@@ -1,6 +1,11 @@
 import SwiftUI
 import LibraryCore
 import CryptoKit
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 extension View {
     @ViewBuilder
@@ -131,24 +136,12 @@ struct EntityProfileEditorView: View {
                             .focused($focusedField, equals: .newGalleryUrl)
                             .submitLabel(.done)
                             .onSubmit {
-                                let url = newGalleryUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !url.isEmpty && !galleryUrls.contains(url) {
-                                    galleryUrls.append(url)
-                                    if photoUrl.isEmpty {
-                                        photoUrl = url
-                                    }
-                                }
+                                addGalleryUrl(newGalleryUrl)
                                 newGalleryUrl = ""
                                 focusedField = .newGalleryUrl // keep focus
                             }
                         Button("Add") {
-                            let url = newGalleryUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !url.isEmpty && !galleryUrls.contains(url) {
-                                galleryUrls.append(url)
-                                if photoUrl.isEmpty {
-                                    photoUrl = url
-                                }
-                            }
+                            addGalleryUrl(newGalleryUrl)
                             newGalleryUrl = ""
                         }
                         .disabled(newGalleryUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -159,7 +152,12 @@ struct EntityProfileEditorView: View {
                             HStack(spacing: 12) {
                                 ForEach(galleryUrls, id: \.self) { url in
                                     VStack {
-                                        ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: url, isGallery: url != photoUrl) { image in
+                                        // isGallery decides which FILE to read, so it must
+                                        // reflect what's on disk (the SAVED primary), not the
+                                        // live-edited photoUrl field — otherwise promoting a
+                                        // URL in the editor renders it from the primary file,
+                                        // which still holds the previous photo's bytes.
+                                        ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: url, isGallery: url != (initialProfile?.photoUrl ?? "")) { image in
                                             image.resizable().scaledToFill()
                                         } placeholder: {
                                             ZStack {
@@ -376,7 +374,13 @@ struct EntityProfileEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let finalPhotoUrl = photoUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-                        
+
+                        // If a new remote primary is about to overwrite a
+                        // local-only primary (a photo file with no source
+                        // URL — unrecoverable once overwritten), preserve
+                        // the old file as a regular gallery photo first.
+                        preserveLocalPrimaryIfBeingReplaced(by: finalPhotoUrl)
+
                         var finalCountry = countryOfOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !finalCountry.isEmpty {
                             let flag = CountryFlagHelper.flagEmoji(for: finalCountry)
@@ -528,12 +532,62 @@ struct EntityProfileEditorView: View {
         isShowingAkaEntry = false
     }
     
+    /// The primary photo file (`<safeId>.jpg`) is overwritten on save when a
+    /// remote primary URL is set. If the CURRENT primary is local-only (no
+    /// URL — the `local://primary` placeholder), that file is the only copy
+    /// in existence. Copy it to a content-addressed gallery file and swap
+    /// the placeholder token for a synthetic one (same convention as Actor
+    /// Library Merge), so the old photo survives the overwrite.
+    private func preserveLocalPrimaryIfBeingReplaced(by newPrimaryUrl: String) {
+        guard !newPrimaryUrl.isEmpty,
+              (initialProfile?.photoUrl ?? "").isEmpty,
+              let idx = galleryUrls.firstIndex(of: ProfileImageNaming.localPrimaryToken),
+              let libraryURL else { return }
+
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        let primaryFile = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: entityId))
+        guard let data = try? Data(contentsOf: primaryFile) else {
+            // No file to preserve — just drop the now-meaningless placeholder.
+            galleryUrls.remove(at: idx)
+            return
+        }
+
+        let token = "imported-photo://\(ProfileImageNaming.sha256Hex(data))"
+        let destination = profilesDir.appendingPathComponent(ProfileImageNaming.galleryFileName(for: entityId, token: token))
+        do {
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try data.write(to: destination)
+            }
+            galleryUrls[idx] = token
+        } catch {
+            print("Failed to preserve local primary photo: \(error)")
+            AppErrorReporter.report("Couldn't preserve the previous profile photo: \(error.localizedDescription)")
+        }
+    }
+
+    private func addGalleryUrl(_ raw: String) {
+        let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty, !galleryUrls.contains(url) else { return }
+        galleryUrls.append(url)
+        // Only auto-promote to primary when there's truly no primary yet.
+        // An empty photoUrl does NOT mean "no primary" — a local-only
+        // primary (the local://primary placeholder) has a photo file on
+        // disk but no URL. Auto-promoting over it made the new URL render
+        // as "the primary" (showing the OLD photo's bytes, so the gallery
+        // appeared to hold two copies of the old photo), and saving then
+        // overwrote — permanently — the local-only original.
+        if photoUrl.isEmpty && !galleryUrls.contains(ProfileImageNaming.localPrimaryToken) {
+            photoUrl = url
+        }
+    }
+
     private func downloadProfileImage(urlString: String, isGallery: Bool) {
         guard urlString != "local://primary" else { return }
-        guard let url = URL(string: urlString), let libraryURL = libraryURL else { return }
+        guard let url = URL(string: urlString), let libraryURL = libraryURL,
+              url.scheme == "http" || url.scheme == "https" else { return }
         let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        
+
         let fileName: String
         if isGallery {
             let hashData = SHA256.hash(data: Data(urlString.utf8))
@@ -542,13 +596,34 @@ struct EntityProfileEditorView: View {
         } else {
             fileName = "\(safeId).jpg"
         }
-        
+
         let fileURL = profilesDir.appendingPathComponent(fileName)
-        
+
         Task.detached {
             do {
                 try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)
-                let (data, _) = try await URLSession.shared.data(from: url)
+                var request = URLRequest(url: url)
+                request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 400 {
+                    print("Failed to download profile image for \(entityId): HTTP \(httpResponse.statusCode)")
+                    return
+                }
+
+                // Validate the bytes decode as an image before persisting —
+                // some hosts return an HTML error page with a 200 status,
+                // and saving that as a .jpg poisons the cache on disk.
+                #if os(iOS)
+                let decodable = UIImage(data: data) != nil
+                #else
+                let decodable = NSImage(data: data) != nil
+                #endif
+                guard decodable else {
+                    print("Downloaded profile image for \(entityId) is not decodable; not saving")
+                    return
+                }
+
                 try data.write(to: fileURL, options: .atomic)
             } catch {
                 print("Failed to forcefully download profile image for \(entityId): \(error)")

@@ -5,6 +5,7 @@ struct SeriesGalleryView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     let libraryURL: URL?
+    var onPullToRefresh: () async -> Void = {}
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
 
@@ -61,6 +62,9 @@ struct SeriesGalleryView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .refreshable { await onPullToRefresh() }
+        #endif
         .navigationTitle("Series Gallery")
         .toolbar {
             if !allSeries.isEmpty {
@@ -77,6 +81,7 @@ struct SeriesGalleryView: View {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help")
+                .accessibilityLabel("Help")
             }
         }
         .sheet(isPresented: $isShowingCleanup) {

@@ -61,6 +61,8 @@ enum HelpContent {
         items: [
             .init(label: "Search bar",
                   description: "Searches filenames, series names, episode titles, notes, actor names (including aliases and bios), tags, and studios. You can type multiple words — each word can match a different field, so \"jane beach\" finds a video where \"jane\" is an actor and \"beach\" is in the title."),
+            .init(label: "Videos / Actors toggle",
+                  description: "Appears whenever the grid is narrowed down — by a search, a filter, or viewing a tag/actor/studio/series from elsewhere in the app — and switches between the matching videos and the actors who appear in them, so you can jump straight to an actor's profile instead of scrolling through their videos one by one."),
             .init(label: "Filter button",
                   description: "Opens detailed filters — review status, minimum rating, and specific actors, tags, studios, or actor details like hair color, gender, and country — to narrow the grid down. You can save your current filters as the default, or save them as a named Smart Collection in the sidebar."),
             .init(label: "Sort menu",
@@ -73,6 +75,8 @@ enum HelpContent {
                   description: "Turns on multi-select so you can tap several videos, then Edit Selected to change tags, reviewed status, or series/season for all of them at once."),
             .init(label: "Filter chips",
                   description: "When you're viewing more than one actor, tag, studio, or series at once, each appears as a removable chip at the top of the grid."),
+            .init(label: "Pull to refresh (iPhone/iPad)",
+                  description: "Pull down on the grid to re-scan the library folder for added or removed video files — the same check Settings → Check for Changes runs."),
         ]
     )
 
@@ -95,6 +99,8 @@ enum HelpContent {
                   description: "Saves every actor's name, bio, photo URL, home page, gender, hair color, birth year, and country to a spreadsheet file you can edit in Excel or Numbers. This is text only — it doesn't move actual photo files, just the photo's URL if one is set."),
             .init(label: "Import from CSV",
                   description: "Reads a CSV file (in the format Export produces) and updates matching actors. Only fills in the fields the CSV has a value for — a blank cell leaves whatever's already there untouched, and tags, gallery photos, and aliases are always preserved, since this format doesn't carry them."),
+            .init(label: "Pull to refresh (iPhone/iPad)",
+                  description: "Pull down on the grid to re-scan the library folder for added or removed video files — the same check Settings → Check for Changes runs."),
         ]
     )
 
@@ -106,9 +112,11 @@ enum HelpContent {
             .init(label: "A–Z picker",
                   description: "Jump straight to tags starting with a given letter."),
             .init(label: "Tag cards",
-                  description: "Tap a tag to select it (you can select more than one); each card shows how many videos use that tag."),
+                  description: "Tap a tag to select it (you can select more than one); each card shows how many videos match that tag, plus a color-coded scope: green \"Film\" tags are applied directly to videos, blue \"Actor\" tags only live on actor profiles (like a hair color or physical trait), and orange \"Shared\" tags are used both ways. Selecting an Actor tag still finds videos — specifically, videos featuring an actor who carries that tag."),
             .init(label: "View Matches",
                   description: "Appears once you've selected one or more tags — switches to the All Assets grid filtered to videos with those tags."),
+            .init(label: "Pull to refresh (iPhone/iPad)",
+                  description: "Pull down on the grid to re-scan the library folder for added or removed video files — the same check Settings → Check for Changes runs."),
         ]
     )
 
@@ -121,6 +129,8 @@ enum HelpContent {
                   description: "Tap or drag across the thumbnail grid to seek the player to that point in the video."),
             .init(label: "Player controls",
                   description: "Show or hide the inline player, pop it out into its own window (Mac), or play from the start."),
+            .init(label: "Scene Markers",
+                  description: "Name and jump to specific moments in the video — like \"Lightsaber Fight\" at 5:25. Tap the + to add a marker at wherever the player is currently paused/scrubbed to, give it an optional name, and it appears as a thumbnail card you can tap anytime to jump straight back there. The preview picture is grabbed a few seconds after the marked moment (so it shows the actual scene rather than a transition frame), but tapping the card still jumps to the exact time you marked. Use the card's ⋯ menu to rename or delete a marker."),
             .init(label: "Reviewed toggle",
                   description: "Marks the video as reviewed or unreviewed."),
             .init(label: "Rating stars",
@@ -133,6 +143,8 @@ enum HelpContent {
                   description: "Set which series this video belongs to, its season or movie number, its episode number, and an optional episode title. A preview underneath shows exactly how this will sort and file."),
             .init(label: "Tags, Actors, Studios",
                   description: "Add, rename, or remove entries in each category. Typing shows matching existing values to reuse, plus suggestions guessed from the filename. Tapping an existing tag/actor/studio jumps to its own page."),
+            .init(label: "Suggest Actors (face icon, next to Actors)",
+                  description: "Scans this video's contact-sheet frames for faces and compares them to your actors' reference photos, entirely on this device. Matches are shown with the detected face, the actor's name, and a rough similarity percentage — tap Add to tag an actor, or ignore any that don't look right. This is a visual-similarity guess, not confirmed identification, so always double-check before adding. Run \"Rebuild Face Index\" in Settings first if you've recently added new actor photos."),
             .init(label: "Rename File",
                   description: "Appears when the filename doesn't match what your metadata suggests it should be — lets you rename the file to match."),
             .init(label: "Missing file handling",
@@ -156,7 +168,7 @@ enum HelpContent {
             .init(label: "Explore Related Links",
                   description: "A collapsible section (closed by default) showing studios, co-actors, tags, and series connected to this actor — tap any of them to jump straight there."),
             .init(label: "Profile photo",
-                  description: "Tap it to browse a full-screen gallery of every photo you've added for this actor. Swipe left or right to move between photos, including wrapping from the last photo back to the first."),
+                  description: "Tap it to browse a full-screen gallery of every photo you've added for this actor. Swipe left or right to move between photos, including wrapping from the last photo back to the first. Pinch to zoom in on a photo, and double-tap to reset it back to fit."),
             .init(label: "Ellipsis menu",
                   description: "Rename Globally changes this actor's name everywhere in your library at once. Edit Bio opens the full details form. Delete Profile removes the actor's profile — only available once they have no videos left."),
             .init(label: "Edit Bio form",
@@ -183,6 +195,8 @@ enum HelpContent {
                   description: "The collapsible card at the top of a series shows actors, studios, and tags that appear across the series' videos — tap any of them to jump to that actor, studio, or tag. It's closed by default; tap it to open."),
             .init(label: "Standardize Series (wand icon)",
                   description: "Videos are often typed by hand, so the same series can end up spelled slightly differently — \"Training\" vs \"training \" vs \"TRAINING.\" This tool finds names that are the same once you ignore capitalization and stray spaces, lets you pick (or type) the correct spelling, and merges them into one series."),
+            .init(label: "Pull to refresh (iPhone/iPad)",
+                  description: "Pull down on the grid to re-scan the library folder for added or removed video files — the same check Settings → Check for Changes runs."),
         ]
     )
 
@@ -207,6 +221,8 @@ enum HelpContent {
                   description: "A one-time cleanup for older videos that have season/episode info typed as plain text (like \"2 Episode 12\") instead of in the dedicated Season and Episode fields. It reads that old text, guesses the season and episode numbers, and lets you review and confirm before anything changes."),
             .init(label: "Tag & Actor Cleanup",
                   description: "Merges duplicate tags or actors (e.g. combining \"Sci-Fi\" and \"SciFi\"), and finds actor/tag/studio profiles that no longer have any videos attached, so you can remove them."),
+            .init(label: "Rebuild Face Index",
+                  description: "Scans every actor's profile and gallery photos and remembers what their face looks like, entirely on this device — no photos leave your library. This powers \"Suggest Actors\" in Video Details. Safe to run anytime; already-processed photos are skipped, so re-running only picks up photos that are new or changed since the last time."),
             .init(label: "Export Actor Library For Merge",
                   description: "Packages up all of your actors' bios, details, and photos into a single file you can save anywhere (like iCloud Drive). Meant for moving enriched actor information between two copies of your library — for example, a \"portable\" library you've been working on and your main one."),
             .init(label: "Import and Merge Actor Library",

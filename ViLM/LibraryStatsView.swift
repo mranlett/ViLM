@@ -5,6 +5,8 @@ struct LibraryStatsView: View {
     let libraryURL: URL?
     var onSelectAsset: ((Asset.ID) -> Void)?
     var onSelectActor: ((String) -> Void)?
+    var onSelectTag: ((String) -> Void)?
+    var onOpenTagGallery: (() -> Void)?
     
     // Films
     @State private var totalFilms = 0
@@ -17,12 +19,19 @@ struct LibraryStatsView: View {
     
     // Actors
     @State private var totalActors = 0
-    @State private var actorsWithBio: [EntityProfile] = []
-    @State private var actorsWithoutBio: [EntityProfile] = []
     @State private var actorsWithTags: [EntityProfile] = []
     @State private var actorsWithoutTags: [EntityProfile] = []
     @State private var actorsWithImages: [EntityProfile] = []
     @State private var actorsWithoutImages: [EntityProfile] = []
+    @State private var actorsWithGender: [EntityProfile] = []
+    @State private var actorsWithoutGender: [EntityProfile] = []
+    @State private var actorsWithHairColor: [EntityProfile] = []
+    @State private var actorsWithoutHairColor: [EntityProfile] = []
+    @State private var actorsWithBirthYear: [EntityProfile] = []
+    @State private var actorsWithoutBirthYear: [EntityProfile] = []
+    @State private var actorsWithCountry: [EntityProfile] = []
+    @State private var actorsWithoutCountry: [EntityProfile] = []
+    @State private var actorsComplete: [EntityProfile] = []
     @State private var totalActorPhotos = 0
     
     struct TopActor: Hashable {
@@ -66,7 +75,7 @@ struct LibraryStatsView: View {
                             let filmPct = totalFilms > 0 ? Double(filmsWithTags.count) / Double(totalFilms) : 0
                             StatRingView(percentage: filmPct, label: "Films Complete")
                             
-                            let actorPct = totalActors > 0 ? Double(actorsWithTags.count) / Double(totalActors) : 0
+                            let actorPct = totalActors > 0 ? Double(actorsComplete.count) / Double(totalActors) : 0
                             StatRingView(percentage: actorPct, label: "Actors Complete")
                             
                             VStack(spacing: 6) {
@@ -111,7 +120,10 @@ struct LibraryStatsView: View {
                             
                             Divider()
                             
-                            StatProgressBarRow(title: "Actors", value: filmsWithActors.count, missing: filmsWithoutActors.count, valueLabel: "have actors", missingLabel: "no actors", showChevron: false)
+                            NavigationLink(destination: FilmsWithoutActorsView(films: filmsWithoutActors, onSelect: onSelectAsset)) {
+                                StatProgressBarRow(title: "Actors", value: filmsWithActors.count, missing: filmsWithoutActors.count, valueLabel: "have actors", missingLabel: "no actors")
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
                             Divider()
                             
@@ -142,18 +154,42 @@ struct LibraryStatsView: View {
                             
                             Divider()
                             
-                            StatProgressBarRow(title: "Biography", value: actorsWithBio.count, missing: actorsWithoutBio.count, valueLabel: "have bio", missingLabel: "missing", showChevron: false, barColor: .blue)
-                            
+                            StatProgressBarRow(title: "Saved Images", value: actorsWithImages.count, missing: actorsWithoutImages.count, valueLabel: "have images", missingLabel: "missing", showChevron: false, barColor: .blue)
+
                             Divider()
-                            
+
+                            NavigationLink(destination: ActorsMissingFieldView(title: "Actors Without Gender", profiles: actorsWithoutGender, onSelect: onSelectActor)) {
+                                StatProgressBarRow(title: "Gender", value: actorsWithGender.count, missing: actorsWithoutGender.count, valueLabel: "set", missingLabel: "missing", barColor: .blue)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Divider()
+
+                            NavigationLink(destination: ActorsMissingFieldView(title: "Actors Without Hair Color", profiles: actorsWithoutHairColor, onSelect: onSelectActor)) {
+                                StatProgressBarRow(title: "Hair Color", value: actorsWithHairColor.count, missing: actorsWithoutHairColor.count, valueLabel: "set", missingLabel: "missing", barColor: .blue)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Divider()
+
+                            NavigationLink(destination: ActorsMissingFieldView(title: "Actors Without Date of Birth", profiles: actorsWithoutBirthYear, onSelect: onSelectActor)) {
+                                StatProgressBarRow(title: "Date of Birth", value: actorsWithBirthYear.count, missing: actorsWithoutBirthYear.count, valueLabel: "set", missingLabel: "missing", barColor: .blue)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Divider()
+
+                            NavigationLink(destination: ActorsMissingFieldView(title: "Actors Without Country of Origin", profiles: actorsWithoutCountry, onSelect: onSelectActor)) {
+                                StatProgressBarRow(title: "Country of Origin", value: actorsWithCountry.count, missing: actorsWithoutCountry.count, valueLabel: "set", missingLabel: "missing", barColor: .blue)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Divider()
+
                             NavigationLink(destination: ActorsWithoutTagsView(profiles: actorsWithoutTags, onSelect: onSelectActor)) {
                                 StatProgressBarRow(title: "Tags", value: actorsWithTags.count, missing: actorsWithoutTags.count, valueLabel: "tagged", missingLabel: "untagged", barColor: .blue)
                             }
                             .buttonStyle(PlainButtonStyle())
-                            
-                            Divider()
-                            
-                            StatProgressBarRow(title: "Saved Images", value: actorsWithImages.count, missing: actorsWithoutImages.count, valueLabel: "have images", missingLabel: "missing", showChevron: false, barColor: .blue)
                             
                             Divider()
                             
@@ -182,7 +218,10 @@ struct LibraryStatsView: View {
                         VStack(spacing: 0) {
                             let maxImg = topActorsByPhotos.first?.count ?? 0
                             ForEach(Array(topActorsByPhotos.enumerated()), id: \.element.name) { index, actor in
-                                StatBarChartRow(index: index + 1, title: actor.name, count: actor.count, maxCount: maxImg, barColor: .blue)
+                                Button(action: { onSelectActor?(actor.name) }) {
+                                    StatBarChartRow(index: index + 1, title: actor.name, count: actor.count, maxCount: maxImg, barColor: .blue)
+                                }
+                                .buttonStyle(PlainButtonStyle())
                                 if index < topActorsByPhotos.count - 1 {
                                     Divider()
                                 }
@@ -201,55 +240,61 @@ struct LibraryStatsView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                         
-                        VStack(spacing: 0) {
-                            HStack {
-                                Text("Total Unique Tags")
-                                    .font(.system(size: 15))
-                                Spacer()
-                                Text("\(totalTags)")
-                                    .font(.system(size: 17, weight: .bold))
+                        Button(action: { onOpenTagGallery?() }) {
+                            VStack(spacing: 0) {
+                                HStack {
+                                    Text("Total Unique Tags")
+                                        .font(.system(size: 15))
+                                    Spacer()
+                                    Text("\(totalTags)")
+                                        .font(.system(size: 17, weight: .bold))
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Color.secondary.opacity(0.4))
+                                }
+                                .padding(.vertical, 12)
+
+                                Divider()
+
+                                HStack {
+                                    Text("Film Tags")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Spacer()
+                                    Text("\(filmTagsCount)")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.vertical, 12)
+
+                                Divider()
+
+                                HStack {
+                                    Text("Actor Tags")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Spacer()
+                                    Text("\(actorTagsCount)")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.vertical, 12)
+
+                                Divider()
+
+                                HStack {
+                                    Text("Shared Tags")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Spacer()
+                                    Text("\(sharedTagsCount)")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.vertical, 12)
                             }
-                            .padding(.vertical, 12)
-                            
-                            Divider()
-                            
-                            HStack {
-                                Text("Film Tags")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Spacer()
-                                Text("\(filmTagsCount) >")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.primary)
-                            }
-                            .padding(.vertical, 12)
-                            
-                            Divider()
-                            
-                            HStack {
-                                Text("Actor Tags")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Spacer()
-                                Text("\(actorTagsCount) >")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.primary)
-                            }
-                            .padding(.vertical, 12)
-                            
-                            Divider()
-                            
-                            HStack {
-                                Text("Shared Tags")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Spacer()
-                                Text("\(sharedTagsCount) >")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.primary)
-                            }
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .background(Color(PlatformSystemBackground))
+                            .cornerRadius(20)
                         }
-                        .padding(.horizontal, 16)
-                        .background(Color(PlatformSystemBackground))
-                        .cornerRadius(20)
+                        .buttonStyle(PlainButtonStyle())
                         .padding(.horizontal, 20)
                         .padding(.bottom, 8)
                         
@@ -269,7 +314,10 @@ struct LibraryStatsView: View {
                         VStack(spacing: 0) {
                             let maxTag = topTagsByUsage.first?.count ?? 0
                             ForEach(topTagsByUsage, id: \.name) { tag in
-                                StatBarChartRow(index: nil, title: tag.name, count: tag.count, maxCount: maxTag, barColor: .blue)
+                                Button(action: { onSelectTag?(tag.name) }) {
+                                    StatBarChartRow(index: nil, title: tag.name, count: tag.count, maxCount: maxTag, barColor: .blue)
+                                }
+                                .buttonStyle(PlainButtonStyle())
                                 if tag.name != topTagsByUsage.last?.name {
                                     Divider()
                                 }
@@ -302,7 +350,10 @@ struct LibraryStatsView: View {
             do {
                 let store = try LibraryStore(at: url)
                 let assets = try store.fetchAllAssets()
-                let profiles = try store.fetchAllEntityProfiles()
+                // fetchAllEntityProfiles() returns actors, studios, tags, and
+                // series alike — this page's "Actors" stats only make sense
+                // for actor profiles.
+                let profiles = try store.fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
                 
                 let thumbDir = url.appendingPathComponent(".catalog/thumbnails")
                 let profileDir = url.appendingPathComponent(".catalog/profiles")
@@ -344,51 +395,69 @@ struct LibraryStatsView: View {
                 }
                 
                 // Actors lists
-                var aWithBio: [EntityProfile] = []
-                var aNoBio: [EntityProfile] = []
                 var aWithTags: [EntityProfile] = []
                 var aNoTags: [EntityProfile] = []
                 var aWithImages: [EntityProfile] = []
                 var aNoImages: [EntityProfile] = []
-                
+                var aWithGender: [EntityProfile] = []
+                var aNoGender: [EntityProfile] = []
+                var aWithHairColor: [EntityProfile] = []
+                var aNoHairColor: [EntityProfile] = []
+                var aWithBirthYear: [EntityProfile] = []
+                var aNoBirthYear: [EntityProfile] = []
+                var aWithCountry: [EntityProfile] = []
+                var aNoCountry: [EntityProfile] = []
+                var aComplete: [EntityProfile] = []
+
                 var aTotalPhotos = 0
                 var actorPhotoCounts: [String: Int] = [:]
                 var allActorTagsSet = Set<String>()
-                
+
                 let allProfileFiles = (try? FileManager.default.contentsOfDirectory(atPath: profileDir.path)) ?? []
                 let jpgFiles = allProfileFiles.filter { $0.hasSuffix(".jpg") }
-                
+
                 for profile in profiles {
-                    if !(profile.bio ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        aWithBio.append(profile)
-                    } else {
-                        aNoBio.append(profile)
-                    }
-                    
                     if !profile.tags.isEmpty {
                         aWithTags.append(profile)
-                        for tag in profile.tags { 
+                        for tag in profile.tags {
                             allActorTagsSet.insert(tag)
                             tagUsageCounts[tag, default: 0] += 1
                         }
                     } else {
                         aNoTags.append(profile)
                     }
-                    
+
                     let safeId = profile.id.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
                     let actorPhotos = jpgFiles.filter { $0 == "\(safeId).jpg" || $0.hasPrefix("\(safeId)_") }.count
-                    
+                    let hasPhoto = actorPhotos > 0 || profile.photoUrl != nil
+
                     if actorPhotos > 0 {
                         aWithImages.append(profile)
                         aTotalPhotos += actorPhotos
-                        
+
                         let displayName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
                         actorPhotoCounts[displayName] = actorPhotos
                     } else {
                         aNoImages.append(profile)
                     }
+
+                    let hasGender = !(profile.gender ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                    if hasGender { aWithGender.append(profile) } else { aNoGender.append(profile) }
+
+                    let hasHairColor = !(profile.hairColor ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                    if hasHairColor { aWithHairColor.append(profile) } else { aNoHairColor.append(profile) }
+
+                    let hasBirthYear = profile.birthYear != nil
+                    if hasBirthYear { aWithBirthYear.append(profile) } else { aNoBirthYear.append(profile) }
+
+                    let hasCountry = !(profile.countryOfOrigin ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                    if hasCountry { aWithCountry.append(profile) } else { aNoCountry.append(profile) }
+
+                    if hasPhoto && hasGender && hasHairColor && hasBirthYear && hasCountry {
+                        aComplete.append(profile)
+                    }
                 }
-                
+
                 let top5Actors = actorPhotoCounts.map { TopActor(name: $0.key, count: $0.value) }
                                            .sorted { $0.count > $1.count }
                                            .prefix(5)
@@ -409,7 +478,7 @@ struct LibraryStatsView: View {
                 let finalFilmTagsCount = allFilmTagsSet.count
                 let finalActorTagsCount = allActorTagsSet.count
                 
-                await MainActor.run { [fWithTags, fNoTags, fWithActors, fNoActors, fWithThumbs, fNoThumbs, aWithBio, aNoBio, aWithTags, aNoTags, aWithImages, aNoImages] in
+                await MainActor.run { [fWithTags, fNoTags, fWithActors, fNoActors, fWithThumbs, fNoThumbs, aWithTags, aNoTags, aWithImages, aNoImages, aWithGender, aNoGender, aWithHairColor, aNoHairColor, aWithBirthYear, aNoBirthYear, aWithCountry, aNoCountry, aComplete] in
                     self.totalFilms = finalTotalFilms
                     self.filmsWithTags = fWithTags
                     self.untaggedFilms = fNoTags
@@ -417,15 +486,22 @@ struct LibraryStatsView: View {
                     self.filmsWithoutActors = fNoActors
                     self.filmsWithThumbnails = fWithThumbs
                     self.filmsWithoutThumbnails = fNoThumbs
-                    
+
                     self.totalActors = finalTotalActors
-                    self.actorsWithBio = aWithBio
-                    self.actorsWithoutBio = aNoBio
                     self.actorsWithTags = aWithTags
                     self.actorsWithoutTags = aNoTags
                     self.actorsWithImages = aWithImages
                     self.actorsWithoutImages = aNoImages
-                    
+                    self.actorsWithGender = aWithGender
+                    self.actorsWithoutGender = aNoGender
+                    self.actorsWithHairColor = aWithHairColor
+                    self.actorsWithoutHairColor = aNoHairColor
+                    self.actorsWithBirthYear = aWithBirthYear
+                    self.actorsWithoutBirthYear = aNoBirthYear
+                    self.actorsWithCountry = aWithCountry
+                    self.actorsWithoutCountry = aNoCountry
+                    self.actorsComplete = aComplete
+
                     self.totalActorPhotos = finalTotalPhotos
                     self.topActorsByPhotos = finalTop5Actors
                     

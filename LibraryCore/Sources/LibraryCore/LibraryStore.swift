@@ -16,6 +16,22 @@ public class LibraryStore {
     nonisolated(unsafe) private static var queueCache: [String: DatabaseQueue] = [:]
     private static let cacheLock = NSLock()
 
+    /// Drops cached connections for every library except the one at
+    /// `activeURL` (pass nil to drop them all). Without this, switching
+    /// between libraries accumulates an open SQLite connection (plus WAL
+    /// file handles) per library visited, for the life of the app. Existing
+    /// `LibraryStore` instances keep their own reference to an evicted
+    /// queue, so in-flight work is unaffected — the connection closes once
+    /// the last such instance goes away.
+    public static func evictCachedConnections(keepingLibraryAt activeURL: URL?) {
+        let keepPath = activeURL?
+            .appendingPathComponent(".catalog")
+            .appendingPathComponent("catalog.sqlite").path
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        queueCache = queueCache.filter { $0.key == keepPath }
+    }
+
     public init(at url: URL) throws {
         self.libraryURL = url
         let dbPath = url.appendingPathComponent(".catalog").appendingPathComponent("catalog.sqlite").path
@@ -39,6 +55,10 @@ public class LibraryStore {
                 // prior mode if the filesystem can't support WAL, so this is
                 // safe on network/USB volumes.
                 try db.execute(sql: "PRAGMA journal_mode = WAL")
+                // SQLite does not enforce foreign keys unless told to, per
+                // connection. This is what makes scene_markers' ON DELETE
+                // CASCADE actually take effect when a video is deleted.
+                try db.execute(sql: "PRAGMA foreign_keys = ON")
             }
             return c
         }()
@@ -163,6 +183,20 @@ public class LibraryStore {
             }
         }
 
+        // --- NEW: Migration v14 adds scene markers (named, jumpable
+        // timestamps within a video). ON DELETE CASCADE means a marker is
+        // automatically removed the moment its video is deleted, regardless
+        // of which of the app's several delete paths did it.
+        migrator.registerMigration("v14") { db in
+            try db.create(table: "scene_markers") { t in
+                t.column("id", .text).primaryKey()
+                t.column("asset_id", .text).notNull().indexed().references("assets", onDelete: .cascade)
+                t.column("timestamp_seconds", .double).notNull()
+                t.column("label", .text)
+                t.column("created_at", .datetime).notNull()
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
     
@@ -183,6 +217,29 @@ public class LibraryStore {
     public func deleteSmartCollection(id: String) throws {
         try dbQueue.write { db in
             _ = try SmartCollection.deleteOne(db, key: id)
+        }
+    }
+
+    // MARK: - Scene Markers
+
+    public func fetchSceneMarkers(for assetId: Asset.ID) throws -> [SceneMarker] {
+        try dbQueue.read { db in
+            try SceneMarker
+                .filter(Column("asset_id") == assetId.uuidString)
+                .order(Column("timestamp_seconds").asc)
+                .fetchAll(db)
+        }
+    }
+
+    public func saveSceneMarker(_ marker: SceneMarker) throws {
+        try dbQueue.write { db in
+            try marker.save(db)
+        }
+    }
+
+    public func deleteSceneMarker(id: SceneMarker.ID) throws {
+        try dbQueue.write { db in
+            _ = try SceneMarker.deleteOne(db, key: id.uuidString)
         }
     }
     
@@ -265,10 +322,26 @@ public class LibraryStore {
             
             // Handle Entity Profile merging
             if let oldProfile = try EntityProfile.fetchOne(db, key: normalizedOld) {
-                let destExists = try EntityProfile.fetchOne(db, key: normalizedNew) != nil
-                
-                if !destExists {
-                    // Safe to rename the profile
+                if var dest = try EntityProfile.fetchOne(db, key: normalizedNew) {
+                    // Destination already has a profile: merge instead of
+                    // discarding the source. The destination's own values win
+                    // where set; the source fills gaps, and list fields are
+                    // unioned so no bio/photo/AKA data is silently lost.
+                    dest.bio = dest.bio ?? oldProfile.bio
+                    dest.photoUrl = dest.photoUrl ?? oldProfile.photoUrl
+                    dest.homePage = dest.homePage ?? oldProfile.homePage
+                    dest.gender = dest.gender ?? oldProfile.gender
+                    dest.hairColor = dest.hairColor ?? oldProfile.hairColor
+                    dest.birthYear = dest.birthYear ?? oldProfile.birthYear
+                    dest.countryOfOrigin = dest.countryOfOrigin ?? oldProfile.countryOfOrigin
+                    dest.tags = (dest.tags + oldProfile.tags.filter { !dest.tags.contains($0) })
+                    dest.galleryUrls = (dest.galleryUrls + oldProfile.galleryUrls.filter { !dest.galleryUrls.contains($0) })
+                    dest.akas = (dest.akas + oldProfile.akas.filter { !dest.akas.contains($0) })
+                    try dest.save(db)
+                } else {
+                    // Safe to rename the profile. Carry every field —
+                    // omitting akas here used to silently drop all of an
+                    // actor's aliases on rename.
                     let newProfile = EntityProfile(
                         id: normalizedNew,
                         bio: oldProfile.bio,
@@ -279,11 +352,13 @@ public class LibraryStore {
                         birthYear: oldProfile.birthYear,
                         countryOfOrigin: oldProfile.countryOfOrigin,
                         tags: oldProfile.tags,
-                        galleryUrls: oldProfile.galleryUrls
+                        galleryUrls: oldProfile.galleryUrls,
+                        akas: oldProfile.akas,
+                        createdAt: oldProfile.createdAt
                     )
                     try newProfile.save(db)
                 }
-                
+
                 // Old profile must be deleted since the tag is gone
                 _ = try oldProfile.delete(db)
             }

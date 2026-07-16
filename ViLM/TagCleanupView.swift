@@ -143,9 +143,10 @@ struct TagCleanupView: View {
             for orphan in orphanedProfiles {
                 try store.deleteEntityProfile(for: orphan.id)
             }
-            
+
             await MainActor.run {
                 loadProfiles()
+                onRefresh()
             }
         } catch {
             self.errorMessage = "Failed to delete orphans: \(error.localizedDescription)"

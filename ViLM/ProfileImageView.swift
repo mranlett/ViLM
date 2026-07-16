@@ -12,7 +12,43 @@ import AppKit
 // placeholders and snaps abruptly. Lives outside the generic view because
 // generic types can't hold static stored properties. Thread-safe NSCache.
 private enum ProfileImageCache {
-    nonisolated(unsafe) static let shared = NSCache<NSString, PlatformImage>()
+    nonisolated(unsafe) static let shared: NSCache<NSString, PlatformImage> = {
+        let c = NSCache<NSString, PlatformImage>()
+        // This cache holds full-resolution decoded photos (the full-screen
+        // browser reads from it), so bound it by decoded pixel bytes — cost
+        // is passed at setObject — rather than waiting for system memory
+        // pressure, which on iOS often arrives as a jetsam kill.
+        c.totalCostLimit = 192 * 1024 * 1024
+        return c
+    }()
+
+    /// Rough decoded-bitmap size in bytes (RGBA), used as the NSCache cost.
+    static func cost(of image: PlatformImage) -> Int {
+        #if os(iOS)
+        return Int(image.size.width * image.scale) * Int(image.size.height * image.scale) * 4
+        #else
+        return Int(image.size.width) * Int(image.size.height) * 4
+        #endif
+    }
+}
+
+// URLs that failed to download or decode this session. Without this, a dead
+// photo URL is re-requested every single time its view appears — every
+// scroll of the actor grid fires HTTP requests for the same 404s. Session-
+// scoped on purpose: a URL that's down today may work after a relaunch.
+private enum FailedProfileURLs {
+    nonisolated(unsafe) private static var urls = Set<String>()
+    private static let lock = NSLock()
+
+    static func contains(_ url: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return urls.contains(url)
+    }
+
+    static func insert(_ url: String) {
+        lock.lock(); defer { lock.unlock() }
+        urls.insert(url)
+    }
 }
 
 struct ProfileImageView<Content: View, Placeholder: View>: View {
@@ -42,7 +78,10 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: photoUrl ?? "") {
+        // Explicit sentinel: a nil photoUrl and an empty-string photoUrl must
+        // not share a task identity (both mean "no remote URL" today, but the
+        // collision would silently skip a reload if that ever changes).
+        .task(id: photoUrl ?? "«no-url»") {
             await resolveLocalImage()
         }
     }
@@ -71,7 +110,6 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     private func resolveLocalImage() async {
         guard let libraryURL = libraryURL else { return }
 
-        let safeId = ProfileImageNaming.safeId(for: entityId)
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
 
         let fileName = ProfileImageNaming.fileName(for: entityId, token: photoUrl, isGallery: isGallery)
@@ -89,48 +127,54 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
             }
         }
         
-        // 2. Check for legacy images to migrate (previously hashed by URL) - only for primary
-        if !isGallery, let fallbackFile = findAnyExistingImage(in: profilesDir, for: safeId) {
-            do {
-                try FileManager.default.moveItem(at: fallbackFile, to: fileURL)
-                cleanupOldImages(in: profilesDir, for: safeId, keeping: fileName)
-                if let image = await loadImageAsync(from: fileURL) {
-                    setLocalImage(image)
-                    return
-                } else {
-                    try? FileManager.default.removeItem(at: fileURL)
-                }
-            } catch {
-                if let image = await loadImageAsync(from: fallbackFile) {
-                    setLocalImage(image)
-                    return
-                }
-            }
-        }
-        
-        // 3. If no local image exists, and a URL was provided, attempt to download it
-        guard let photoUrlString = photoUrl, let url = URL(string: photoUrlString) else { return }
-        
+        // NOTE: a "legacy migration" step used to live here — it moved the
+        // first `<safeId>_*.jpg` file to the primary filename and deleted
+        // every other match, from an era when that pattern was the *old
+        // primary* naming scheme. Today that exact pattern is how GALLERY
+        // photos are named, so the "migration" was actively destroying whole
+        // galleries: any actor whose primary file was missing had one gallery
+        // photo promoted and the rest permanently deleted, triggered by
+        // merely scrolling their card into view. Never reintroduce a glob
+        // over `<safeId>_` that deletes or moves files.
+
+        // 2. If no local image exists, and a URL was provided, attempt to download it
+        guard let photoUrlString = photoUrl, let url = URL(string: photoUrlString),
+              url.scheme == "http" || url.scheme == "https" else { return }
+
+        // A URL that already failed this session isn't retried — otherwise a
+        // dead link fires a fresh HTTP request every time its card scrolls
+        // into view.
+        guard !FailedProfileURLs.contains(photoUrlString) else { return }
+
         do {
             try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)
-            
+
             var request = URLRequest(url: url)
             // Add a standard User-Agent to prevent 403 Forbidden on some CDNs (like sk-static)
             request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-            
+
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 400 {
+                FailedProfileURLs.insert(photoUrlString)
                 print("Failed to download profile image for \(entityId): HTTP \(httpResponse.statusCode)")
                 return
             }
-            
-            try data.write(to: fileURL)
 
-            if let image = await decodeAndCache(from: data, cacheKey: fileURL.path as NSString) {
-                setLocalImage(image)
+            // Decode BEFORE writing. Some hosts return an HTML error page
+            // with a 200 status; persisting it produced a churn loop — the
+            // undecodable file was deleted on the next appearance and then
+            // re-downloaded, forever. Only verified image bytes reach disk.
+            guard let image = await decodeAndCache(from: data, cacheKey: fileURL.path as NSString) else {
+                FailedProfileURLs.insert(photoUrlString)
+                print("Downloaded profile image for \(entityId) is not decodable; not saving")
+                return
             }
+
+            try data.write(to: fileURL)
+            setLocalImage(image)
         } catch {
+            FailedProfileURLs.insert(photoUrlString)
             print("Failed to download profile image for \(entityId): \(error)")
         }
     }
@@ -162,31 +206,9 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         }.value
         guard let platformImage else { return nil }
         if let cacheKey {
-            ProfileImageCache.shared.setObject(platformImage, forKey: cacheKey)
+            ProfileImageCache.shared.setObject(platformImage, forKey: cacheKey, cost: ProfileImageCache.cost(of: platformImage))
         }
         return Image(platformImage: platformImage)
     }
     
-    private func findAnyExistingImage(in directory: URL, for safeId: String) -> URL? {
-        do {
-            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            return files.first { $0.lastPathComponent.hasPrefix("\(safeId)_") && $0.lastPathComponent.hasSuffix(".jpg") }
-        } catch {
-            return nil
-        }
-    }
-    
-    private func cleanupOldImages(in directory: URL, for safeId: String, keeping currentFileName: String) {
-        do {
-            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            for file in files {
-                let name = file.lastPathComponent
-                if name.hasPrefix("\(safeId)_") && name.hasSuffix(".jpg") && name != currentFileName {
-                    try? FileManager.default.removeItem(at: file)
-                }
-            }
-        } catch {
-            // Ignore cleanup errors
-        }
-    }
 }

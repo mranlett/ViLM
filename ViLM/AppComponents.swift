@@ -25,6 +25,29 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Error surfacing
+//
+// The app's write paths used to swallow failures with a print() — a save
+// that didn't persist (disk full, unplugged volume, permissions) looked
+// exactly like success. Any code that fails a user-initiated write calls
+// AppErrorReporter.report(_:); ContentView listens and shows a transient
+// toast. Deliberately fire-and-forget: reporting must never be able to make
+// the failing operation worse.
+enum AppErrorReporter {
+    nonisolated static let notificationName = NSNotification.Name("AppErrorToast")
+
+    // Callable from any thread/task — the body hops to main itself.
+    nonisolated static func report(_ message: String) {
+        if Thread.isMainThread {
+            NotificationCenter.default.post(name: notificationName, object: message)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: notificationName, object: message)
+            }
+        }
+    }
+}
+
 // MARK: - Detail High-Res Grid (4x4 clickable frames)
 struct DetailGridView: View {
     let asset: Asset
@@ -34,11 +57,23 @@ struct DetailGridView: View {
 
     @State private var times: [Double] = Array(repeating: 0, count: 16)
     @State private var computedAspectRatio: CGFloat = 16.0 / 9.0
+    // One AVURLAsset per video, held across renders. `body` used to build a
+    // fresh instance on every render and hand it to all 16 cells; the cell
+    // count made that per-render cost real. Set from the .task below (state
+    // can't be mutated during a view update).
+    @State private var cachedVideoAsset: AVURLAsset?
+
+    private func videoAsset(for url: URL) -> AVURLAsset {
+        if let cachedVideoAsset, cachedVideoAsset.url == url {
+            return cachedVideoAsset
+        }
+        return AVURLAsset(url: url)
+    }
 
     var body: some View {
         Group {
             if let url = libraryURL?.appendingPathComponent(asset.relativePath) {
-                let videoAsset = AVURLAsset(url: url)
+                let videoAsset = videoAsset(for: url)
 
                 VStack(spacing: 2) {
                     ForEach(0..<4, id: \.self) { row in
@@ -64,7 +99,9 @@ struct DetailGridView: View {
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .task(id: asset.id) {
-                    await computeTimes(for: url)
+                    let avAsset = self.videoAsset(for: url)
+                    cachedVideoAsset = avAsset
+                    await computeTimes(for: avAsset)
                 }
             } else {
                 EmptyView()
@@ -72,9 +109,7 @@ struct DetailGridView: View {
         }
     }
 
-    private func computeTimes(for url: URL) async {
-        let avAsset = AVURLAsset(url: url)
-        
+    private func computeTimes(for avAsset: AVURLAsset) async {
         if let track = try? await avAsset.loadTracks(withMediaType: .video).first,
            let size = try? await track.load(.naturalSize),
            let transform = try? await track.load(.preferredTransform) {
@@ -150,7 +185,14 @@ struct FrameExtractView: View {
 // main thread per render does not scale to large libraries.
 enum ThumbnailLoader {
     // NSCache is internally thread-safe; opt out of Swift 6 global-state isolation.
-    nonisolated(unsafe) private static let cache = NSCache<NSString, CGImage>()
+    nonisolated(unsafe) private static let cache: NSCache<NSString, CGImage> = {
+        let c = NSCache<NSString, CGImage>()
+        // Bound by decoded pixel bytes (cost passed at setObject) so a large
+        // grid can't accumulate unlimited bitmaps before the system's memory
+        // pressure — which on iOS often arrives as a jetsam kill — steps in.
+        c.totalCostLimit = 96 * 1024 * 1024
+        return c
+    }()
 
     /// Cache key includes the file's modification date so regenerated
     /// thumbnails (e.g. "Set as Main Thumbnail") are picked up.
@@ -169,7 +211,7 @@ enum ThumbnailLoader {
                 kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
             ]
             guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
-            cache.setObject(image, forKey: key)
+            cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
             return image
         }.value
     }

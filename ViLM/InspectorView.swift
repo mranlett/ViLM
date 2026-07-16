@@ -96,9 +96,26 @@ struct SingleInspectorView: View {
     // scrubbing around the same video several times isn't several "plays."
     @State private var hasRecordedPlayThisSession = false
 
+    // Scene markers
+    @State private var sceneMarkers: [SceneMarker] = []
+    @State private var isShowingAddMarkerPopover = false
+    @State private var pendingMarkerTimestamp: Double = 0
+    @State private var editingMarker: SceneMarker? = nil
+    // Bumped once a newly-added marker's thumbnail finishes generating
+    // asynchronously, so its card's .task re-checks disk for the new file.
+    @State private var markerThumbnailRefreshID = UUID()
+
     // iOS/Mac shared progress flags
     @State private var isSavingThumb = false
     @State private var isGeneratingSheet = false
+
+    // Face-based actor suggestions
+    @State private var isShowingSuggestActors = false
+
+    // Notes editing buffer (see annotationsSection for why edits are
+    // debounced instead of bound directly to the asset).
+    @State private var notesDraft: String = ""
+    @State private var notesSaveTask: Task<Void, Never>?
 
     // macOS-only state
     #if os(macOS)
@@ -160,6 +177,7 @@ struct SingleInspectorView: View {
                             .disabled(!hasPrevious)
                             .keyboardShortcut(.leftArrow, modifiers: [])
                             .help("Previous Video")
+                            .accessibilityLabel("Previous Video")
                             
                             Button(action: goToNext) {
                                 Image(systemName: "chevron.right")
@@ -167,6 +185,7 @@ struct SingleInspectorView: View {
                             .disabled(!hasNext)
                             .keyboardShortcut(.rightArrow, modifiers: [])
                             .help("Next Video")
+                            .accessibilityLabel("Next Video")
                         }
                         .padding(.trailing, 8)
                     }
@@ -254,6 +273,10 @@ struct SingleInspectorView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 #endif
+
+                Divider()
+
+                sceneMarkersSection
 
                 Divider()
 
@@ -381,6 +404,7 @@ struct SingleInspectorView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .help("Open Link")
+                                .accessibilityLabel("Open Link")
                             }
                         }
                     }
@@ -393,7 +417,7 @@ struct SingleInspectorView: View {
 
                 tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
                 Divider()
-                tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
+                tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue, showSuggestButton: true)
                 Divider()
                 tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
 
@@ -434,6 +458,16 @@ struct SingleInspectorView: View {
             .padding()
         }
         .frame(minWidth: 300)
+#if os(macOS)
+        // ⌘⌫ opens the same delete confirmation as the Danger Zone button
+        // (hidden so it works even while the DisclosureGroup is collapsed).
+        .background(
+            Button("") { showDeleteConfirmation = true }
+                .keyboardShortcut(.delete, modifiers: [.command])
+                .hidden()
+                .accessibilityHidden(true)
+        )
+#endif
         .popover(isPresented: $isShowingTagEntry) {
             tagEntryPopover
         }
@@ -455,15 +489,33 @@ struct SingleInspectorView: View {
         } message: {
             Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
         }
+        .sheet(isPresented: $isShowingSuggestActors) {
+            if let url = libraryURL {
+                SuggestActorsView(asset: asset, libraryURL: url, onAddActor: addActorTag)
+            }
+        }
         .onAppear {
             #if os(macOS)
             loadDuration()
             #endif
+            loadSceneMarkers()
+            notesDraft = asset.notes ?? ""
+        }
+        .onDisappear {
+            // Commit any un-debounced notes edit before the view goes away,
+            // and stop audio — on iPhone, pushing deeper (e.g. tapping an
+            // actor tag) keeps this view alive in the navigation stack, so
+            // without this the video kept playing underneath the new screen.
+            notesSaveTask?.cancel()
+            commitNotesDraft()
+            playback.player.pause()
         }
         .onChange(of: asset.id) { _, _ in
             #if os(macOS)
             loadDuration()
             #endif
+            loadSceneMarkers()
+            notesDraft = asset.notes ?? ""
         }
         .onChange(of: scrubTime) { _, newValue in
             #if os(macOS)
@@ -483,17 +535,163 @@ struct SingleInspectorView: View {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                 }
                 .help("Toggle Full Screen")
+                .accessibilityLabel("Toggle Full Screen")
             }
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: { isShowingHelp = true }) {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help")
+                .accessibilityLabel("Help")
             }
         }
         .sheet(isPresented: $isShowingHelp) {
             HelpView(initialTopicID: HelpContent.videoDetails.id)
         }
+    }
+
+    // MARK: - Scene Markers
+
+    // The real, live playback position — NOT `scrubTime`, which is just a
+    // one-shot "seek to here" request set when tapping a frame-grid thumbnail
+    // or dragging the macOS scrubber. It never tracks ongoing playback, so
+    // using it here would record the same stale timestamp for every marker
+    // regardless of where the video is actually paused.
+    private func currentPlaybackSeconds() -> Double {
+        let seconds = playback.player.currentTime().seconds
+        return seconds.isFinite ? max(0, seconds) : scrubTime
+    }
+
+    private func formattedTime(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    @ViewBuilder
+    private var sceneMarkersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Scene Markers").font(.subheadline).fontWeight(.bold)
+                Spacer()
+                Button {
+                    // Capture the timestamp once, right now — not when the
+                    // popover later renders or when Save is tapped — so the
+                    // dialog's title and the saved marker always agree, even
+                    // if playback continues while naming it.
+                    pendingMarkerTimestamp = currentPlaybackSeconds()
+                    isShowingAddMarkerPopover = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.plain)
+            }
+
+            if sceneMarkers.isEmpty {
+                Text("No markers yet. Add one at the current position to jump straight back to it later.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(sceneMarkers) { marker in
+                            SceneMarkerCard(
+                                marker: marker,
+                                libraryURL: libraryURL,
+                                refreshToken: markerThumbnailRefreshID,
+                                onTap: { jumpToMarker(marker) },
+                                onEdit: { editingMarker = marker },
+                                onDelete: { deleteMarker(marker) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .popover(isPresented: $isShowingAddMarkerPopover) {
+            MarkerLabelEntryView(title: "Add Marker at \(formattedTime(pendingMarkerTimestamp))", initialValue: "") { label in
+                addMarker(label: label, at: pendingMarkerTimestamp)
+            }
+        }
+        .popover(item: $editingMarker) { marker in
+            MarkerLabelEntryView(title: "Rename Marker", initialValue: marker.label ?? "") { label in
+                renameMarker(marker, to: label)
+            }
+        }
+    }
+
+    private func loadSceneMarkers() {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            sceneMarkers = try store.fetchSceneMarkers(for: asset.id)
+        } catch {
+            print("Failed to load scene markers: \(error)")
+        }
+    }
+
+    private func addMarker(label: String, at timestampSeconds: Double) {
+        guard let url = libraryURL else { return }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let marker = SceneMarker(assetId: asset.id, timestampSeconds: timestampSeconds, label: trimmed.isEmpty ? nil : trimmed)
+        do {
+            let store = try LibraryStore(at: url)
+            try store.saveSceneMarker(marker)
+            sceneMarkers.append(marker)
+            sceneMarkers.sort { $0.timestampSeconds < $1.timestampSeconds }
+            Task {
+                let service = ContactSheetService(store: store)
+                try? await service.generateMarkerThumbnail(
+                    for: asset,
+                    markerId: marker.id,
+                    timestampSeconds: marker.timestampSeconds,
+                    libraryURL: url
+                )
+                await MainActor.run { markerThumbnailRefreshID = UUID() }
+            }
+        } catch {
+            print("Failed to save scene marker: \(error)")
+            AppErrorReporter.report("Couldn't save the scene marker: \(error.localizedDescription)")
+        }
+    }
+
+    private func renameMarker(_ marker: SceneMarker, to label: String) {
+        guard let url = libraryURL else { return }
+        var updated = marker
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.label = trimmed.isEmpty ? nil : trimmed
+        do {
+            let store = try LibraryStore(at: url)
+            try store.saveSceneMarker(updated)
+            if let idx = sceneMarkers.firstIndex(where: { $0.id == updated.id }) {
+                sceneMarkers[idx] = updated
+            }
+        } catch {
+            print("Failed to rename scene marker: \(error)")
+            AppErrorReporter.report("Couldn't rename the scene marker: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteMarker(_ marker: SceneMarker) {
+        guard let url = libraryURL else { return }
+        do {
+            let store = try LibraryStore(at: url)
+            try store.deleteSceneMarker(id: marker.id)
+            sceneMarkers.removeAll { $0.id == marker.id }
+            ContactSheetService(store: store).deleteMarkerThumbnail(markerId: marker.id, libraryURL: url)
+        } catch {
+            print("Failed to delete scene marker: \(error)")
+            AppErrorReporter.report("Couldn't delete the scene marker: \(error.localizedDescription)")
+        }
+    }
+
+    private func jumpToMarker(_ marker: SceneMarker) {
+        guard let url = videoURL(), !missingAssetIDs.contains(asset.id) else { return }
+        scrubTime = marker.timestampSeconds
+        isShowingPlayer = true
+        recordPlayIfNeeded()
+        playback.load(url: url, startSeconds: marker.timestampSeconds, autoplay: true)
     }
 
     // MARK: - Thumbnail + Contact sheet section
@@ -681,11 +879,22 @@ struct SingleInspectorView: View {
 
     // MARK: - Tagging / metadata
 
-    private func tagSection(title: String, items: [String], category: String, color: Color) -> some View {
+    private func tagSection(title: String, items: [String], category: String, color: Color, showSuggestButton: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(title).font(.subheadline).fontWeight(.bold)
                 Spacer()
+                if showSuggestButton {
+                    Button {
+                        isShowingSuggestActors = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(color)
+                    .help("Suggest Actors From This Video's Faces")
+                    .accessibilityLabel("Suggest Actors")
+                }
                 Button {
                     activeCategory = category
                     newTagValue = ""
@@ -696,6 +905,7 @@ struct SingleInspectorView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(color)
+                .accessibilityLabel("Add \(category)")
             }
 
             if items.isEmpty {
@@ -890,17 +1100,24 @@ struct SingleInspectorView: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 Text("Notes").font(.subheadline).foregroundColor(.secondary)
-                TextEditor(text: Binding(
-                    get: { asset.notes ?? "" },
-                    set: { newValue in
-                        var updated = asset
-                        updated.notes = newValue.isEmpty ? nil : newValue
-                        if let url = libraryURL { updateAsset(updated, at: url) }
-                    }
-                ))
+                // Edits buffer into notesDraft and commit ~600ms after the
+                // last keystroke (plus a flush on disappear). Binding the
+                // editor straight to the asset meant one SQLite UPDATE *and*
+                // one mutation of the app-wide assets array per keystroke —
+                // every keystroke re-triggered grid refiltering everywhere.
+                TextEditor(text: $notesDraft)
                 .frame(minHeight: 80)
                 .padding(4)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                .onChange(of: notesDraft) { _, newValue in
+                    guard newValue != (asset.notes ?? "") else { return }
+                    notesSaveTask?.cancel()
+                    notesSaveTask = Task {
+                        try? await Task.sleep(nanoseconds: 600_000_000)
+                        guard !Task.isCancelled else { return }
+                        commitNotesDraft()
+                    }
+                }
             }
         }
     }
@@ -940,6 +1157,16 @@ struct SingleInspectorView: View {
         updateAsset(updated, at: url)
     }
 
+    private func addActorTag(_ name: String) {
+        guard let url = libraryURL else { return }
+        var updated = asset
+        let tagToSave = "actor:\(name)"
+        if !updated.tags.contains(tagToSave) {
+            updated.tags.append(tagToSave)
+        }
+        updateAsset(updated, at: url)
+    }
+
     private var playCountSummary: String {
         let timesText = "Played \(asset.playCount) time\(asset.playCount == 1 ? "" : "s")"
         guard let lastPlayedAt = asset.lastPlayedAt else { return timesText }
@@ -955,6 +1182,15 @@ struct SingleInspectorView: View {
         updateAsset(updated, at: url)
     }
 
+    private func commitNotesDraft() {
+        guard let url = libraryURL else { return }
+        let newNotes = notesDraft.isEmpty ? nil : notesDraft
+        guard newNotes != asset.notes else { return }
+        var updated = asset
+        updated.notes = newNotes
+        updateAsset(updated, at: url)
+    }
+
     private func updateAsset(_ updated: Asset, at url: URL) {
         do {
             let store = try LibraryStore(at: url)
@@ -964,6 +1200,7 @@ struct SingleInspectorView: View {
             }
         } catch {
             print("Update failed: \(error)")
+            AppErrorReporter.report("Couldn't save changes to \(updated.fileName): \(error.localizedDescription)")
         }
     }
     
@@ -977,6 +1214,7 @@ struct SingleInspectorView: View {
             missingAssetIDs.remove(asset.id)
         } catch {
             print("Failed to remove missing asset: \(error)")
+            AppErrorReporter.report("Couldn't remove the missing file's entry: \(error.localizedDescription)")
         }
     }
 
@@ -990,6 +1228,7 @@ struct SingleInspectorView: View {
             isShowingRenameDialog = false
         } catch {
             print("Failed to rename: \(error)")
+            AppErrorReporter.report("Couldn't rename the file: \(error.localizedDescription)")
         }
     }
 
@@ -1006,6 +1245,7 @@ struct SingleInspectorView: View {
             try FileManager.default.trashItem(at: videoURL, resultingItemURL: nil)
         } catch {
             print("Failed to trash video: \(error)")
+            AppErrorReporter.report("Couldn't move the video file to the Trash: \(error.localizedDescription)")
         }
         
         do {
@@ -1031,6 +1271,7 @@ struct SingleInspectorView: View {
             }
         } catch {
             print("Failed to delete asset from store: \(error)")
+            AppErrorReporter.report("Couldn't remove the video from the library: \(error.localizedDescription)")
         }
     }
 
@@ -1049,4 +1290,108 @@ struct SingleInspectorView: View {
         }
     }
     #endif
+}
+
+// MARK: - Scene Marker Card
+
+private struct SceneMarkerCard: View {
+    let marker: SceneMarker
+    let libraryURL: URL?
+    let refreshToken: UUID
+    let onTap: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var cgImage: CGImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let cgImage {
+                        Image(decorative: cgImage, scale: 1.0, orientation: .up)
+                            .resizable()
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    } else {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                            .overlay(ProgressView())
+                    }
+                }
+                .frame(width: 140)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                Text(marker.formattedTimestamp)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(4)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+            #if os(macOS)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            #endif
+
+            HStack(spacing: 4) {
+                Text(marker.displayTitle)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .frame(width: 108, alignment: .leading)
+
+                Menu {
+                    Button("Rename", action: onEdit)
+                    Button("Delete", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+        }
+        .task(id: "\(marker.id)|\(refreshToken)") {
+            guard let libraryURL else { return }
+            let url = libraryURL.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg")
+            cgImage = await ThumbnailLoader.image(from: url, maxPixelSize: 400)
+        }
+    }
+}
+
+// MARK: - Marker Label Entry Popover
+
+private struct MarkerLabelEntryView: View {
+    let title: String
+    let initialValue: String
+    let onSave: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String = ""
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(title)
+                .font(.headline)
+            TextField("Marker name (optional)", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { save() }
+            Button("Save") { save() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .frame(minWidth: 240)
+        .onAppear { text = initialValue }
+    }
+
+    private func save() {
+        onSave(text)
+        dismiss()
+    }
 }

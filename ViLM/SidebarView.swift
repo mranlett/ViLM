@@ -6,11 +6,13 @@ struct SidebarView: View {
     let assets: [Asset]
     let libraryURL: URL?
     let smartCollections: [SmartCollection]
+    // Loaded once at the ContentView level and shared across every screen
+    // that needs entity profiles, instead of re-fetching independently here.
+    let entityProfiles: [String: EntityProfile]
     let onApplyFilters: () -> Void
-    
-    @State private var profiles: [EntityProfile] = []
-    @State private var akaMap: [String: String] = [:]
-    
+
+    private var profiles: [EntityProfile] { Array(entityProfiles.values) }
+
     @State private var isSmartCollectionsExpanded = true
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true
@@ -55,6 +57,15 @@ struct SidebarView: View {
         var newStudioCounts = [String: Int]()
         var reviewedCount = 0
         var unreviewed = 0
+
+        // Computed once here rather than as a property, so the per-tag
+        // lookups below stay O(1) instead of rebuilding the whole map on
+        // every access.
+        var akaMap: [String: String] = [:]
+        for profile in profiles where profile.id.hasPrefix("actor:") {
+            let mainName = String(profile.id.dropFirst(6))
+            for aka in profile.akas { akaMap[aka] = mainName }
+        }
 
         for asset in assets {
             if asset.status == .reviewed { reviewedCount += 1 }
@@ -204,46 +215,17 @@ struct SidebarView: View {
         .navigationTitle("ViLM")
         .onAppear {
             recomputeDerivedData()
-            fetchProfiles()
         }
         .onChange(of: assets) { _, _ in
             recomputeDerivedData()
         }
-        .onChange(of: libraryURL) { _, _ in
-            fetchProfiles()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
-            fetchProfiles()
+        .onChange(of: entityProfiles) { _, _ in
+            recomputeDerivedData()
         }
     }
-    
+
     // MARK: - Helpers
-    
-    private func fetchProfiles() {
-        guard let url = libraryURL else { return }
-        Task {
-            do {
-                let store = try LibraryStore(at: url)
-                let allProfiles = try store.fetchAllEntityProfiles()
-                var newAkaMap: [String: String] = [:]
-                for profile in allProfiles {
-                    if profile.id.hasPrefix("actor:") {
-                        let mainName = String(profile.id.dropFirst(6))
-                        for aka in profile.akas {
-                            newAkaMap[aka] = mainName
-                        }
-                    }
-                }
-                await MainActor.run {
-                    self.profiles = allProfiles
-                    self.akaMap = newAkaMap
-                    self.recomputeDerivedData()
-                }
-            } catch {
-                print("Failed to fetch profiles in sidebar: \(error)")
-            }
-        }
-    }    
+
     private func filteredItems(_ items: [String], by letter: Character?) -> [String] {
         guard let letter = letter else { return items }
         return items.filter { $0.uppercased().hasPrefix(String(letter)) }

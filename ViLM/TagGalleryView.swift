@@ -1,12 +1,24 @@
 import SwiftUI
 import LibraryCore
 
+enum TagScope {
+    /// Applied directly to videos only (`asset.tags` with a "tag:" prefix).
+    case filmOnly
+    /// Only present in an actor's own profile tags (e.g. "Blonde"), never
+    /// applied directly to a video.
+    case actorOnly
+    /// Used both ways.
+    case shared
+}
+
 struct TagGalleryView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     let libraryURL: URL?
-    
-    @State private var tagProfiles: [String: EntityProfile] = [:]
+    // Loaded once at the ContentView level and shared across every screen
+    // that needs entity profiles, instead of re-fetching independently here.
+    let entityProfiles: [String: EntityProfile]
+    var onPullToRefresh: () async -> Void = {}
 
     @State private var alphaFilter: Character? = nil
     @State private var isShowingHelp = false
@@ -15,22 +27,58 @@ struct TagGalleryView: View {
     // re-counted per tag) on every render.
     @State private var allUniqueTags: [String] = []
     @State private var tagCounts: [String: Int] = [:]
+    @State private var tagScopes: [String: TagScope] = [:]
 
     private func recomputeTags() {
-        var unique = Set<String>()
-        var counts = [String: Int]()
+        let tagProfiles = entityProfiles.filter { $0.key.hasPrefix("tag:") }
+        let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
+
+        var filmTagSet = Set<String>()
         for asset in assets {
             for tag in asset.tags where tag.hasPrefix("tag:") {
-                let name = String(tag.dropFirst(4))
-                unique.insert(name)
+                filmTagSet.insert(String(tag.dropFirst(4)))
+            }
+        }
+        for key in tagProfiles.keys {
+            filmTagSet.insert(String(key.dropFirst(4)))
+        }
+
+        var actorTagSet = Set<String>()
+        for profile in actorProfiles.values {
+            actorTagSet.formUnion(profile.tags)
+        }
+
+        let allNames = filmTagSet.union(actorTagSet)
+        var scopes = [String: TagScope]()
+        for name in allNames {
+            let isFilm = filmTagSet.contains(name)
+            let isActor = actorTagSet.contains(name)
+            scopes[name] = (isFilm && isActor) ? .shared : (isActor ? .actorOnly : .filmOnly)
+        }
+
+        // Single pass over assets — for each one, gather every tag name it
+        // matches (its own film tags, plus any of its actors' tags) and
+        // increment once per match. O(assets) instead of the O(tags × assets)
+        // this used to cost by re-scanning every asset per tag.
+        var counts = [String: Int]()
+        for asset in assets {
+            var matchedNames = Set<String>()
+            for tag in asset.tags where tag.hasPrefix("tag:") {
+                matchedNames.insert(String(tag.dropFirst(4)))
+            }
+            for actor in asset.actors {
+                if let profile = actorProfiles["actor:\(actor)"] {
+                    matchedNames.formUnion(profile.tags)
+                }
+            }
+            for name in matchedNames {
                 counts[name, default: 0] += 1
             }
         }
-        for key in tagProfiles.keys where key.hasPrefix("tag:") {
-            unique.insert(String(key.dropFirst(4)))
-        }
-        allUniqueTags = unique.sorted()
+
+        allUniqueTags = allNames.sorted()
         tagCounts = counts
+        tagScopes = scopes
     }
 
     var filteredTags: [String] {
@@ -45,26 +93,48 @@ struct TagGalleryView: View {
                     .padding(.horizontal)
                     .padding(.bottom)
                 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                    ForEach(filteredTags, id: \.self) { tag in
-                        let isSelected = sidebarSelection.contains(.tag(tag))
-                        Button(action: {
-                            toggleSelection(item: .tag(tag))
-                        }) {
-                            TagGalleryItemView(
-                                tag: tag,
-                                assetsCount: tagCounts[tag] ?? 0,
-                                isSelected: isSelected
-                            )
-                        }
-                        .buttonStyle(.plain)
+                if filteredTags.isEmpty {
+                    if allUniqueTags.isEmpty {
+                        ContentUnavailableView(
+                            "No Tags Yet",
+                            systemImage: "tag",
+                            description: Text("Tags added to videos or actor profiles will appear here.")
+                        )
+                        .padding(.top, 80)
+                    } else {
+                        ContentUnavailableView(
+                            "No Matching Tags",
+                            systemImage: "tag",
+                            description: Text("No tags start with the selected letter.")
+                        )
+                        .padding(.top, 80)
                     }
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                        ForEach(filteredTags, id: \.self) { tag in
+                            let isSelected = sidebarSelection.contains(.tag(tag))
+                            Button(action: {
+                                toggleSelection(item: .tag(tag))
+                            }) {
+                                TagGalleryItemView(
+                                    tag: tag,
+                                    assetsCount: tagCounts[tag] ?? 0,
+                                    isSelected: isSelected,
+                                    scope: tagScopes[tag] ?? .filmOnly
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
             }
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .refreshable { await onPullToRefresh() }
+        #endif
         .navigationTitle("Tags Gallery")
         .toolbar {
             let selectedTagsCount = sidebarSelection.filter { item in
@@ -90,6 +160,7 @@ struct TagGalleryView: View {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help")
+                .accessibilityLabel("Help")
             }
         }
         .sheet(isPresented: $isShowingHelp) {
@@ -97,9 +168,11 @@ struct TagGalleryView: View {
         }
         .onAppear {
             recomputeTags()
-            fetchProfiles()
         }
         .onChange(of: assets) { _, _ in
+            recomputeTags()
+        }
+        .onChange(of: entityProfiles) { _, _ in
             recomputeTags()
         }
     }
@@ -112,47 +185,61 @@ struct TagGalleryView: View {
             sidebarSelection.insert(item)
         }
     }
-    
-    private func fetchProfiles() {
-        guard let url = libraryURL else { return }
-        do {
-            let store = try LibraryStore(at: url)
-            let allProfiles = try store.fetchAllEntityProfiles()
-            for profile in allProfiles {
-                if profile.id.hasPrefix("tag:") {
-                    tagProfiles[profile.id] = profile
-                }
-            }
-            recomputeTags()
-        } catch {
-            print("Failed to fetch tag profiles: \(error)")
-        }
-    }
 }
 
 struct TagGalleryItemView: View {
     let tag: String
     let assetsCount: Int
     let isSelected: Bool
-    
+    let scope: TagScope
+
+    private var scopeColor: Color {
+        switch scope {
+        case .filmOnly: return .green
+        case .actorOnly: return .blue
+        case .shared: return .orange
+        }
+    }
+
+    private var scopeIcon: String {
+        switch scope {
+        case .filmOnly: return "tag.fill"
+        case .actorOnly: return "person.fill"
+        case .shared: return "link"
+        }
+    }
+
+    private var scopeLabel: String {
+        switch scope {
+        case .filmOnly: return "Film"
+        case .actorOnly: return "Actor"
+        case .shared: return "Shared"
+        }
+    }
+
     var body: some View {
         HStack {
-            Image(systemName: "tag.fill")
-                .foregroundColor(.green)
+            Image(systemName: scopeIcon)
+                .foregroundColor(scopeColor)
                 .font(.title3)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(tag)
                     .font(.headline)
                     .lineLimit(1)
-                
-                Text("\(assetsCount) Video\(assetsCount == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                HStack(spacing: 4) {
+                    Text("\(assetsCount) Video\(assetsCount == 1 ? "" : "s")")
+                    Text("·")
+                    Text(scopeLabel)
+                        .foregroundColor(scopeColor)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
-            
+
             Spacer()
-            
+
             Image(systemName: "chevron.right")
                 .foregroundColor(.secondary)
                 .imageScale(.small)
@@ -165,6 +252,9 @@ struct TagGalleryItemView: View {
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .cornerRadius(12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(tag), \(scopeLabel) tag, \(assetsCount) video\(assetsCount == 1 ? "" : "s")")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         #if os(macOS)
         .onHover { isHovered in
             if isHovered {

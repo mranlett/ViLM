@@ -31,14 +31,22 @@ struct DashboardView: View {
     @Binding var selectedAssetIDs: Set<Asset.ID>
     
     let libraryURL: URL?
-    
+
+    // Loaded once at the ContentView level and shared across every screen
+    // that needs actor profiles, instead of each screen independently
+    // re-fetching the same data on its own `.onAppear`.
+    let entityProfiles: [String: EntityProfile]
+    let profileImageFileNames: Set<String>
+    let akaMap: [String: String]
+
     @Binding var pendingAssetFilter: AssetFilterCriteria?
     @Binding var pendingAssetSort: AssetsGridView.SortOption?
     @Binding var pendingAssetSortAscending: Bool?
     @Binding var pendingActorFilter: ActorFilterCriteria?
-    
-    @State private var actorProfiles: [String: EntityProfile] = [:]
-    @State private var profileImageFileNames: Set<String> = []
+
+    private var actorProfiles: [String: EntityProfile] {
+        entityProfiles.filter { $0.key.hasPrefix("actor:") }
+    }
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
 
@@ -55,23 +63,37 @@ struct DashboardView: View {
     @State private var isShowingHelp = false
 
     private func recomputeStats() {
-        var actorTagSet = Set<String>()
+        // Filtered once here rather than read through the computed
+        // `actorProfiles` property below, which would otherwise re-filter
+        // the full entityProfiles dict on every single access in the loops
+        // that follow.
+        let actorProfiles = self.actorProfiles
+
+        var actorNameSet = Set<String>()
         var tagSet = Set<String>()
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
         var countsByDay: [Date: Int] = [:]
 
         for asset in assets {
             for tag in asset.tags {
-                if tag.hasPrefix("actor:") { actorTagSet.insert(tag) }
-                else if tag.hasPrefix("tag:") { tagSet.insert(tag) }
+                if tag.hasPrefix("actor:") {
+                    let rawName = String(tag.dropFirst(6))
+                    actorNameSet.insert(akaMap[rawName] ?? rawName)
+                } else if tag.hasPrefix("tag:") {
+                    tagSet.insert(tag)
+                }
             }
             if asset.createdAt >= thirtyDaysAgo {
                 let startOfDay = Calendar.current.startOfDay(for: asset.createdAt)
                 countsByDay[startOfDay, default: 0] += 1
             }
         }
+        // Actors with a saved profile but 0 matched videos still count.
+        for key in actorProfiles.keys {
+            actorNameSet.insert(String(key.dropFirst(6)))
+        }
 
-        totalActors = actorTagSet.union(actorProfiles.keys).count
+        totalActors = actorNameSet.count
         totalTags = tagSet.count
         recentlyAdded = Array(assets.sorted { $0.createdAt > $1.createdAt }.prefix(10))
         unreviewed = Array(assets.filter { $0.status == .unreviewed }.prefix(10))
@@ -81,14 +103,19 @@ struct DashboardView: View {
         }
         recentlyAddedActors = Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
 
+        // Every actor ever referenced, not just those with a saved profile —
+        // an actor with no profile at all necessarily has no photo, so
+        // skipping them here (as this used to) silently hid exactly the
+        // actors most in need of attention.
         var needsAttention: [String] = []
-        for profile in actorProfiles.values {
-            let safeId = profile.id.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        for name in actorNameSet.sorted() {
+            let profile = actorProfiles["actor:\(name)"]
+            let safeId = "actor:\(name)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
             let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg")
                 || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
-            let hasPhoto = hasLocalPhoto || profile.photoUrl != nil
+            let hasPhoto = hasLocalPhoto || profile?.photoUrl != nil
             if !hasPhoto {
-                needsAttention.append(String(profile.id.dropFirst(6)))
+                needsAttention.append(name)
             }
             if needsAttention.count >= 10 { break }
         }
@@ -372,6 +399,7 @@ struct DashboardView: View {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help")
+                .accessibilityLabel("Help")
             }
         }
         .sheet(isPresented: $isShowingHelp) {
@@ -379,10 +407,11 @@ struct DashboardView: View {
         }
         .onAppear {
             recomputeStats()
-            loadActorProfiles()
-            loadProfileImages()
         }
         .onChange(of: assets) { _, _ in
+            recomputeStats()
+        }
+        .onChange(of: entityProfiles) { _, _ in
             recomputeStats()
         }
     }
@@ -456,35 +485,11 @@ struct DashboardView: View {
                 NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
             } catch {
                 print("Failed to save asset: \(error)")
+                AppErrorReporter.report("Couldn't mark the video as reviewed: \(error.localizedDescription)")
             }
         }
     }
     
-    private func loadActorProfiles() {
-        if let url = libraryURL {
-            do {
-                let store = try LibraryStore(at: url)
-                let profiles = try store.fetchAllEntityProfiles()
-                var dict: [String: EntityProfile] = [:]
-                for p in profiles {
-                    dict[p.id] = p
-                }
-                actorProfiles = dict
-                recomputeStats()
-            } catch {
-                print("Failed to load profiles: \(error)")
-            }
-        }
-    }
-
-    private func loadProfileImages() {
-        guard let url = libraryURL else { return }
-        let profilesDir = url.appendingPathComponent(".catalog/profiles")
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path) {
-            profileImageFileNames = Set(contents)
-            recomputeStats()
-        }
-    }
 }
 
 struct StatCardView: View {
@@ -507,6 +512,8 @@ struct StatCardView: View {
         .background(Color(PlatformSystemBackground))
         .cornerRadius(18)
         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(title)")
     }
 }
 
@@ -651,7 +658,13 @@ struct ActorCircleCard: View {
 // carousels/rows where sync decoding in `body` stalled scrolling.
 enum ProfileAvatarLoader {
     // NSCache is internally thread-safe; opt out of Swift 6 global-state isolation.
-    nonisolated(unsafe) private static let cache = NSCache<NSString, PlatformImage>()
+    nonisolated(unsafe) private static let cache: NSCache<NSString, PlatformImage> = {
+        let c = NSCache<NSString, PlatformImage>()
+        // Avatars are decoded at ≤100px, so pixel cost is tiny — a count
+        // limit keeps the cache bounded without cost bookkeeping.
+        c.countLimit = 500
+        return c
+    }()
 
     static func image(actorName: String, fileNames: Set<String>, libraryURL: URL?, maxPixelSize: Int) async -> PlatformImage? {
         guard let url = libraryURL else { return nil }

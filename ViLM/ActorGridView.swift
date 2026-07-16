@@ -10,10 +10,19 @@ struct ActorGridView: View {
     @Binding var pendingFilter: ActorFilterCriteria?
     @Binding var pendingSort: ActorFilterCriteria.SortOption?
     @Binding var pendingSortAscending: Bool?
-    
+
+    // Loaded once at the ContentView level and shared across every screen
+    // that needs actor profiles, instead of each screen independently
+    // re-fetching the same data on its own `.onAppear`.
+    let entityProfiles: [String: EntityProfile]
+    let profileImageFileNames: Set<String>
+    let akaMap: [String: String]
+    var onPullToRefresh: () async -> Void = {}
+
+    // Filtered down to actor: profiles once per entityProfiles change
+    // (see deriveActorProfiles()), rather than on every one of the many
+    // dictionary lookups below.
     @State private var actorProfiles: [String: EntityProfile] = [:]
-    @State private var akaMap: [String: String] = [:]
-    @State private var profileImageFileNames: Set<String> = []
     @State private var alphaFilter: Character? = nil
     @State private var hasLoadedDefaults = false
     @Environment(\.usesStackNavigation) private var usesStackNavigation
@@ -33,7 +42,12 @@ struct ActorGridView: View {
     @State private var isSelectionMode = false
     @State private var isShowingHelp = false
     @State private var searchText = ""
-    
+    // The search field binds to `searchText` directly for instant typing
+    // feedback; `filteredActors` reacts to this debounced copy instead, so a
+    // fast typist doesn't re-filter the whole actor list on every keystroke.
+    @State private var debouncedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
+
     var uniqueGenders: [String] {
         let values = actorProfiles.values.compactMap { $0.gender }
             .flatMap { $0.components(separatedBy: ",") }
@@ -64,6 +78,7 @@ struct ActorGridView: View {
     @State private var csvDocument: CSVDocument?
     @State private var showImportError = false
     @State private var importErrorMessage = ""
+    @State private var isImportingCSV = false
     
     var allUniqueActors: [String] {
         let allTags = assets.flatMap { $0.tags }
@@ -102,9 +117,9 @@ struct ActorGridView: View {
     
     var filteredActors: [String] {
         var result = allUniqueActors
-        
-        if !searchText.isEmpty {
-            result = result.filter { $0.localizedCaseInsensitiveContains(searchText) }
+
+        if !debouncedSearchText.isEmpty {
+            result = result.filter { $0.localizedCaseInsensitiveContains(debouncedSearchText) }
         }
         
         if let letter = alphaFilter {
@@ -232,16 +247,37 @@ struct ActorGridView: View {
                     .padding(.horizontal)
                     .padding(.bottom)
                 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
-                    ForEach(filteredActors, id: \.self) { actor in
-                        let isSelected = sidebarSelection.contains(.actor(actor))
-                        interactiveGridItem(for: actor, isSelected: isSelected)
+                if filteredActors.isEmpty {
+                    if allUniqueActors.isEmpty {
+                        ContentUnavailableView(
+                            "No Actors Yet",
+                            systemImage: "person.2",
+                            description: Text("Actors tagged on videos will appear here.")
+                        )
+                        .padding(.top, 80)
+                    } else {
+                        ContentUnavailableView(
+                            "No Matching Actors",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("No actors match the current search, letter, or filters.")
+                        )
+                        .padding(.top, 80)
                     }
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 20) {
+                        ForEach(filteredActors, id: \.self) { actor in
+                            let isSelected = sidebarSelection.contains(.actor(actor))
+                            interactiveGridItem(for: actor, isSelected: isSelected)
+                        }
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .refreshable { await onPullToRefresh() }
+        #endif
         .sheet(isPresented: $isShowingFilterBuilder) {
             ActorFilterBuilderView(
                 allUniqueGenders: uniqueGenders,
@@ -253,6 +289,17 @@ struct ActorGridView: View {
         }
         .navigationTitle("Actors Gallery")
         .searchable(text: $searchText, prompt: "Search Actors")
+        .onAppear {
+            debouncedSearchText = searchText
+        }
+        .onChange(of: searchText) { _, newValue in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+                debouncedSearchText = newValue
+            }
+        }
         .toolbar {
             let selectedActorsCount = sidebarSelection.filter { item in
                 if case .actor = item { return true }
@@ -335,6 +382,7 @@ struct ActorGridView: View {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help")
+                .accessibilityLabel("Help")
             }
         }
         .sheet(isPresented: $isShowingHelp) {
@@ -364,6 +412,15 @@ struct ActorGridView: View {
                 importCSV(from: url)
             case .failure(let error):
                 print("Import failed: \(error.localizedDescription)")
+                AppErrorReporter.report("CSV import failed: \(error.localizedDescription)")
+            }
+        }
+        .overlay {
+            if isImportingCSV {
+                ProgressView("Importing CSV…")
+                    .padding()
+                    .background(.regularMaterial)
+                    .cornerRadius(10)
             }
         }
         .onChange(of: pendingFilter) { _, newValue in
@@ -401,10 +458,10 @@ struct ActorGridView: View {
                 filterCriteria.sortDescending = !newAsc
                 pendingSortAscending = nil
             }
-            fetchProfiles()
+            deriveActorProfiles()
         }
-        .onChange(of: assets.count) { old, new in
-            fetchProfiles()
+        .onChange(of: entityProfiles) { _, _ in
+            deriveActorProfiles()
         }
     }
     
@@ -503,35 +560,8 @@ struct ActorGridView: View {
         }.count
     }
     
-    private func fetchProfiles() {
-        guard let url = libraryURL else { return }
-        do {
-            let store = try LibraryStore(at: url)
-            let allProfiles = try store.fetchAllEntityProfiles()
-            var newActorProfiles: [String: EntityProfile] = [:]
-            for profile in allProfiles {
-                if profile.id.hasPrefix("actor:") {
-                    newActorProfiles[profile.id] = profile
-                }
-            }
-            actorProfiles = newActorProfiles
-            
-            var newAkaMap: [String: String] = [:]
-            for profile in newActorProfiles.values {
-                let mainName = String(profile.id.dropFirst(6))
-                for aka in profile.akas {
-                    newAkaMap[aka] = mainName
-                }
-            }
-            akaMap = newAkaMap
-            
-            let profilesDir = url.appendingPathComponent(".catalog/profiles")
-            if let files = try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path) {
-                profileImageFileNames = Set(files.filter { $0.hasSuffix(".jpg") })
-            }
-        } catch {
-            print("Failed to fetch actor profiles: \(error)")
-        }
+    private func deriveActorProfiles() {
+        actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
     }
     
     // MARK: - CSV Logic
@@ -565,64 +595,84 @@ struct ActorGridView: View {
     
     private func importCSV(from url: URL) {
         guard let libraryURL = libraryURL else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-        
-        do {
-            let data = try Data(contentsOf: url)
-            guard let content = String(data: data, encoding: .utf8) else { return }
-            
-            let store = try LibraryStore(at: libraryURL)
-            let records = parseCSV(content)
-            
-            // Assuming header is first line
-            let rows = records.dropFirst()
-            
-            for columns in rows {
-                if columns.count >= 4 {
-                    let name = columns[0]
-                    if name.isEmpty { continue }
 
-                    let entityId = "actor:\(name)"
-                    // Merge into whatever's already there rather than replacing
-                    // the profile wholesale. A CSV row is usually a partial
-                    // edit — a handful of fields filled in for many actors at
-                    // once — so a blank cell must leave the existing value
-                    // alone, and tags/gallery photos/AKAs (which this CSV
-                    // format doesn't even represent) must always survive.
-                    let existing = try? store.fetchEntityProfile(for: entityId)
-
-                    func cell(_ index: Int) -> String? {
-                        guard index < columns.count, !columns[index].isEmpty else { return nil }
-                        return columns[index]
-                    }
-
-                    let profile = EntityProfile(
-                        id: entityId,
-                        bio: cell(1) ?? existing?.bio,
-                        photoUrl: cell(2) ?? existing?.photoUrl,
-                        homePage: cell(3) ?? existing?.homePage,
-                        gender: cell(4) ?? existing?.gender,
-                        hairColor: cell(5) ?? existing?.hairColor,
-                        birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
-                        countryOfOrigin: cell(7) ?? existing?.countryOfOrigin,
-                        tags: existing?.tags ?? [],
-                        galleryUrls: existing?.galleryUrls ?? [],
-                        akas: existing?.akas ?? [],
-                        createdAt: existing?.createdAt ?? Date()
-                    )
-                    try store.saveEntityProfile(profile)
-                }
+        // File read, CSV parse, and the row-by-row DB writes all run off the
+        // main thread — a large CSV used to freeze the UI for its duration.
+        isImportingCSV = true
+        Task.detached(priority: .userInitiated) {
+            defer {
+                Task { @MainActor in isImportingCSV = false }
             }
-            
-            fetchProfiles()
-            
-        } catch {
-            print("Import failed: \(error)")
+
+            guard url.startAccessingSecurityScopedResource() else {
+                AppErrorReporter.report("CSV import failed: the file couldn't be accessed.")
+                return
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+
+            do {
+                let data = try Data(contentsOf: url)
+                guard let content = String(data: data, encoding: .utf8) else {
+                    AppErrorReporter.report("CSV import failed: the file isn't UTF-8 text.")
+                    return
+                }
+
+                let store = try LibraryStore(at: libraryURL)
+                let records = parseCSV(content)
+
+                // Assuming header is first line
+                let rows = records.dropFirst()
+
+                for columns in rows {
+                    if columns.count >= 4 {
+                        let name = columns[0]
+                        if name.isEmpty { continue }
+
+                        let entityId = "actor:\(name)"
+                        // Merge into whatever's already there rather than replacing
+                        // the profile wholesale. A CSV row is usually a partial
+                        // edit — a handful of fields filled in for many actors at
+                        // once — so a blank cell must leave the existing value
+                        // alone, and tags/gallery photos/AKAs (which this CSV
+                        // format doesn't even represent) must always survive.
+                        let existing = try? store.fetchEntityProfile(for: entityId)
+
+                        func cell(_ index: Int) -> String? {
+                            guard index < columns.count, !columns[index].isEmpty else { return nil }
+                            return columns[index]
+                        }
+
+                        let profile = EntityProfile(
+                            id: entityId,
+                            bio: cell(1) ?? existing?.bio,
+                            photoUrl: cell(2) ?? existing?.photoUrl,
+                            homePage: cell(3) ?? existing?.homePage,
+                            gender: cell(4) ?? existing?.gender,
+                            hairColor: cell(5) ?? existing?.hairColor,
+                            birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
+                            countryOfOrigin: cell(7) ?? existing?.countryOfOrigin,
+                            tags: existing?.tags ?? [],
+                            galleryUrls: existing?.galleryUrls ?? [],
+                            akas: existing?.akas ?? [],
+                            createdAt: existing?.createdAt ?? Date()
+                        )
+                        try store.saveEntityProfile(profile)
+                    }
+                }
+
+                await MainActor.run {
+                    NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+                }
+            } catch {
+                print("Import failed: \(error)")
+                AppErrorReporter.report("CSV import failed: \(error.localizedDescription)")
+            }
         }
     }
     
-    private func parseCSV(_ content: String) -> [[String]] {
+    // Pure text parsing, safe from any thread (called from the detached
+    // import task).
+    nonisolated private func parseCSV(_ content: String) -> [[String]] {
         var results: [[String]] = []
         var currentRow: [String] = []
         var currentCell = ""
@@ -716,6 +766,9 @@ struct ActorGridItemView: View {
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .cornerRadius(12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(actor), \(assetsCount) video\(assetsCount == 1 ? "" : "s")")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         #if os(macOS)
         .onHover { isHovered in
             if isHovered {

@@ -42,6 +42,12 @@ struct AssetsGridView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     @Binding var searchText: String
+    // The search field itself binds to `searchText` directly so typing feels
+    // instant; the (potentially expensive, full-library) recompute below
+    // reacts to this debounced copy instead, so a fast typist doesn't
+    // trigger a re-filter on every keystroke.
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @Binding var selectedAssetIDs: Set<Asset.ID>
     let missingAssetIDs: Set<Asset.ID>
     @AppStorage("assetGridStyle") private var gridStyle: GridStyle = .singleFrame
@@ -50,7 +56,14 @@ struct AssetsGridView: View {
     let libraryURL: URL?
     let refreshID: UUID
     @Binding var filteredAssetContext: [Asset.ID]
-    
+    var onPullToRefresh: () async -> Void = {}
+
+    // Loaded once at the ContentView level and shared across every screen
+    // that needs entity profiles, instead of each screen independently
+    // re-fetching the same data on its own `.onAppear`.
+    let entityProfiles: [String: EntityProfile]
+    let akaMap: [String: String]
+
     @Environment(\.usesStackNavigation) private var usesStackNavigation
     
     @Binding var pendingFilter: AssetFilterCriteria?
@@ -60,8 +73,14 @@ struct AssetsGridView: View {
     @State private var isShowingFilterBuilder = false
     @State private var isShowingSaveCollection = false
     @State private var newCollectionName = ""
-    @State private var actorProfiles: [String: EntityProfile] = [:]
-    @State private var akaMap: [String: String] = [:]
+
+    enum ResultViewMode: String, CaseIterable {
+        case assets = "Videos"
+        case actors = "Actors"
+    }
+    // Only meaningful while searching — reset to .assets once the search is
+    // cleared so the toggle doesn't linger showing actors for an empty query.
+    @State private var resultViewMode: ResultViewMode = .assets
     
     enum SortOption: String, CaseIterable {
         case seriesOrder = "Series Order"
@@ -115,7 +134,7 @@ struct AssetsGridView: View {
     private var filterInputs: FilterInputs {
         FilterInputs(
             sidebarSelection: sidebarSelection,
-            searchText: searchText,
+            searchText: debouncedSearchText,
             filterCriteria: filterCriteria,
             sortOption: sortOption,
             sortAscending: sortAscending
@@ -127,7 +146,7 @@ struct AssetsGridView: View {
     private struct RecomputeSignature: Equatable {
         let inputs: FilterInputs
         let assets: [Asset]
-        let actorProfiles: [String: EntityProfile]
+        let entityProfiles: [String: EntityProfile]
         let akaMap: [String: String]
         let fileSizes: [Asset.ID: Int64]?
     }
@@ -142,7 +161,7 @@ struct AssetsGridView: View {
         RecomputeSignature(
             inputs: filterInputs,
             assets: assets,
-            actorProfiles: actorProfiles,
+            entityProfiles: entityProfiles,
             akaMap: akaMap,
             fileSizes: sortOption == .size ? fileSizes : nil
         )
@@ -159,7 +178,12 @@ struct AssetsGridView: View {
                 switch item {
                 case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .smartCollection: return true
                 case .actor(let name): return mappedActors(for: asset).contains(name)
-                case .tag(let name): return asset.tags.contains("tag:\(name)")
+                case .tag(let name):
+                    // A tag can apply directly to a video, or only exist on
+                    // an actor's own profile (e.g. "Blonde") — match either,
+                    // since Tag Gallery surfaces both kinds under one name.
+                    if asset.tags.contains("tag:\(name)") { return true }
+                    return mappedActors(for: asset).contains { entityProfiles["actor:\($0)"]?.tags.contains(name) ?? false }
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
                 case .series(let name): return asset.videoName == name
                 }
@@ -212,7 +236,7 @@ struct AssetsGridView: View {
             }
             
             // Actor Metadata Filters (must pass all specified)
-            let assetActorProfiles = mappedActors(for: asset).compactMap { actorProfiles["actor:\($0)"] }
+            let assetActorProfiles = mappedActors(for: asset).compactMap { entityProfiles["actor:\($0)"] }
             
             // Actor Tags
             if !filterCriteria.selectedActorTags.isEmpty {
@@ -254,7 +278,7 @@ struct AssetsGridView: View {
                 }
             }
             
-            if !matchesSearch(asset, query: searchText) {
+            if !matchesSearch(asset, query: debouncedSearchText) {
                 return false
             }
 
@@ -343,7 +367,20 @@ struct AssetsGridView: View {
                     .padding(.top)
                 }
 
-                if displayedAssets.isEmpty {
+                if isFiltered {
+                    Picker("View", selection: $resultViewMode) {
+                        ForEach(ResultViewMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                }
+
+                if isFiltered && resultViewMode == .actors {
+                    actorsResultGrid
+                } else if displayedAssets.isEmpty {
                     emptyStateView // Use the helper view here
                         .padding(.top, 100)
                 } else if showSeasonSections {
@@ -358,6 +395,33 @@ struct AssetsGridView: View {
                     .padding()
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var actorsResultGrid: some View {
+        if matchingActors.isEmpty {
+            ContentUnavailableView(
+                "No Matching Actors",
+                systemImage: "person.crop.circle.badge.questionmark",
+                description: Text("None of the matching videos have an actor tagged.")
+            )
+            .padding(.top, 100)
+        } else {
+            LazyVGrid(columns: gridColumns, spacing: 20) {
+                ForEach(matchingActors, id: \.self) { actor in
+                    actorNavigationWrapper(for: actor) {
+                        ActorGridItemView(
+                            actor: actor,
+                            profile: entityProfiles["actor:\(actor)"],
+                            assetsCount: matchingActorsCount(for: actor),
+                            isSelected: false,
+                            libraryURL: libraryURL
+                        )
+                    }
+                }
+            }
+            .padding()
         }
     }
 
@@ -408,14 +472,17 @@ struct AssetsGridView: View {
     private var stateManagedContent: some View {
         scrollContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(iOS)
+        .refreshable { await onPullToRefresh() }
+        #endif
         .onChange(of: recomputeSignature) { _, _ in
             recomputeDisplayedAssets()
         }
-        .onAppear {
-            fetchActorProfiles()
-        }
-        .onChange(of: libraryURL) { _, _ in
-            fetchActorProfiles()
+        .onChange(of: akaMap) { _, newAkaMap in
+            if let first = sidebarSelection.first, case .actor(let name) = first,
+               let resolved = newAkaMap[name], resolved != name {
+                sidebarSelection = [.actor(resolved)]
+            }
         }
         .onChange(of: sidebarSelection) { _, newSelection in
             if let first = newSelection.first {
@@ -497,9 +564,34 @@ struct AssetsGridView: View {
     // MARK: - Body
     var body: some View {
         stateManagedContent
+#if os(macOS)
+        // Escape clears the current video selection. Hidden button rather
+        // than onExitCommand: the shortcut works regardless of which child
+        // view currently has focus.
+        .background(
+            Button("") { selectedAssetIDs.removeAll() }
+                .keyboardShortcut(.cancelAction)
+                .hidden()
+                .accessibilityHidden(true)
+        )
+#endif
         .navigationTitle(sidebarSelectionTitle)
-        .navigationSubtitle("\(displayedAssets.count) items")
+        .navigationSubtitle(isFiltered && resultViewMode == .actors ? "\(matchingActors.count) actors" : "\(displayedAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
+        .onAppear {
+            debouncedSearchText = searchText
+        }
+        .onChange(of: searchText) { _, newValue in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+                debouncedSearchText = newValue
+            }
+        }
+        .onChange(of: filterInputs) { _, _ in
+            if !isFiltered { resultViewMode = .assets }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
@@ -568,7 +660,7 @@ struct AssetsGridView: View {
 #endif
         }
         .sheet(isPresented: $isShowingFilterBuilder) {
-            FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: actorProfiles)
+            FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: entityProfiles)
         }
         .sheet(isPresented: $isShowingHelp) {
             HelpView(initialTopicID: currentHelpTopicID)
@@ -624,6 +716,49 @@ struct AssetsGridView: View {
     
     private func mappedActors(for asset: Asset) -> Set<String> {
         return Set(asset.actors.map { akaMap[$0] ?? $0 })
+    }
+
+    // MARK: - Actors search-result mode
+
+    // True whenever the grid is showing something narrower than the full,
+    // unfiltered library — a text search, an advanced filter, or a sidebar
+    // selection like a tag/actor/studio/series. That's when switching to the
+    // Actors view is meaningful.
+    private var isFiltered: Bool {
+        if !searchText.isEmpty { return true }
+        if !filterCriteria.isEmpty { return true }
+        if sidebarSelection.isEmpty || sidebarSelection == [.allAssets] { return false }
+        return true
+    }
+
+    private var matchingActors: [String] {
+        Set(displayedAssets.flatMap { mappedActors(for: $0) }).sorted()
+    }
+
+    private func matchingActorsCount(for actor: String) -> Int {
+        displayedAssets.filter { mappedActors(for: $0).contains(actor) }.count
+    }
+
+    @ViewBuilder
+    private func actorNavigationWrapper<Content: View>(
+        for actor: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if usesStackNavigation {
+            NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
+                content()
+            }
+            .buttonStyle(.plain)
+        } else {
+            content()
+                .onTapGesture {
+                    var newSelection = sidebarSelection
+                    newSelection.remove(.allAssets)
+                    newSelection.insert(.actor(actor))
+                    sidebarSelection = newSelection
+                    selectedAssetIDs.removeAll()
+                }
+        }
     }
 
     private var isSingleSeriesSelected: Bool {
@@ -726,7 +861,7 @@ struct AssetsGridView: View {
         strings.append(contentsOf: asset.actions)
         strings.append(contentsOf: asset.studios)
         for actor in mappedActors(for: asset) {
-            if let profile = actorProfiles["actor:\(actor)"] {
+            if let profile = entityProfiles["actor:\(actor)"] {
                 if let bio = profile.bio { strings.append(bio) }
                 strings.append(contentsOf: profile.akas)
             }
@@ -761,8 +896,8 @@ struct AssetsGridView: View {
     }
     @ViewBuilder
     private var emptyStateView: some View {
-        let title = searchText.isEmpty ? "No Assets Found" : "No Results for \"\(searchText)\""
-        let symbol = searchText.isEmpty ? "film" : "magnifyingglass"
+        let title = debouncedSearchText.isEmpty ? "No Assets Found" : "No Results for \"\(debouncedSearchText)\""
+        let symbol = debouncedSearchText.isEmpty ? "film" : "magnifyingglass"
         ContentUnavailableView(title, systemImage: symbol)
     }
     
@@ -884,37 +1019,6 @@ struct AssetsGridView: View {
         }
     }
     
-    private func fetchActorProfiles() {
-        guard let url = libraryURL else { return }
-        Task {
-            do {
-                let store = try LibraryStore(at: url)
-                let profiles = try store.fetchAllEntityProfiles()
-                let profilesDict = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
-                var newAkaMap: [String: String] = [:]
-                for profile in profiles {
-                    if profile.id.hasPrefix("actor:") {
-                        let mainName = String(profile.id.dropFirst(6))
-                        for aka in profile.akas {
-                            newAkaMap[aka] = mainName
-                        }
-                    }
-                }
-                await MainActor.run {
-                    self.actorProfiles = profilesDict
-                    self.akaMap = newAkaMap
-                    
-                    if let first = sidebarSelection.first, case .actor(let name) = first {
-                        if let resolved = newAkaMap[name], resolved != name {
-                            sidebarSelection = [.actor(resolved)]
-                        }
-                    }
-                }
-            } catch {
-                print("Failed to fetch actor profiles: \(error)")
-            }
-        }
-    }
     
     private func saveSmartCollection() {
         guard let url = libraryURL, !newCollectionName.trimmingCharacters(in: .whitespaces).isEmpty else { return }

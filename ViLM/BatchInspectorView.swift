@@ -149,6 +149,7 @@ struct BatchInspectorView: View {
             NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch {
             print("Batch series update failed: \(error)")
+            AppErrorReporter.report("Couldn't apply the series changes: \(error.localizedDescription)")
         }
     }
     
@@ -254,6 +255,7 @@ struct BatchInspectorView: View {
             }
         } catch {
             print("Batch update failed: \(error)")
+            AppErrorReporter.report("Couldn't apply the batch changes: \(error.localizedDescription)")
         }
     }
     
@@ -275,6 +277,7 @@ struct BatchInspectorView: View {
             }
         } catch {
             print("Batch tag failed: \(error)")
+            AppErrorReporter.report("Couldn't add the tag to the selected videos: \(error.localizedDescription)")
         }
         newTagValue = ""
         isShowingTagEntry = false
@@ -297,6 +300,7 @@ struct BatchInspectorView: View {
             }
         } catch {
             print("Batch tag delete failed: \(error)")
+            AppErrorReporter.report("Couldn't remove the tag from the selected videos: \(error.localizedDescription)")
         }
     }
 }

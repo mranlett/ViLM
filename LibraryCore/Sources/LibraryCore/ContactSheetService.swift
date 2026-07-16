@@ -103,15 +103,66 @@ public final class ContactSheetService {
         try writeJPEG(cgImage: sheetImage, to: destinationURL, quality: jpegQuality)
     }
 
+    /// Generates a preview frame for a scene marker, cached at
+    /// `.catalog/markers/<markerId>.jpg`. Captures `offsetSeconds` after the
+    /// marker's own timestamp (clamped to the video's duration) rather than
+    /// the exact marked instant — the marked moment itself is often a
+    /// transition/establishing frame, so a few seconds in gives a more
+    /// representative picture. This only affects the preview image; jumping
+    /// to the marker still seeks to its exact timestamp.
+    public func generateMarkerThumbnail(
+        for asset: Asset,
+        markerId: SceneMarker.ID,
+        timestampSeconds: Double,
+        libraryURL: URL,
+        offsetSeconds: Double = 3.0,
+        maxPixelSize: CGSize = CGSize(width: 320, height: 180),
+        jpegQuality: CGFloat = 0.85,
+        overwrite: Bool = false
+    ) async throws {
+        let videoURL = libraryURL.appendingPathComponent(asset.relativePath)
+        let destinationURL = markerThumbnailURL(markerId: markerId, libraryURL: libraryURL)
+
+        if !overwrite, FileManager.default.fileExists(atPath: destinationURL.path) { return }
+
+        try ensureCatalogSubdirectoriesExist(libraryURL: libraryURL)
+
+        let avAsset = AVURLAsset(url: videoURL)
+        let generator = AVAssetImageGenerator(asset: avAsset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = maxPixelSize
+
+        let durationSeconds = try await avAsset.load(.duration).seconds
+        let captureSeconds: Double
+        if durationSeconds.isFinite, durationSeconds > 0 {
+            captureSeconds = min(timestampSeconds + offsetSeconds, max(0, durationSeconds - 0.5))
+        } else {
+            captureSeconds = timestampSeconds
+        }
+
+        let cgImage = try await generateImage(generator: generator, seconds: captureSeconds)
+        try writeJPEG(cgImage: cgImage, to: destinationURL, quality: jpegQuality)
+    }
+
+    public func markerThumbnailURL(markerId: SceneMarker.ID, libraryURL: URL) -> URL {
+        libraryURL.appendingPathComponent(".catalog/markers/\(markerId.uuidString).jpg")
+    }
+
+    public func deleteMarkerThumbnail(markerId: SceneMarker.ID, libraryURL: URL) {
+        try? FileManager.default.removeItem(at: markerThumbnailURL(markerId: markerId, libraryURL: libraryURL))
+    }
+
     // MARK: - Helpers
 
     private func ensureCatalogSubdirectoriesExist(libraryURL: URL) throws {
         let catalogURL = libraryURL.appendingPathComponent(".catalog")
         let thumbsURL = catalogURL.appendingPathComponent("thumbnails")
         let sheetsURL = catalogURL.appendingPathComponent("contactSheets")
+        let markersURL = catalogURL.appendingPathComponent("markers")
 
         try FileManager.default.createDirectory(at: thumbsURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sheetsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: markersURL, withIntermediateDirectories: true)
     }
 
     private func pickDefaultThumbnailSecond(durationSeconds: Double) -> Double {

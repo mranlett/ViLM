@@ -9,67 +9,72 @@ struct HelpView: View {
 
     var initialTopicID: String? = nil
 
+    // Drives scrolling declaratively via .scrollPosition(id:) — assigning a
+    // topic id scrolls to it, including the initial jump on appear, with no
+    // timing assumptions. (This replaced a ScrollViewReader whose initial
+    // scrollTo had to be delayed by a hardcoded 0.35s to outlast the sheet
+    // presentation animation and first lazy-layout pass.)
+    @State private var scrolledTopicID: String?
+
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Plain ScrollView + LazyVStack rather than List: a List's
-                    // internal representation doesn't reliably expose a
-                    // `Section` as one identifiable view, so `ScrollViewReader`
-                    // can't resolve `.id()` scroll targets attached to a
-                    // Section — jump-to-section silently no-ops. Attaching the
-                    // id directly to a plain VStack here works reliably.
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Contents")
-                                .font(.headline)
-                            ForEach(HelpContent.topics) { topic in
-                                Button(topic.title) {
-                                    withAnimation { proxy.scrollTo(topic.id, anchor: .top) }
-                                }
-                                .font(.subheadline)
+            ScrollView {
+                // Plain ScrollView + LazyVStack rather than List: a List's
+                // internal representation doesn't reliably expose a `Section`
+                // as one identifiable view, so scroll targets attached to a
+                // Section silently no-op. Each topic renders as ONE child of
+                // the lazy stack (divider included) so its ForEach identity
+                // is the scroll target.
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Contents")
+                            .font(.headline)
+                        ForEach(HelpContent.topics) { topic in
+                            Button(topic.title) {
+                                withAnimation { scrolledTopicID = topic.id }
                             }
+                            .font(.subheadline)
                         }
-                        .padding(.horizontal)
 
                         Divider()
+                            .padding(.top, 14)
+                    }
+                    .padding(.horizontal)
 
-                        ForEach(HelpContent.topics) { topic in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(topic.title)
-                                    .font(.title3.bold())
-                                Text(topic.summary)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                    ForEach(HelpContent.topics) { topic in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(topic.title)
+                                .font(.title3.bold())
+                            Text(topic.summary)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
 
-                                ForEach(topic.items) { item in
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(item.label)
-                                            .font(.subheadline)
-                                            .fontWeight(.semibold)
-                                        Text(item.description)
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .padding(.vertical, 2)
+                            ForEach(topic.items) { item in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.label)
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                    Text(item.description)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
                                 }
+                                .padding(.vertical, 2)
                             }
-                            .padding(.horizontal)
-                            .id(topic.id)
 
                             Divider()
+                                .padding(.top, 10)
                         }
+                        .padding(.horizontal)
+                        .id(topic.id)
                     }
-                    .padding(.vertical)
                 }
-                .onAppear {
-                    if let initialTopicID {
-                        // Defer until after the sheet's presentation animation
-                        // and initial layout pass complete.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            withAnimation { proxy.scrollTo(initialTopicID, anchor: .top) }
-                        }
-                    }
+                .scrollTargetLayout()
+                .padding(.vertical)
+            }
+            .scrollPosition(id: $scrolledTopicID, anchor: .top)
+            .onAppear {
+                if let initialTopicID {
+                    scrolledTopicID = initialTopicID
                 }
             }
             .navigationTitle("Help")

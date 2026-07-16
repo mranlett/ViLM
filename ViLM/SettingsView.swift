@@ -13,10 +13,13 @@ struct SettingsView: View {
     var onFindDuplicates: (() -> Void)?
     var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
+    var onRebuildFaceIndex: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
     var onImportActorLibrary: (() -> Void)?
     var onSelectAsset: ((Asset.ID) -> Void)?
     var onSelectActor: ((String) -> Void)?
+    var onSelectTag: ((String) -> Void)?
+    var onOpenTagGallery: (() -> Void)?
 
     @State private var isShowingHelp = false
 
@@ -34,20 +37,15 @@ struct SettingsView: View {
                 
                 Section(header: Text("Information")) {
                     NavigationLink {
+                        // Deep-link handlers fire immediately; ContentView
+                        // defers the navigation until the sheet's onDismiss,
+                        // so no timing guess is involved.
                         LibraryStatsView(
                             libraryURL: libraryURL,
-                            onSelectAsset: { assetID in
-                                dismiss()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    onSelectAsset?(assetID)
-                                }
-                            },
-                            onSelectActor: { actorID in
-                                dismiss()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    onSelectActor?(actorID)
-                                }
-                            }
+                            onSelectAsset: { onSelectAsset?($0) },
+                            onSelectActor: { onSelectActor?($0) },
+                            onSelectTag: { onSelectTag?($0) },
+                            onOpenTagGallery: { onOpenTagGallery?() }
                         )
                     } label: {
                         Label("Library Statistics", systemImage: "chart.bar.doc.horizontal")
@@ -107,6 +105,14 @@ struct SettingsView: View {
                         Label("Tag & Actor Cleanup", systemImage: "paintbrush")
                     }
                     .buttonStyle(.plain)
+
+                    Button(action: {
+                        dismiss()
+                        onRebuildFaceIndex?()
+                    }) {
+                        Label("Rebuild Face Index", systemImage: "person.crop.rectangle.stack")
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Section(header: Text("Actor Library Merge"), footer: Text("Move enriched actor bios and photos from another library (e.g. a portable copy) into this one without losing existing work.")) {
@@ -137,6 +143,7 @@ struct SettingsView: View {
                         Image(systemName: "questionmark.circle")
                     }
                     .help("Help")
+                    .accessibilityLabel("Help")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {

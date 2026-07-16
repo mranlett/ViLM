@@ -223,8 +223,14 @@ struct BatchEntityProfileEditorView: View {
                 var updatedProfiles: [EntityProfile] = []
                 
                 for id in entityIds {
-                    var profile = (try? store.fetchEntityProfile(for: id)) ?? EntityProfile(id: id)
-                    
+                    // "No profile row yet" and "the fetch failed" must be
+                    // treated differently: creating a fresh profile is right
+                    // for the former, but doing it after a failed fetch
+                    // overwrites the actor's existing bio/photos/AKAs with a
+                    // blank record. A throwing fetch aborts the whole batch
+                    // (via the outer catch) instead of wiping anything.
+                    var profile = try store.fetchEntityProfile(for: id) ?? EntityProfile(id: id)
+
                     if !finalGender.isEmpty { profile.gender = finalGender }
                     if !finalHair.isEmpty { profile.hairColor = finalHair }
                     if !finalCountry.isEmpty { profile.countryOfOrigin = finalCountry }
@@ -246,6 +252,7 @@ struct BatchEntityProfileEditorView: View {
                 }
             } catch {
                 print("Failed batch save: \(error)")
+                AppErrorReporter.report("Couldn't save the actor profiles: \(error.localizedDescription)")
                 await MainActor.run { isSaving = false }
             }
         }

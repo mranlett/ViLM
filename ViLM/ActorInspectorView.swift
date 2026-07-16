@@ -20,8 +20,21 @@ struct ActorInspectorView: View {
                         entityId: "actor:\(selectedActors[0])",
                         profile: profile,
                         embedsInNavigationStack: false,
-                        onSave: { _ in
+                        onSave: { profile in
+                            // The editor doesn't persist — that's the
+                            // caller's job. Skipping this silently discards
+                            // the user's edits.
+                            if let url = libraryURL {
+                                do {
+                                    let store = try LibraryStore(at: url)
+                                    try store.saveEntityProfile(profile)
+                                } catch {
+                                    print("Failed to save profile: \(error)")
+                                    AppErrorReporter.report("Couldn't save the profile: \(error.localizedDescription)")
+                                }
+                            }
                             gridRefreshID = UUID()
+                            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
                         }
                     )
                 } else if selectedActors.count > 1 {
@@ -30,6 +43,7 @@ struct ActorInspectorView: View {
                         entityIds: selectedActors.map { "actor:\($0)" },
                         onSave: { _ in
                             gridRefreshID = UUID()
+                            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
                         }
                     )
                 } else {
@@ -74,8 +88,13 @@ struct ActorInspectorView: View {
                     self.isLoading = false
                 }
             } catch {
+                // A FAILED fetch must not fabricate a blank profile — the
+                // editor would show empty fields over a real record, and
+                // saving would overwrite the actor's bio/photos/AKAs with
+                // blanks. Show the unavailable state instead.
+                print("Failed to fetch actor profile: \(error)")
                 await MainActor.run {
-                    self.singleProfile = EntityProfile(id: "actor:\(selectedActors[0])")
+                    self.singleProfile = nil
                     self.isLoading = false
                 }
             }

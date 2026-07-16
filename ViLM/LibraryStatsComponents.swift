@@ -31,6 +31,8 @@ struct StatRingView: View {
         .background(Color(PlatformSystemBackground))
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(Int(percentage * 100)) percent")
     }
 }
 
@@ -82,6 +84,8 @@ struct StatProgressBarRow: View {
             .frame(height: 4)
         }
         .padding(.vertical, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(value) \(valueLabel), \(missing) \(missingLabel)")
     }
 }
 
@@ -132,6 +136,8 @@ struct StatBarChartRow: View {
                 .frame(width: 30, alignment: .trailing)
         }
         .padding(.vertical, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(count)")
     }
 }
 
@@ -190,6 +196,66 @@ struct ActorsWithoutTagsView: View {
             }
         }
         .navigationTitle("Actors Without Tags")
+    }
+}
+
+struct FilmsWithoutActorsView: View {
+    let films: [Asset]
+    var onSelect: ((Asset.ID) -> Void)?
+
+    var body: some View {
+        List {
+            ForEach(films) { film in
+                HStack {
+                    Text(film.videoName ?? film.fileName)
+                        .font(.system(size: 17))
+                    Spacer()
+                    Button("Add Actors") {
+                        onSelect?(film.id)
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(16)
+                }
+            }
+        }
+        .navigationTitle("Films Without Actors")
+    }
+}
+
+/// Generic drill-down list for any single-field actor completeness check
+/// (gender, hair color, date of birth, country of origin, ...).
+struct ActorsMissingFieldView: View {
+    let title: String
+    let profiles: [EntityProfile]
+    var onSelect: ((String) -> Void)?
+
+    var body: some View {
+        List {
+            ForEach(profiles) { profile in
+                // The selection handler expects a bare actor name; the stored
+                // id carries an "actor:" prefix that must be stripped.
+                let actorName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+                HStack {
+                    Text(actorName)
+                        .font(.system(size: 17))
+                    Spacer()
+                    Button("Edit") {
+                        onSelect?(actorName)
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(16)
+                }
+            }
+        }
+        .navigationTitle(title)
     }
 }
 
