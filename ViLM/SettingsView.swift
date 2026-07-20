@@ -18,7 +18,8 @@ struct SettingsView: View {
     var onFindDuplicates: (() -> Void)?
     var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
-    var onRebuildFaceIndex: (() -> Void)?
+    var onMoveVideos: (() -> Void)?
+    var onBackupRestore: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
     var onImportActorLibrary: (() -> Void)?
     var onSelectAsset: ((Asset.ID) -> Void)?
@@ -62,80 +63,32 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
                 
-                Section(header: Text("Library Management")) {
-                    Button(action: {
-                        dismiss()
-                        onOpenLibrary?()
-                    }) {
-                        Label("Open Library", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button(action: {
-                        dismiss()
-                        onCheckForChanges?()
-                    }) {
-                        Label("Check for Changes", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Button(action: {
-                        dismiss()
-                        onAuditFileName?()
-                    }) {
-                        Label("File Name Audit", systemImage: "text.magnifyingglass")
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        dismiss()
-                        onFindDuplicates?()
-                    }) {
-                        Label("Find Duplicates", systemImage: "square.on.square.dashed")
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        dismiss()
-                        onMigrateEpisodes?()
-                    }) {
-                        Label("Migrate Episode Info", systemImage: "arrow.triangle.branch")
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        dismiss()
-                        onTagCleanup?()
-                    }) {
-                        Label("Tag & Actor Cleanup", systemImage: "paintbrush")
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        dismiss()
-                        onRebuildFaceIndex?()
-                    }) {
-                        Label("Rebuild Face Index", systemImage: "person.crop.rectangle.stack")
-                    }
-                    .buttonStyle(.plain)
+                Section(
+                    header: Text("Library"),
+                    footer: Text("Choose which folder ViLM manages and keep it in sync with what's on disk.")
+                ) {
+                    toolButton("Open Library", icon: "folder.badge.plus", action: onOpenLibrary)
+                    toolButton("Check for Changes", icon: "arrow.triangle.2.circlepath", action: onCheckForChanges)
+                    toolButton("Move Videos Between Libraries", icon: "arrow.left.arrow.right", action: onMoveVideos)
+                    toolButton("Back Up & Restore", icon: "externaldrive.badge.timemachine", action: onBackupRestore)
                 }
 
-                Section(header: Text("Actor Library Merge"), footer: Text("Move enriched actor bios and photos from another library (e.g. a portable copy) into this one without losing existing work.")) {
-                    Button(action: {
-                        dismiss()
-                        onExportActorLibrary?()
-                    }) {
-                        Label("Export Actor Library For Merge", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.plain)
+                Section(
+                    header: Text("Cleanup Tools"),
+                    footer: Text("Find and fix inconsistent or duplicated data across the whole library.")
+                ) {
+                    toolButton("File Name Audit", icon: "text.magnifyingglass", action: onAuditFileName)
+                    toolButton("Find Duplicates", icon: "square.on.square.dashed", action: onFindDuplicates)
+                    toolButton("Migrate Episode Info", icon: "arrow.triangle.branch", action: onMigrateEpisodes)
+                    toolButton("Tag & Actor Cleanup", icon: "paintbrush", action: onTagCleanup)
+                }
 
-                    Button(action: {
-                        dismiss()
-                        onImportActorLibrary?()
-                    }) {
-                        Label("Import and Merge Actor Library", systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(.plain)
+                Section(
+                    header: Text("Actors"),
+                    footer: Text("Export and Import move enriched actor bios and photos between library copies (e.g. a portable copy) without losing existing work.")
+                ) {
+                    toolButton("Export Actor Library For Merge", icon: "square.and.arrow.up", action: onExportActorLibrary)
+                    toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down", action: onImportActorLibrary)
                 }
             }
             .navigationTitle("Settings")
@@ -161,5 +114,17 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 300, minHeight: 300)
+    }
+
+    // Every tool row behaves the same way: close Settings, then hand off to
+    // the callback ContentView wired up (which presents the tool's sheet).
+    private func toolButton(_ title: String, icon: String, action: (() -> Void)?) -> some View {
+        Button(action: {
+            dismiss()
+            action?()
+        }) {
+            Label(title, systemImage: icon)
+        }
+        .buttonStyle(.plain)
     }
 }

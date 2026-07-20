@@ -10,7 +10,6 @@ struct SidebarView: View {
     @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
     let libraryURL: URL?
-    let smartCollections: [SmartCollection]
     // Loaded once at the ContentView level and shared across every screen
     // that needs entity profiles, instead of re-fetching independently here.
     let entityProfiles: [String: EntityProfile]
@@ -18,7 +17,6 @@ struct SidebarView: View {
 
     private var profiles: [EntityProfile] { Array(entityProfiles.values) }
 
-    @State private var isSmartCollectionsExpanded = true
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true
     @State private var isStudiosExpanded = true
@@ -150,25 +148,6 @@ struct SidebarView: View {
                     selection = [.seriesGallery]
                     onApplyFilters()
                 }
-            }
-            
-            if !smartCollections.isEmpty {
-                DisclosureGroup(isExpanded: $isSmartCollectionsExpanded) {
-                    ForEach(smartCollections) { sc in
-                        sidebarRow(title: sc.name, icon: "folder.fill", isSelected: selection == [.smartCollection(sc.id, sc.name)]) {
-                            selection = [.smartCollection(sc.id, sc.name)]
-                            onApplyFilters()
-                        }
-                        // Add context menu to delete
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                NotificationCenter.default.post(name: NSNotification.Name("DeleteSmartCollection"), object: sc.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
-                } label: { Text("Smart Collections").font(.headline) }
             }
             
             DisclosureGroup(isExpanded: $isActorsExpanded) {

@@ -52,21 +52,24 @@ struct ActorFilterBuilderView: View {
                 DisclosureGroup("Gender", isExpanded: $isGendersExpanded) {
                     multiSelectionSection(
                         items: allUniqueGenders,
-                        selectionBinding: $criteria.selectedGenders
+                        selectionBinding: $criteria.selectedGenders,
+                        emptyBinding: $criteria.showMissingGenderOnly
                     )
                 }
-                
+
                 DisclosureGroup("Hair Color", isExpanded: $isHairColorsExpanded) {
                     singleSelectionSection(
                         items: allUniqueHairColors,
-                        selectionBinding: $criteria.hairColor
+                        selectionBinding: $criteria.hairColor,
+                        emptyBinding: $criteria.matchEmptyHairColor
                     )
                 }
-                
+
                 DisclosureGroup("Country of Origin", isExpanded: $isCountriesExpanded) {
                     singleSelectionSection(
                         items: allUniqueCountries,
-                        selectionBinding: $criteria.country
+                        selectionBinding: $criteria.country,
+                        emptyBinding: $criteria.matchEmptyCountry
                     )
                 }
                 
@@ -95,6 +98,7 @@ struct ActorFilterBuilderView: View {
                 }
                 
                 Section("Age Range") {
+                    Toggle("No Date of Birth", isOn: $criteria.matchEmptyBirthYear)
                     HStack {
                         Picker("Min", selection: Binding(get: { criteria.minAge ?? -1 }, set: { criteria.minAge = $0 == -1 ? nil : $0 })) {
                             Text("Any").tag(-1 as Int)
@@ -105,7 +109,7 @@ struct ActorFilterBuilderView: View {
                         #else
                         .pickerStyle(.menu)
                         #endif
-                        
+
                         Picker("Max", selection: Binding(get: { criteria.maxAge ?? -1 }, set: { criteria.maxAge = $0 == -1 ? nil : $0 })) {
                             Text("Any").tag(-1 as Int)
                             ForEach(18...100, id: \.self) { age in Text("\(age)").tag(age) }
@@ -116,6 +120,9 @@ struct ActorFilterBuilderView: View {
                         .pickerStyle(.menu)
                         #endif
                     }
+                    // An actor with no DOB has no age, so a range can't apply.
+                    .disabled(criteria.matchEmptyBirthYear)
+                    .opacity(criteria.matchEmptyBirthYear ? 0.4 : 1)
                 }
                 
                 DisclosureGroup("Tags", isExpanded: $isTagsExpanded) {
@@ -157,20 +164,21 @@ struct ActorFilterBuilderView: View {
         .frame(minWidth: 400, minHeight: 600)
     }
     
-    private func singleSelectionSection(items: [String], selectionBinding: Binding<String>) -> some View {
+    private func singleSelectionSection(items: [String], selectionBinding: Binding<String>, emptyBinding: Binding<Bool>) -> some View {
         let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
-        
+
         return Group {
-            if !filtered.isEmpty || !selectionBinding.wrappedValue.isEmpty {
+            if !filtered.isEmpty || !selectionBinding.wrappedValue.isEmpty || emptyBinding.wrappedValue {
                 VStack(alignment: .leading, spacing: 0) {
-                    // "Any" option
+                    // "Any" option — no constraint on this field.
                     Button {
                         selectionBinding.wrappedValue = ""
+                        emptyBinding.wrappedValue = false
                     } label: {
                         HStack {
                             Text("Any").foregroundColor(.primary)
                             Spacer()
-                            if selectionBinding.wrappedValue.isEmpty {
+                            if selectionBinding.wrappedValue.isEmpty && !emptyBinding.wrappedValue {
                                 Image(systemName: "checkmark").foregroundColor(.accentColor)
                             }
                         }
@@ -179,15 +187,39 @@ struct ActorFilterBuilderView: View {
                     }
                     .buttonStyle(.plain)
                     Divider()
-                    
+
+                    // "Empty / Not Set" — actors missing this detail. Mutually
+                    // exclusive with a specific value.
+                    Button {
+                        if emptyBinding.wrappedValue {
+                            emptyBinding.wrappedValue = false
+                        } else {
+                            emptyBinding.wrappedValue = true
+                            selectionBinding.wrappedValue = ""
+                        }
+                    } label: {
+                        HStack {
+                            Text("Empty / Not Set").foregroundColor(.primary)
+                            Spacer()
+                            if emptyBinding.wrappedValue {
+                                Image(systemName: "checkmark").foregroundColor(.accentColor)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+
                     ForEach(filtered, id: \.self) { item in
-                        let isSelected = selectionBinding.wrappedValue == item
-                        
+                        let isSelected = selectionBinding.wrappedValue == item && !emptyBinding.wrappedValue
+
                         Button {
                             if isSelected {
                                 selectionBinding.wrappedValue = ""
                             } else {
                                 selectionBinding.wrappedValue = item
+                                emptyBinding.wrappedValue = false
                             }
                         } label: {
                             HStack {
@@ -259,20 +291,44 @@ struct ActorFilterBuilderView: View {
         }
     }
     
-    private func multiSelectionSection(items: [String], selectionBinding: Binding<Set<String>>) -> some View {
+    private func multiSelectionSection(items: [String], selectionBinding: Binding<Set<String>>, emptyBinding: Binding<Bool>) -> some View {
         let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
-        
+
         return Group {
-            if !filtered.isEmpty || !selectionBinding.wrappedValue.isEmpty {
+            if !filtered.isEmpty || !selectionBinding.wrappedValue.isEmpty || emptyBinding.wrappedValue {
                 VStack(alignment: .leading, spacing: 0) {
+                    // "Empty / Not Set" — actors missing this detail. Selecting a
+                    // specific value clears it (and vice versa).
+                    Button {
+                        if emptyBinding.wrappedValue {
+                            emptyBinding.wrappedValue = false
+                        } else {
+                            emptyBinding.wrappedValue = true
+                            selectionBinding.wrappedValue = []
+                        }
+                    } label: {
+                        HStack {
+                            Text("Empty / Not Set").foregroundColor(.primary)
+                            Spacer()
+                            if emptyBinding.wrappedValue {
+                                Image(systemName: "checkmark").foregroundColor(.accentColor)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+
                     ForEach(filtered, id: \.self) { item in
                         let isSelected = selectionBinding.wrappedValue.contains(item)
-                        
+
                         Button {
                             if isSelected {
                                 selectionBinding.wrappedValue.remove(item)
                             } else {
                                 selectionBinding.wrappedValue.insert(item)
+                                emptyBinding.wrappedValue = false
                             }
                         } label: {
                             HStack {

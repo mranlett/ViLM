@@ -58,13 +58,14 @@ public final class ContactSheetService {
         cellSize: CGSize = CGSize(width: 320, height: 180),
         margin: CGFloat = 8,
         backgroundGray: CGFloat = 0.10,
-        jpegQuality: CGFloat = 0.85
+        jpegQuality: CGFloat = 0.85,
+        overwrite: Bool = false
     ) async throws {
         let videoURL = libraryURL.appendingPathComponent(asset.relativePath)
         let destinationURL = libraryURL
             .appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
 
-        if FileManager.default.fileExists(atPath: destinationURL.path) { return }
+        if !overwrite, FileManager.default.fileExists(atPath: destinationURL.path) { return }
 
         try ensureCatalogSubdirectoriesExist(libraryURL: libraryURL)
 
@@ -155,6 +156,25 @@ public final class ContactSheetService {
 
     public func deleteMarkerThumbnail(markerId: SceneMarker.ID, libraryURL: URL) {
         try? FileManager.default.removeItem(at: markerThumbnailURL(markerId: markerId, libraryURL: libraryURL))
+    }
+
+    /// Regenerates the poster thumbnail, contact sheet, and every scene-marker
+    /// preview for `asset` from its current file on disk. Best-effort (each step
+    /// is independent). Shared by the transfer and editing flows so a video's
+    /// cached visuals are rebuilt after its file changes — which is why every
+    /// generator is called with `overwrite: true`: the whole point is that the
+    /// existing cached files are stale (the generators' default exists-check
+    /// would otherwise skip them all and regenerate nothing).
+    public func regenerateAllVisuals(for asset: Asset, libraryURL: URL) async {
+        try? await generateSingleThumbnail(for: asset, libraryURL: libraryURL, overwrite: true)
+        try? await generateContactSheet(for: asset, libraryURL: libraryURL, overwrite: true)
+        let markers = (try? store.fetchSceneMarkers(for: asset.id)) ?? []
+        for marker in markers {
+            try? await generateMarkerThumbnail(
+                for: asset, markerId: marker.id,
+                timestampSeconds: marker.timestampSeconds, libraryURL: libraryURL,
+                overwrite: true)
+        }
     }
 
     // MARK: - Helpers

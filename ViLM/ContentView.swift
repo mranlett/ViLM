@@ -56,6 +56,12 @@ struct ContentView: View {
     @State private var pendingActorSort: ActorFilterCriteria.SortOption?
     @State private var pendingActorSortAscending: Bool?
 
+    // A direct-play quick action stashes its picked video here; Video Details
+    // consumes it on appear to auto-start playback.
+    @State private var pendingAutoPlayAssetID: UUID?
+    // Home Screen quick actions arrive here (from the scene delegate).
+    @ObservedObject private var quickActionRouter = QuickActionRouter.shared
+
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
     @State private var isShowingSettings = false
 
@@ -77,7 +83,8 @@ struct ContentView: View {
     @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
     @State private var isShowingActorLibraryImport = false
-    @State private var isShowingRebuildFaceIndex = false
+    @State private var isShowingLibraryTransfer = false
+    @State private var isShowingLibraryBackup = false
 
 #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -110,6 +117,25 @@ struct ContentView: View {
             }
             .onChange(of: selectedAssetIDs) { _, _ in
                 detailPath.removeAll()
+            }
+            .onChange(of: selectedLibraryURL) { _, newURL in
+                // One-time cleanup of the orphaned face-recognition cache left
+                // by the removed "Suggest Actors" feature — harmless dead data,
+                // deleted the first time a library that still has it is opened.
+                guard let url = newURL else { return }
+                Task.detached(priority: .utility) {
+                    try? FileManager.default.removeItem(
+                        at: url.appendingPathComponent(".catalog/facePrints", isDirectory: true))
+                }
+            }
+            // Perform a pending Home Screen quick action once the library is
+            // loaded — the pending value or the just-loaded assets can arrive
+            // in either order (cold vs. warm launch).
+            .onChange(of: quickActionRouter.pending) { _, _ in
+                performPendingQuickActionIfReady()
+            }
+            .onChange(of: assets.count) { _, _ in
+                performPendingQuickActionIfReady()
             }
 #if os(iOS)
             .onChange(of: horizontalSizeClass) { _, newValue in
@@ -187,7 +213,8 @@ struct ContentView: View {
                     onFindDuplicates: { isShowingDuplicateDetection = true },
                     onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                     onTagCleanup: { isShowingTagCleanup = true },
-                    onRebuildFaceIndex: { isShowingRebuildFaceIndex = true },
+                    onMoveVideos: { isShowingLibraryTransfer = true },
+                    onBackupRestore: { isShowingLibraryBackup = true },
                     onExportActorLibrary: { isShowingActorLibraryExport = true },
                     onImportActorLibrary: { isShowingActorLibraryImport = true },
                     onSelectAsset: settingsDidSelectAsset,
@@ -247,6 +274,22 @@ struct ContentView: View {
                     })
                 }
             }
+            .sheet(isPresented: $isShowingLibraryTransfer) {
+                if let url = selectedLibraryURL {
+                    LibraryTransferView(openLibraryURL: url, onRefresh: {
+                        NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+                    })
+                }
+            }
+            .sheet(isPresented: $isShowingLibraryBackup) {
+                if let url = selectedLibraryURL {
+                    LibraryBackupView(openLibraryURL: url, onRestored: { restoredURL in
+                        // Open the restored folder as the active library, which
+                        // scans it (Check for Changes) and flags any missing files.
+                        processFolder(at: restoredURL)
+                    })
+                }
+            }
             .sheet(isPresented: $isShowingTagCleanup) {
                 if let url = selectedLibraryURL {
                     TagCleanupView(
@@ -263,11 +306,6 @@ struct ContentView: View {
                             }
                         }
                     )
-                }
-            }
-            .sheet(isPresented: $isShowingRebuildFaceIndex) {
-                if let url = selectedLibraryURL {
-                    RebuildFaceIndexView(libraryURL: url)
                 }
             }
 #if os(iOS)
@@ -305,7 +343,6 @@ struct ContentView: View {
                 selection: $sidebarSelection,
                 assets: assets,
                 libraryURL: selectedLibraryURL,
-                smartCollections: smartCollections,
                 entityProfiles: entityProfiles,
                 onApplyFilters: {
                     if navigationPath.isEmpty {
@@ -344,7 +381,6 @@ struct ContentView: View {
                 selection: $sidebarSelection,
                 assets: assets,
                 libraryURL: selectedLibraryURL,
-                smartCollections: smartCollections,
                 entityProfiles: entityProfiles,
                 onApplyFilters: {}
             )
@@ -383,7 +419,10 @@ struct ContentView: View {
                 pendingAssetFilter: $pendingAssetFilter,
                 pendingAssetSort: $pendingAssetSort,
                 pendingAssetSortAscending: $pendingAssetSortAscending,
-                pendingActorFilter: $pendingActorFilter
+                pendingActorFilter: $pendingActorFilter,
+                onSeeAllShelf: showShelf,
+                onQuickAction: performQuickAction,
+                smartCollections: smartCollections
             )
         } else if sidebarSelection.contains(.actorGallery) {
             ActorGridView(
@@ -454,7 +493,8 @@ struct ContentView: View {
                     gridRefreshID: $gridRefreshID,
                     libraryURL: selectedLibraryURL,
                     missingAssetIDs: $missingAssetIDs,
-                    contextAssetIDs: filteredAssetContext
+                    contextAssetIDs: filteredAssetContext,
+                    autoPlayAssetID: $pendingAutoPlayAssetID
                 )
             } else if selectedActors.count == 1, let actor = selectedActors.first {
                 // Same profile page the compact layout pushes (graph header +
@@ -543,6 +583,64 @@ struct ContentView: View {
     private func deferUntilSettingsDismissed(_ action: @escaping () -> Void) {
         pendingSettingsDeepLink = action
         isShowingSettings = false
+    }
+
+    // MARK: - Quick Actions
+
+    private func performPendingQuickActionIfReady() {
+        guard let action = quickActionRouter.pending else { return }
+        // Wait until the library + its assets have loaded (a cold launch from a
+        // quick action reaches here before loadLastLibrary() finishes).
+        guard selectedLibraryURL != nil, !assets.isEmpty else { return }
+        quickActionRouter.pending = nil
+        performQuickAction(action)
+    }
+
+    // Runs a quick action now (used by both the Home Screen shortcut and the
+    // in-app Dashboard shuffle menu). Re-rolls its pick every invocation.
+    func performQuickAction(_ action: QuickAction) {
+        guard selectedLibraryURL != nil, !assets.isEmpty else {
+            AppErrorReporter.report("Open a library first to use quick actions.")
+            return
+        }
+        var rng = SystemRandomNumberGenerator()
+        let result = QuickActionPicker().pick(
+            action, assets: assets, entityProfiles: entityProfiles, akaMap: akaMap, using: &rng)
+
+        switch result {
+        case .openFilteredList(let criteria):
+            pendingAssetFilter = criteria
+            sidebarSelection = [.allAssets]
+#if os(iOS)
+            if horizontalSizeClass == .compact { navigationPath = [.browse]; return }
+#endif
+            columnVisibility = .all
+        case .play(let asset):
+            selectedAssetIDs = [asset.id]
+            pendingAutoPlayAssetID = asset.id
+#if os(iOS)
+            if horizontalSizeClass == .compact {
+                navigationPath = [.browse, .asset(asset.id, context: [asset.id])]
+                return
+            }
+#endif
+            // Split view: the detail column's root shows the selected asset.
+            columnVisibility = .all
+        case .nothingAvailable:
+            AppErrorReporter.report("Nothing to play yet.")
+        }
+    }
+
+    // A Smart Shelf "See All" opens its full live list as a pushed route —
+    // onto the compact stack on iPhone, or the detail stack on iPad/macOS.
+    private func showShelf(_ query: LibraryQuery) {
+#if os(iOS)
+        if horizontalSizeClass == .compact {
+            navigationPath.append(.shelf(query))
+            return
+        }
+#endif
+        detailPath.append(.shelf(query))
     }
 
     private func settingsDidSelectAsset(_ assetID: Asset.ID) {
@@ -691,6 +789,13 @@ struct ContentView: View {
         switch route {
         case .browse:
             browseContentView
+        case .shelf(let query):
+            ShelfDetailView(
+                query: query,
+                assets: assets,
+                libraryURL: selectedLibraryURL,
+                selectedAssetIDs: $selectedAssetIDs
+            )
         case .asset(let id, let context):
             InspectorView(
                 sidebarSelection: $sidebarSelection,
@@ -700,7 +805,8 @@ struct ContentView: View {
                 gridRefreshID: $gridRefreshID,
                 libraryURL: selectedLibraryURL,
                 missingAssetIDs: $missingAssetIDs,
-                contextAssetIDs: context
+                contextAssetIDs: context,
+                autoPlayAssetID: $pendingAutoPlayAssetID
             )
             .onAppear {
                 if !selectedAssetIDs.contains(id) {

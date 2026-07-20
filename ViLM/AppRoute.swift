@@ -4,6 +4,7 @@
 // screens.
 
 import Foundation
+import LibraryCore
 
 enum AppRoute: Hashable {
     /// Compact-width hub: shows the section selected in the sidebar
@@ -13,4 +14,6 @@ enum AppRoute: Hashable {
     case assets(Set<UUID>)
     case entityProfile(category: String, name: String)
     case batchActors(Set<String>)
+    /// A Smart Shelf's full "See All" list, computed live from a `LibraryQuery`.
+    case shelf(LibraryQuery)
 }

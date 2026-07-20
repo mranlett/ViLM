@@ -18,6 +18,7 @@ final class ActorLibraryPackageTests: XCTestCase {
 
     override func tearDownWithError() throws {
         store = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
         try? FileManager.default.removeItem(at: libraryURL)
     }
 
@@ -117,19 +118,47 @@ final class ActorLibraryPackageTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fileURL), Data([1, 2, 3]))
     }
 
-    func testApplyFullyOverwritesScalarFieldsOnMatch() throws {
-        try store.saveEntityProfile(EntityProfile(id: "actor:Jane Doe", bio: "old bio", gender: "old gender", tags: ["tag:Old"]))
+    func testApplyMergesFieldLevelSourceWinsButNeverNullOverwrites() throws {
+        // Destination has rich, fully-filled bio data.
+        try store.saveEntityProfile(EntityProfile(
+            id: "actor:Jane Doe",
+            bio: "dest bio",
+            homePage: "https://dest.example",
+            gender: "Female",
+            hairColor: "Brown",
+            birthYear: 1990,
+            countryOfOrigin: "Canada",
+            tags: ["tag:Old"],
+            akas: ["Janet"]
+        ))
 
+        // Source (import) is sparser: some real values (which should win),
+        // some nil/empty (which must NOT wipe the destination's values).
         let export = ActorLibraryExport(formatVersion: 1, exportedAt: Date(), profiles: [
-            EntityProfile(id: "actor:Jane Doe", bio: "new bio", gender: "new gender", tags: ["tag:New"])
+            EntityProfile(
+                id: "actor:Jane Doe",
+                bio: "source bio",           // conflict → source wins
+                homePage: nil,               // nil → keep destination's
+                gender: nil,                 // nil → keep "Female"
+                hairColor: "  ",             // whitespace-only → keep "Brown"
+                birthYear: nil,              // nil → keep 1990
+                countryOfOrigin: "USA",      // conflict → source wins
+                tags: ["tag:New"],           // unioned
+                akas: ["JD"]                 // unioned
+            )
         ], photos: [])
 
         try store.applyActorMerge(export)
 
         let saved = try XCTUnwrap(store.fetchEntityProfile(for: "actor:Jane Doe"))
-        XCTAssertEqual(saved.bio, "new bio")
-        XCTAssertEqual(saved.gender, "new gender")
-        XCTAssertEqual(saved.tags, ["tag:New"])
+        XCTAssertEqual(saved.bio, "source bio", "a real source value wins a conflict")
+        XCTAssertEqual(saved.homePage, "https://dest.example", "nil source must not wipe the destination")
+        XCTAssertEqual(saved.gender, "Female", "nil source must not wipe the destination")
+        XCTAssertEqual(saved.hairColor, "Brown", "empty source must not wipe the destination")
+        XCTAssertEqual(saved.birthYear, 1990, "nil source must not wipe the destination")
+        XCTAssertEqual(saved.countryOfOrigin, "USA", "a real source value wins a conflict")
+        XCTAssertEqual(Set(saved.tags), Set(["tag:Old", "tag:New"]), "tags are unioned, not replaced")
+        XCTAssertEqual(Set(saved.akas), Set(["Janet", "JD"]), "AKAs are unioned, not replaced")
     }
 
     func testApplyNeverRemovesExistingPhotosOnMatch() throws {

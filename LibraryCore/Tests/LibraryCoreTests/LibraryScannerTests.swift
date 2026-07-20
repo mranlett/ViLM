@@ -18,6 +18,7 @@ final class LibraryScannerTests: XCTestCase {
     override func tearDownWithError() throws {
         scanner = nil
         store = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
         try? FileManager.default.removeItem(at: libraryURL)
     }
 

@@ -147,13 +147,31 @@ struct StatBarChartRow: View {
 }
 
 // MARK: - Drill-Down Views
+
+// Shared display-name helpers for the drill-down lists, so every list sorts
+// the same way. Films sort by their series/video name (falling back to the
+// filename); actors by their display name with the stored "actor:" id prefix
+// stripped. localizedStandardCompare gives case-insensitive, natural-numeric
+// ordering ("Actor 2" before "Actor 10").
+private func filmTitle(_ film: Asset) -> String {
+    film.videoName ?? film.fileName
+}
+
+private func actorName(for profile: EntityProfile) -> String {
+    profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+}
+
 struct UntaggedFilmsView: View {
     let films: [Asset]
     var onSelect: ((Asset.ID) -> Void)?
-    
+
+    private var sortedFilms: [Asset] {
+        films.sorted { filmTitle($0).localizedStandardCompare(filmTitle($1)) == .orderedAscending }
+    }
+
     var body: some View {
         List {
-            ForEach(films) { film in
+            ForEach(sortedFilms) { film in
                 HStack {
                     Text(film.videoName ?? film.fileName)
                         .font(.system(size: 17))
@@ -177,13 +195,15 @@ struct UntaggedFilmsView: View {
 struct ActorsWithoutTagsView: View {
     let profiles: [EntityProfile]
     var onSelect: ((String) -> Void)?
-    
+
+    private var sortedProfiles: [EntityProfile] {
+        profiles.sorted { actorName(for: $0).localizedStandardCompare(actorName(for: $1)) == .orderedAscending }
+    }
+
     var body: some View {
         List {
-            ForEach(profiles) { profile in
-                // The selection handler expects a bare actor name; the stored
-                // id carries an "actor:" prefix that must be stripped.
-                let actorName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+            ForEach(sortedProfiles) { profile in
+                let actorName = actorName(for: profile)
                 HStack {
                     Text(actorName)
                         .font(.system(size: 17))
@@ -208,9 +228,13 @@ struct FilmsWithoutActorsView: View {
     let films: [Asset]
     var onSelect: ((Asset.ID) -> Void)?
 
+    private var sortedFilms: [Asset] {
+        films.sorted { filmTitle($0).localizedStandardCompare(filmTitle($1)) == .orderedAscending }
+    }
+
     var body: some View {
         List {
-            ForEach(films) { film in
+            ForEach(sortedFilms) { film in
                 HStack {
                     Text(film.videoName ?? film.fileName)
                         .font(.system(size: 17))
@@ -238,12 +262,14 @@ struct ActorsMissingFieldView: View {
     let profiles: [EntityProfile]
     var onSelect: ((String) -> Void)?
 
+    private var sortedProfiles: [EntityProfile] {
+        profiles.sorted { actorName(for: $0).localizedStandardCompare(actorName(for: $1)) == .orderedAscending }
+    }
+
     var body: some View {
         List {
-            ForEach(profiles) { profile in
-                // The selection handler expects a bare actor name; the stored
-                // id carries an "actor:" prefix that must be stripped.
-                let actorName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+            ForEach(sortedProfiles) { profile in
+                let actorName = actorName(for: profile)
                 HStack {
                     Text(actorName)
                         .font(.system(size: 17))
@@ -261,19 +287,5 @@ struct ActorsMissingFieldView: View {
             }
         }
         .navigationTitle(title)
-    }
-}
-
-struct ActorTagsUsageView: View {
-    let tags: [String]
-    
-    var body: some View {
-        List {
-            ForEach(tags, id: \.self) { tag in
-                Text(tag)
-                    .font(.system(size: 17))
-            }
-        }
-        .navigationTitle("Actor Tags")
     }
 }

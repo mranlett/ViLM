@@ -204,7 +204,17 @@ public class LibraryStore {
 
         try migrator.migrate(dbQueue)
     }
-    
+
+    /// Merges the write-ahead log back into the main database file and truncates
+    /// it, so a copy of `catalog.sqlite` taken right after is complete on its own
+    /// (no `-wal` sidecar needed). Used before a backup so the archived database
+    /// is consistent.
+    public func checkpointWAL() throws {
+        try dbQueue.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+    }
+
     // MARK: - Smart Collections
     
     public func fetchAllSmartCollections() throws -> [SmartCollection] {
@@ -253,7 +263,17 @@ public class LibraryStore {
             try asset.update(db)
         }
     }
-    
+
+    /// Inserts a fully-populated asset row (every column), unlike the
+    /// scanner's `saveAsset` which is an INSERT-OR-IGNORE that only writes the
+    /// handful of columns a freshly-discovered file has. Used by the video
+    /// transfer tool to persist a moved asset's complete metadata in one shot.
+    public func insertAsset(_ asset: Asset) throws {
+        try dbQueue.write { db in
+            try asset.insert(db)
+        }
+    }
+
     public func fetchAllAssets() throws -> [Asset] {
         try dbQueue.read { db in
             // This maps the SQLite rows back into your Swift Asset structs automatically

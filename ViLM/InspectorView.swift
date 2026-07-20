@@ -21,6 +21,9 @@ struct InspectorView: View {
     let libraryURL: URL?
     @Binding var missingAssetIDs: Set<Asset.ID>
     var contextAssetIDs: [Asset.ID] = []
+    /// When this matches the shown asset, Video Details auto-starts playback
+    /// (set by a direct-play quick action). Cleared once consumed.
+    var autoPlayAssetID: Binding<UUID?> = .constant(nil)
 
     var body: some View {
         if selectedAssetIDs.count > 1 {
@@ -38,7 +41,8 @@ struct InspectorView: View {
                 gridRefreshID: $gridRefreshID,
                 libraryURL: libraryURL,
                 missingAssetIDs: $missingAssetIDs,
-                contextAssetIDs: contextAssetIDs
+                contextAssetIDs: contextAssetIDs,
+                autoPlayAssetID: autoPlayAssetID
             )
             .id(asset.id)
         } else {
@@ -56,6 +60,7 @@ struct SingleInspectorView: View {
     let libraryURL: URL?
     @Binding var missingAssetIDs: Set<Asset.ID>
     let contextAssetIDs: [Asset.ID]
+    @Binding var autoPlayAssetID: UUID?
     
     @Environment(\.dismiss) private var dismiss
 
@@ -116,12 +121,19 @@ struct SingleInspectorView: View {
     @State private var isGeneratingSheet = false
 
     // Face-based actor suggestions
-    @State private var isShowingSuggestActors = false
+    @State private var isShowingEditVideo = false
 
     // Notes editing buffer (see annotationsSection for why edits are
     // debounced instead of bound directly to the asset).
     @State private var notesDraft: String = ""
     @State private var notesSaveTask: Task<Void, Never>?
+
+    // Series Name and Episode Title editing buffers. Normalizing to title
+    // case on every keystroke would fight the typist (and jump the cursor),
+    // so each field edits its draft freely and commits the title-cased result
+    // when the user submits or leaves the field/video.
+    @State private var seriesNameDraft: String = ""
+    @State private var episodeTitleDraft: String = ""
 
     // macOS-only state
     #if os(macOS)
@@ -318,15 +330,9 @@ struct SingleInspectorView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Series Name").font(.subheadline).foregroundColor(.secondary)
-                        TextField("e.g. Movie Name or TV Show", text: Binding(
-                            get: { asset.videoName ?? "" },
-                            set: { newValue in
-                                var updatedAsset = asset
-                                updatedAsset.videoName = newValue.isEmpty ? nil : newValue
-                                if let url = libraryURL { updateAsset(updatedAsset, at: url) }
-                            }
-                        ))
-                        .textFieldStyle(.roundedBorder)
+                        TextField("e.g. Movie Name or TV Show", text: $seriesNameDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { commitSeriesNameDraft() }
                     }
 
                     HStack(alignment: .top, spacing: 12) {
@@ -365,15 +371,9 @@ struct SingleInspectorView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Episode Title").font(.subheadline).foregroundColor(.secondary)
-                        TextField("e.g. Valentine's Day (optional)", text: Binding(
-                            get: { asset.episode ?? "" },
-                            set: { newValue in
-                                var updatedAsset = asset
-                                updatedAsset.episode = newValue.isEmpty ? nil : newValue
-                                if let url = libraryURL { updateAsset(updatedAsset, at: url) }
-                            }
-                        ))
-                        .textFieldStyle(.roundedBorder)
+                        TextField("e.g. Valentine's Day (optional)", text: $episodeTitleDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { commitEpisodeTitleDraft() }
                     }
 
                     if !asset.seriesTitleBlock.isEmpty {
@@ -424,7 +424,7 @@ struct SingleInspectorView: View {
 
                 tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
                 Divider()
-                tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue, showSuggestButton: true)
+                tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
                 Divider()
                 tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
 
@@ -448,6 +448,19 @@ struct SingleInspectorView: View {
                 }
                 #endif
                 
+                Divider()
+                // File-modifying edits, kept distinct from the non-destructive
+                // tagging/metadata actions above.
+                Button {
+                    isShowingEditVideo = true
+                } label: {
+                    Label("Edit Video (Trim / Flip)", systemImage: "slider.horizontal.below.rectangle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(missingAssetIDs.contains(asset.id))
+                .accessibilityLabel("Edit Video, trim or flip")
+
                 Divider()
                 DisclosureGroup("Danger Zone") {
                     Button(role: .destructive, action: {
@@ -496,9 +509,10 @@ struct SingleInspectorView: View {
         } message: {
             Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
         }
-        .sheet(isPresented: $isShowingSuggestActors) {
+        .sheet(isPresented: $isShowingEditVideo) {
             if let url = libraryURL {
-                SuggestActorsView(asset: asset, libraryURL: url, onAddActor: addActorTag)
+                EditVideoView(asset: asset, libraryURL: url, sceneMarkers: sceneMarkers,
+                              onCompleted: { handleVideoEdited() })
             }
         }
         .onAppear {
@@ -507,14 +521,20 @@ struct SingleInspectorView: View {
             #endif
             loadSceneMarkers()
             notesDraft = asset.notes ?? ""
+            seriesNameDraft = asset.videoName ?? ""
+            episodeTitleDraft = asset.episode ?? ""
+            startAutoPlayIfRequested()
         }
         .onDisappear {
-            // Commit any un-debounced notes edit before the view goes away,
-            // and stop audio — on iPhone, pushing deeper (e.g. tapping an
-            // actor tag) keeps this view alive in the navigation stack, so
-            // without this the video kept playing underneath the new screen.
+            // Commit any un-committed notes/series-name/episode-title edit
+            // before the view goes away, and stop audio — on iPhone, pushing
+            // deeper (e.g. tapping an actor tag) keeps this view alive in the
+            // navigation stack, so without this the video kept playing
+            // underneath the new screen.
             notesSaveTask?.cancel()
             commitNotesDraft()
+            commitSeriesNameDraft()
+            commitEpisodeTitleDraft()
             playback.player.pause()
         }
         .onChange(of: asset.id) { _, _ in
@@ -523,6 +543,8 @@ struct SingleInspectorView: View {
             #endif
             loadSceneMarkers()
             notesDraft = asset.notes ?? ""
+            seriesNameDraft = asset.videoName ?? ""
+            episodeTitleDraft = asset.episode ?? ""
         }
         .onChange(of: scrubTime) { _, newValue in
             #if os(macOS)
@@ -699,6 +721,29 @@ struct SingleInspectorView: View {
         isShowingPlayer = true
         recordPlayIfNeeded()
         playback.load(url: url, startSeconds: marker.timestampSeconds, autoplay: true)
+    }
+
+    // After a trim/flip replaced the video file in place: stop the (now stale)
+    // player, reload markers, and refresh the grid so the regenerated thumbnail
+    // + new duration are picked up. Cached thumbnails self-invalidate because
+    // ThumbnailLoader keys on the file's modification date.
+    private func handleVideoEdited() {
+        playback.player.pause()
+        loadSceneMarkers()
+        gridRefreshID = UUID()
+        NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+    }
+
+    // A direct-play quick action navigated straight to this video; start it from
+    // the top. Consume the request once so it doesn't re-fire on re-appear.
+    private func startAutoPlayIfRequested() {
+        guard autoPlayAssetID == asset.id else { return }
+        autoPlayAssetID = nil
+        guard let url = videoURL(), !missingAssetIDs.contains(asset.id) else { return }
+        scrubTime = 0
+        isShowingPlayer = true
+        recordPlayIfNeeded()
+        playback.load(url: url, startSeconds: 0, autoplay: true)
     }
 
     // MARK: - Thumbnail + Contact sheet section
@@ -886,22 +931,11 @@ struct SingleInspectorView: View {
 
     // MARK: - Tagging / metadata
 
-    private func tagSection(title: String, items: [String], category: String, color: Color, showSuggestButton: Bool = false) -> some View {
+    private func tagSection(title: String, items: [String], category: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(title).font(.subheadline).fontWeight(.bold)
                 Spacer()
-                if showSuggestButton {
-                    Button {
-                        isShowingSuggestActors = true
-                    } label: {
-                        Image(systemName: "person.crop.circle.badge.questionmark")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(color)
-                    .help("Suggest Actors From This Video's Faces")
-                    .accessibilityLabel("Suggest Actors")
-                }
                 Button {
                     activeCategory = category
                     newTagValue = ""
@@ -1164,16 +1198,6 @@ struct SingleInspectorView: View {
         updateAsset(updated, at: url)
     }
 
-    private func addActorTag(_ name: String) {
-        guard let url = libraryURL else { return }
-        var updated = asset
-        let tagToSave = "actor:\(name)"
-        if !updated.tags.contains(tagToSave) {
-            updated.tags.append(tagToSave)
-        }
-        updateAsset(updated, at: url)
-    }
-
     private var playCountSummary: String {
         let timesText = "Played \(asset.playCount) time\(asset.playCount == 1 ? "" : "s")"
         guard let lastPlayedAt = asset.lastPlayedAt else { return timesText }
@@ -1195,6 +1219,30 @@ struct SingleInspectorView: View {
         guard newNotes != asset.notes else { return }
         var updated = asset
         updated.notes = newNotes
+        updateAsset(updated, at: url)
+    }
+
+    private func commitSeriesNameDraft() {
+        guard let url = libraryURL else { return }
+        let titleCased = TagNormalizer.titleCased(seriesNameDraft)
+        // Reflect the normalized form back into the field so the user sees it.
+        if seriesNameDraft != titleCased { seriesNameDraft = titleCased }
+        let newName = titleCased.isEmpty ? nil : titleCased
+        guard newName != asset.videoName else { return }
+        var updated = asset
+        updated.videoName = newName
+        updateAsset(updated, at: url)
+    }
+
+    private func commitEpisodeTitleDraft() {
+        guard let url = libraryURL else { return }
+        let titleCased = TagNormalizer.titleCased(episodeTitleDraft)
+        // Reflect the normalized form back into the field so the user sees it.
+        if episodeTitleDraft != titleCased { episodeTitleDraft = titleCased }
+        let newEpisode = titleCased.isEmpty ? nil : titleCased
+        guard newEpisode != asset.episode else { return }
+        var updated = asset
+        updated.episode = newEpisode
         updateAsset(updated, at: url)
     }
 
@@ -1246,21 +1294,34 @@ struct SingleInspectorView: View {
         let sidecarURL = videoURL.deletingPathExtension().appendingPathExtension("json")
         let thumbnailURL = url.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg")
         let contactSheetURL = url.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
-        
-        // Trash/Delete physical files
-        do {
-            try FileManager.default.trashItem(at: videoURL, resultingItemURL: nil)
-        } catch {
-            print("Failed to trash video: \(error)")
-            AppErrorReporter.report("Couldn't move the video file to the Trash: \(error.localizedDescription)")
+
+        // The video file is the gating step: if it exists and can't be
+        // trashed, ABORT without touching the catalog — deleting the row
+        // anyway would permanently lose the video's metadata and markers
+        // while its file lives on (and a rescan would re-add it as a blank
+        // asset). A file that's already gone is fine to clean up after.
+        if FileManager.default.fileExists(atPath: videoURL.path) {
+            do {
+                try FileManager.default.trashItem(at: videoURL, resultingItemURL: nil)
+            } catch {
+                print("Failed to trash video: \(error)")
+                AppErrorReporter.report("Couldn't move the video file to the Trash, so the video was NOT removed from the library: \(error.localizedDescription)")
+                return
+            }
         }
-        
+
         do {
             try FileManager.default.trashItem(at: sidecarURL, resultingItemURL: nil)
         } catch {
             print("Failed to trash sidecar: \(error)")
         }
-        
+
+        // Marker preview files must go before the row cascade deletes the
+        // marker rows (their ids are unrecoverable afterwards).
+        for marker in sceneMarkers {
+            try? FileManager.default.removeItem(
+                at: url.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg"))
+        }
         try? FileManager.default.removeItem(at: thumbnailURL)
         try? FileManager.default.removeItem(at: contactSheetURL)
         

@@ -69,7 +69,7 @@ struct LibraryStatsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         
                         // Header details
-                        Text("\(totalFilms) films · \(totalActors) actor profiles · \(totalTags) unique tags")
+                        Text("\(totalFilms) films · \(totalActors) actors · \(totalTags) unique tags")
                             .font(.system(size: 14))
                             .foregroundColor(.primary)
                             .padding(.horizontal, 20)
@@ -149,7 +149,7 @@ struct LibraryStatsView: View {
                         
                         VStack(spacing: 0) {
                             HStack {
-                                Text("Total Actor Profiles")
+                                Text("Total Actors")
                                     .font(.system(size: 15))
                                 Spacer()
                                 Text("\(totalActors)")
@@ -399,6 +399,37 @@ struct LibraryStatsView: View {
                     }
                 }
                 
+                // The actor stats must cover every actor the library
+                // references, not just those with a saved EntityProfile row —
+                // an actor tagged on a video but never opened/edited has no
+                // profile, which trivially means it's missing every field.
+                // Build the full universe (asset actor-tags ∪ profile ids,
+                // with AKA resolution) and back each name with its real
+                // profile or a synthesized blank one, so the completeness
+                // checks and drill-down lists see unprofiled actors too.
+                var profilesById: [String: EntityProfile] = [:]
+                for p in profiles { profilesById[p.id] = p }
+
+                var akaMap: [String: String] = [:]
+                for p in profiles {
+                    let mainName = String(p.id.dropFirst(6)) // strip "actor:"
+                    for aka in p.akas { akaMap[aka] = mainName }
+                }
+
+                var actorNames = Set<String>()
+                for asset in assets {
+                    for name in asset.actors {
+                        actorNames.insert(akaMap[name] ?? name)
+                    }
+                }
+                for p in profiles {
+                    actorNames.insert(String(p.id.dropFirst(6)))
+                }
+
+                let actorEntities: [EntityProfile] = actorNames.map { name in
+                    profilesById["actor:\(name)"] ?? EntityProfile(id: "actor:\(name)")
+                }
+
                 // Actors lists
                 var aWithTags: [EntityProfile] = []
                 var aNoTags: [EntityProfile] = []
@@ -421,7 +452,7 @@ struct LibraryStatsView: View {
                 let allProfileFiles = (try? FileManager.default.contentsOfDirectory(atPath: profileDir.path)) ?? []
                 let jpgFiles = allProfileFiles.filter { $0.hasSuffix(".jpg") }
 
-                for profile in profiles {
+                for profile in actorEntities {
                     if !profile.tags.isEmpty {
                         aWithTags.append(profile)
                         for tag in profile.tags {
@@ -472,7 +503,7 @@ struct LibraryStatsView: View {
                                            .prefix(5)
                 
                 let finalTotalFilms = assets.count
-                let finalTotalActors = profiles.count
+                let finalTotalActors = actorEntities.count
                 
                 let finalAllTags = allFilmTagsSet.union(allActorTagsSet)
                 let finalSharedTags = allFilmTagsSet.intersection(allActorTagsSet)

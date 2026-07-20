@@ -164,26 +164,47 @@ struct ActorGridView: View {
         }
         
         if !filterCriteria.selectedGenders.isEmpty {
+            // Match case-insensitively: the actor's stored gender values are
+            // lowercased below, so the selected filter values must be too —
+            // otherwise "Male" (from the filter) never equals "male" and the
+            // filter returns nothing. Mirrors the hair-color/country filters.
+            let selectedGenders = Set(filterCriteria.selectedGenders.map { $0.lowercased() })
             result = result.filter { actor in
                 let profile = actorProfiles["actor:\(actor)"]
                 let values = profile?.gender?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
-                return !filterCriteria.selectedGenders.isDisjoint(with: values)
+                return !selectedGenders.isDisjoint(with: values)
             }
         }
         
-        if !filterCriteria.hairColor.isEmpty {
+        if filterCriteria.matchEmptyHairColor {
+            result = result.filter { actor in
+                (actorProfiles["actor:\(actor)"]?.hairColor ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        } else if !filterCriteria.hairColor.isEmpty {
             result = result.filter { actor in
                 let profile = actorProfiles["actor:\(actor)"]
                 let values = profile?.hairColor?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
                 return values.contains(filterCriteria.hairColor.lowercased())
             }
         }
-        
-        if !filterCriteria.country.isEmpty {
+
+        if filterCriteria.matchEmptyCountry {
+            result = result.filter { actor in
+                (actorProfiles["actor:\(actor)"]?.countryOfOrigin ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        } else if !filterCriteria.country.isEmpty {
             result = result.filter { actor in
                 let profile = actorProfiles["actor:\(actor)"]
                 let values = profile?.countryOfOrigin?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
                 return values.contains(filterCriteria.country.lowercased())
+            }
+        }
+
+        if filterCriteria.matchEmptyBirthYear {
+            // "No date of birth" — actors with no birth year set (including
+            // those with no profile at all).
+            result = result.filter { actor in
+                actorProfiles["actor:\(actor)"]?.birthYear == nil
             }
         }
         
@@ -582,7 +603,9 @@ struct ActorGridView: View {
             let gender = escapeCSV(profile?.gender ?? "")
             let hairColor = escapeCSV(profile?.hairColor ?? "")
             let birthYear = escapeCSV(profile?.birthYear.map { String($0) } ?? "")
-            let country = escapeCSV(profile?.countryOfOrigin ?? "")
+            // CSV can't reliably carry flag emoji, so export the country name
+            // only; import re-adds the flag.
+            let country = escapeCSV(CountryFlagHelper.strippedOfFlag(profile?.countryOfOrigin ?? ""))
             
             csvString.append("\(name),\(bio),\(photoUrl),\(homePage),\(gender),\(hairColor),\(birthYear),\(country)\n")
         }
@@ -655,7 +678,8 @@ struct ActorGridView: View {
                             gender: cell(4) ?? existing?.gender,
                             hairColor: cell(5) ?? existing?.hairColor,
                             birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
-                            countryOfOrigin: cell(7) ?? existing?.countryOfOrigin,
+                            // Re-attach the flag emoji the export stripped out.
+                            countryOfOrigin: cell(7).map { CountryFlagHelper.withFlag($0) } ?? existing?.countryOfOrigin,
                             tags: existing?.tags ?? [],
                             galleryUrls: existing?.galleryUrls ?? [],
                             akas: existing?.akas ?? [],

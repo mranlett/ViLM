@@ -15,6 +15,10 @@ final class LibraryStoreTests: XCTestCase {
 
     override func tearDownWithError() throws {
         store = nil
+        // LibraryStore caches open connections in process-wide static state.
+        // Drop them after every test so the cache can't leak connections (or
+        // surprises) from one test into the next as the suite grows.
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
         try? FileManager.default.removeItem(at: libraryURL)
     }
 
@@ -79,7 +83,11 @@ final class LibraryStoreTests: XCTestCase {
 
         let fetched = try XCTUnwrap(store.fetchAllAssets().first)
         XCTAssertEqual(fetched.playCount, 1)
-        XCTAssertNotNil(fetched.lastPlayedAt)
+        // Round-trip the actual timestamp, not just "non-nil": a wrong-precision
+        // or timezone-shifted serialization would pass a non-nil check but fail
+        // this. Tolerance covers the column's millisecond storage precision.
+        let roundTripped = try XCTUnwrap(fetched.lastPlayedAt)
+        XCTAssertEqual(roundTripped.timeIntervalSince1970, playedAt.timeIntervalSince1970, accuracy: 1.0)
     }
 
     func testDeleteAsset() throws {
@@ -94,8 +102,43 @@ final class LibraryStoreTests: XCTestCase {
         try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
         store = nil
 
+        // LibraryStore keeps a process-wide cache of open DatabaseQueues keyed
+        // by path, so simply re-opening the same URL would hand back the very
+        // same in-memory connection — proving nothing about disk durability.
+        // Drop the cache first so the reopen genuinely opens a fresh connection
+        // and re-reads the bytes SQLite wrote to disk.
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+
         let reopened = try LibraryStore(at: libraryURL)
         XCTAssertEqual(try reopened.fetchAllAssets().count, 1)
+        XCTAssertEqual(try reopened.fetchAllAssets().first?.relativePath, "a.mp4")
+    }
+
+    func testEvictCachedConnectionsIsNonDestructiveAndReopenable() throws {
+        // Two distinct libraries, each with its own persisted asset.
+        let otherURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibraryStoreTests-other-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherURL, withIntermediateDirectories: true)
+        let otherStore = try LibraryStore(at: otherURL)
+        try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
+        try otherStore.saveAsset(Asset(relativePath: "b.mp4", fileName: "b.mp4"))
+
+        // Evict everything except the active library. This drops the other
+        // library's cached connection; the kept one stays cached.
+        LibraryStore.evictCachedConnections(keepingLibraryAt: libraryURL)
+
+        // The guarantee that matters: eviction must never lose data. Both the
+        // kept connection (reused from cache) and the evicted one (re-opened
+        // fresh from disk) still return their persisted rows intact.
+        XCTAssertEqual(try LibraryStore(at: libraryURL).fetchAllAssets().map(\.relativePath), ["a.mp4"])
+        XCTAssertEqual(try LibraryStore(at: otherURL).fetchAllAssets().map(\.relativePath), ["b.mp4"])
+
+        // Evicting all connections is likewise safe and reopenable.
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        XCTAssertEqual(try LibraryStore(at: libraryURL).fetchAllAssets().count, 1)
+        XCTAssertEqual(try LibraryStore(at: otherURL).fetchAllAssets().count, 1)
+
+        try? FileManager.default.removeItem(at: otherURL)
     }
 
     // MARK: - Entity Profiles

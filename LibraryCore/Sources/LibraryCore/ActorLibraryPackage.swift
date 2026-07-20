@@ -1,7 +1,9 @@
 // ActorLibraryPackage.swift
 // Actor Library Merge: the .vilmactors export format (profiles + photo bytes)
-// and the plan/apply merge into a destination library - scalar fields
-// overwrite on match, photos are additive and deduplicated by content hash.
+// and the plan/apply merge into a destination library. The merge is
+// non-destructive and field-level: a real source value wins on a conflict,
+// but a nil/empty source field never overwrites a populated destination one;
+// tags/AKAs are unioned; photos are additive and deduplicated by content hash.
 
 import Foundation
 
@@ -75,12 +77,18 @@ public struct ActorMergeResult: Sendable {
 
 extension LibraryStore {
 
-    /// Packages every actor profile plus whichever of its photo files are
+    /// Packages actor profiles plus whichever of their photo files are
     /// actually cached on disk. The primary slot is always checked directly
     /// (independent of `galleryUrls` bookkeeping) so a photo is never missed
     /// due to a metadata quirk.
-    public func exportActorLibrary() throws -> ActorLibraryExport {
-        let actorProfiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+    ///
+    /// Pass `onlyActorIds` to export just a subset (e.g. the actors a single
+    /// moved video references); nil exports every actor.
+    public func exportActorLibrary(onlyActorIds: Set<String>? = nil) throws -> ActorLibraryExport {
+        var actorProfiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+        if let onlyActorIds {
+            actorProfiles = actorProfiles.filter { onlyActorIds.contains($0.id) }
+        }
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
 
         var photos: [ExportedPhoto] = []
@@ -142,10 +150,12 @@ extension LibraryStore {
         return ActorMergePlan(changes: changes)
     }
 
-    /// Commits an import: matched actors have their scalar fields fully
-    /// replaced by the imported values; photos are additive only (never
-    /// removed), de-duplicated by content hash; actors absent from the import
-    /// are untouched.
+    /// Commits an import with a non-destructive, field-level merge: for a
+    /// matched actor, a real imported (source) value wins, but a nil/empty
+    /// source field keeps the destination's existing value rather than wiping
+    /// it; tags/AKAs are unioned; photos are additive only (never removed),
+    /// de-duplicated by content hash. Actors absent from the import are
+    /// untouched.
     @discardableResult
     public func applyActorMerge(_ export: ActorLibraryExport) throws -> ActorMergeResult {
         let existingProfiles = Dictionary(uniqueKeysWithValues: try fetchAllEntityProfiles().map { ($0.id, $0) })
@@ -191,18 +201,24 @@ extension LibraryStore {
                 newPhotoCount += 1
             }
 
+            // Field-level merge, NOT wholesale overwrite: the imported
+            // (source) value wins when it's actually present, but a nil/empty
+            // source value never clobbers a populated destination value —
+            // otherwise merging a sparsely-filled actor from one library wipes
+            // richer bio data in the other. Tags/AKAs are unioned so neither
+            // side loses any; photos are already additive above.
             let merged = EntityProfile(
                 id: imported.id,
-                bio: imported.bio,
+                bio: MergeSemantics.coalesce(imported.bio, existing?.bio),
                 photoUrl: mergedPhotoUrl,
-                homePage: imported.homePage,
-                gender: imported.gender,
-                hairColor: imported.hairColor,
-                birthYear: imported.birthYear,
-                countryOfOrigin: imported.countryOfOrigin,
-                tags: imported.tags,
+                homePage: MergeSemantics.coalesce(imported.homePage, existing?.homePage),
+                gender: MergeSemantics.coalesce(imported.gender, existing?.gender),
+                hairColor: MergeSemantics.coalesce(imported.hairColor, existing?.hairColor),
+                birthYear: imported.birthYear ?? existing?.birthYear,
+                countryOfOrigin: MergeSemantics.coalesce(imported.countryOfOrigin, existing?.countryOfOrigin),
+                tags: MergeSemantics.union(imported.tags, existing?.tags ?? []),
                 galleryUrls: mergedGalleryUrls,
-                akas: imported.akas,
+                akas: MergeSemantics.union(imported.akas, existing?.akas ?? []),
                 createdAt: existing?.createdAt ?? imported.createdAt
             )
             try saveEntityProfile(merged)
@@ -221,6 +237,9 @@ extension LibraryStore {
     private static func isGalleryToken(_ token: String, photoUrl: String?) -> Bool {
         token != photoUrl && token != ProfileImageNaming.localPrimaryToken
     }
+
+    // coalesce/union moved to the shared `MergeSemantics` (reused by the
+    // full-library restore-over-existing merge).
 
     /// Content hashes of every photo file currently cached on disk for this
     /// profile (primary + gallery), used to detect duplicates on import.

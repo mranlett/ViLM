@@ -9,6 +9,22 @@ final class TagNormalizerTests: XCTestCase {
         XCTAssertEqual(TagNormalizer.normalize(tagValue: "  Spaced Out "), "Spaced Out")
     }
     
+    func testTitleCased() {
+        XCTAssertEqual(TagNormalizer.titleCased("the return of the king"), "The Return Of The King")
+        // Already-uppercased and mixed-case letters are normalized down.
+        XCTAssertEqual(TagNormalizer.titleCased("THE HEIST"), "The Heist")
+        XCTAssertEqual(TagNormalizer.titleCased("iCarly gOES hOME"), "Icarly Goes Home")
+        // Apostrophes are NOT word breaks (the key difference from .capitalized).
+        XCTAssertEqual(TagNormalizer.titleCased("valentine's day"), "Valentine's Day")
+        // Hyphens ARE word breaks, and the hyphen is preserved.
+        XCTAssertEqual(TagNormalizer.titleCased("spider-man"), "Spider-Man")
+        XCTAssertEqual(TagNormalizer.titleCased("x-men: first class"), "X-Men: First Class")
+        // Collapses/ trims whitespace.
+        XCTAssertEqual(TagNormalizer.titleCased("  pilot   episode  "), "Pilot Episode")
+        XCTAssertEqual(TagNormalizer.titleCased(""), "")
+        XCTAssertEqual(TagNormalizer.titleCased("   "), "")
+    }
+
     func testNormalizeFullTag() {
         XCTAssertEqual(TagNormalizer.normalize(fullTag: "actor:luna"), "actor:Luna")
         XCTAssertEqual(TagNormalizer.normalize(fullTag: "tag:running fast"), "tag:Running Fast")

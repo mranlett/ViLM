@@ -173,7 +173,7 @@ struct EpisodeBackfillView: View {
                 guard var asset = assets.first(where: { $0.id == row.id }) else { continue }
                 asset.seasonNumber = Int(row.season.trimmingCharacters(in: .whitespaces))
                 asset.episodeNumber = Int(row.episode.trimmingCharacters(in: .whitespaces))
-                let title = row.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let title = TagNormalizer.titleCased(row.title)
                 asset.episode = title.isEmpty ? nil : title
                 try store.updateAsset(asset)
             }

@@ -15,6 +15,7 @@ final class SceneMarkerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         store = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
         try? FileManager.default.removeItem(at: libraryURL)
     }
 

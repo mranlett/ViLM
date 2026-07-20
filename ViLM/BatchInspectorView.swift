@@ -130,7 +130,7 @@ struct BatchInspectorView: View {
     }
 
     private func applySeriesName() {
-        let name = batchSeriesName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = TagNormalizer.titleCased(batchSeriesName)
         applyToAll { $0.videoName = name.isEmpty ? nil : name }
     }
 

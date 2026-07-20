@@ -159,94 +159,15 @@ struct AssetsGridView: View {
             }
             
             if !matchesCategory { return false }
-            
-            let matchesReviewStatus: Bool
-            switch filterCriteria.reviewStatus {
-            case .all: matchesReviewStatus = true
-            case .reviewed: matchesReviewStatus = asset.status == .reviewed
-            case .unreviewed: matchesReviewStatus = asset.status == .unreviewed
+
+            // Review status, rating, and the actor/tag/studio + actor-metadata
+            // sets are the persisted filter model — matched by the shared,
+            // unit-tested implementation in LibraryCore so this grid and the
+            // Move-Between-Libraries page stay in lockstep.
+            if !filterCriteria.matches(asset, mappedActors: mappedActors(for: asset), entityProfiles: entityProfiles) {
+                return false
             }
-            
-            if !matchesReviewStatus { return false }
-            
-            if let minRating = filterCriteria.minRating {
-                let assetRating = asset.rating ?? 0
-                if assetRating < minRating { return false }
-            }
-            
-            // Actors Filter
-            if !filterCriteria.selectedActors.isEmpty {
-                let assetActors = mappedActors(for: asset)
-                if filterCriteria.actorsLogic == .and {
-                    if !filterCriteria.selectedActors.isSubset(of: assetActors) { return false }
-                } else {
-                    if filterCriteria.selectedActors.isDisjoint(with: assetActors) { return false }
-                }
-            }
-            
-            // Tags Filter
-            if !filterCriteria.selectedTags.isEmpty {
-                let assetTags = Set(asset.actions)
-                if filterCriteria.tagsLogic == .and {
-                    if !filterCriteria.selectedTags.isSubset(of: assetTags) { return false }
-                } else {
-                    if filterCriteria.selectedTags.isDisjoint(with: assetTags) { return false }
-                }
-            }
-            
-            // Studios Filter
-            if !filterCriteria.selectedStudios.isEmpty {
-                let assetStudios = Set(asset.studios)
-                if filterCriteria.studiosLogic == .and {
-                    if !filterCriteria.selectedStudios.isSubset(of: assetStudios) { return false }
-                } else {
-                    if filterCriteria.selectedStudios.isDisjoint(with: assetStudios) { return false }
-                }
-            }
-            
-            // Actor Metadata Filters (must pass all specified)
-            let assetActorProfiles = mappedActors(for: asset).compactMap { entityProfiles["actor:\($0)"] }
-            
-            // Actor Tags
-            if !filterCriteria.selectedActorTags.isEmpty {
-                let allTagsInVideo = Set(assetActorProfiles.flatMap { $0.tags })
-                if filterCriteria.actorTagsLogic == .and {
-                    if !filterCriteria.selectedActorTags.isSubset(of: allTagsInVideo) { return false }
-                } else {
-                    if filterCriteria.selectedActorTags.isDisjoint(with: allTagsInVideo) { return false }
-                }
-            }
-            
-            // Actor Hair Colors
-            if !filterCriteria.selectedActorHairColors.isEmpty {
-                let allHairColorsInVideo = Set(assetActorProfiles.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-                if filterCriteria.actorHairColorsLogic == .and {
-                    if !filterCriteria.selectedActorHairColors.isSubset(of: allHairColorsInVideo) { return false }
-                } else {
-                    if filterCriteria.selectedActorHairColors.isDisjoint(with: allHairColorsInVideo) { return false }
-                }
-            }
-            
-            // Actor Genders
-            if !filterCriteria.selectedActorGenders.isEmpty {
-                let allGendersInVideo = Set(assetActorProfiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-                if filterCriteria.actorGendersLogic == .and {
-                    if !filterCriteria.selectedActorGenders.isSubset(of: allGendersInVideo) { return false }
-                } else {
-                    if filterCriteria.selectedActorGenders.isDisjoint(with: allGendersInVideo) { return false }
-                }
-            }
-            
-            // Actor Countries
-            if !filterCriteria.selectedActorCountries.isEmpty {
-                let allCountriesInVideo = Set(assetActorProfiles.compactMap { $0.countryOfOrigin }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-                if filterCriteria.actorCountriesLogic == .and {
-                    if !filterCriteria.selectedActorCountries.isSubset(of: allCountriesInVideo) { return false }
-                } else {
-                    if filterCriteria.selectedActorCountries.isDisjoint(with: allCountriesInVideo) { return false }
-                }
-            }
-            
+
             if !matchesSearch(asset, query: debouncedSearchText) {
                 return false
             }
