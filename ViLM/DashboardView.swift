@@ -63,14 +63,70 @@ struct DashboardView: View {
     // Smart Collections (v2): same accordion treatment, keyed by collection id.
     @State private var collectionPreviews: [String: [Asset]] = [:]
     @State private var collectionCounts: [String: Int] = [:]
+    @State private var unreadableCollectionIDs: Set<String> = []
     @AppStorage("dashboardExpandedCollections") private var expandedCollectionsRaw: String = ""
 
+    /// Everything the dashboard derives from the library, computed as one
+    /// value so it can be produced off the main thread and applied at once.
+    private struct DashboardStats: Sendable {
+        var totalActors = 0
+        var totalTags = 0
+        var shelfPreviews: [LibraryQuery: [Asset]] = [:]
+        var shelfCounts: [LibraryQuery: Int] = [:]
+        var collectionPreviews: [String: [Asset]] = [:]
+        var collectionCounts: [String: Int] = [:]
+        var unreadableCollectionIDs: Set<String> = []
+        var recentlyAddedActors: [String] = []
+        var actorsNeedingAttention: [String] = []
+        var growthData: [(date: Date, count: Int)] = []
+    }
+
+    /// Guards against an older (slower) recompute landing after a newer one.
+    @State private var statsGeneration = 0
+
+    // The full recompute is O(shelves + collections × assets × criteria) and
+    // used to run synchronously on the main thread on EVERY "ReloadAssets"
+    // (i.e. every metadata edit) — a visible hitch at scale
+    // (DEFECT_INVENTORY M7). It now runs detached (the loadEntityProfiles
+    // pattern) and applies on the main actor, newest generation wins.
     private func recomputeStats() {
-        // Filtered once here rather than read through the computed
-        // `actorProfiles` property below, which would otherwise re-filter
-        // the full entityProfiles dict on every single access in the loops
-        // that follow.
-        let actorProfiles = self.actorProfiles
+        statsGeneration += 1
+        let generation = statsGeneration
+        let assets = self.assets
+        let entityProfiles = self.entityProfiles
+        let profileImageFileNames = self.profileImageFileNames
+        let akaMap = self.akaMap
+        let smartCollections = self.smartCollections
+        Task.detached(priority: .userInitiated) {
+            let stats = Self.computeStats(
+                assets: assets, entityProfiles: entityProfiles,
+                profileImageFileNames: profileImageFileNames,
+                akaMap: akaMap, smartCollections: smartCollections)
+            await MainActor.run {
+                guard generation == statsGeneration else { return }
+                totalActors = stats.totalActors
+                totalTags = stats.totalTags
+                shelfPreviews = stats.shelfPreviews
+                shelfCounts = stats.shelfCounts
+                collectionPreviews = stats.collectionPreviews
+                collectionCounts = stats.collectionCounts
+                unreadableCollectionIDs = stats.unreadableCollectionIDs
+                recentlyAddedActors = stats.recentlyAddedActors
+                actorsNeedingAttention = stats.actorsNeedingAttention
+                growthData = stats.growthData
+            }
+        }
+    }
+
+    private nonisolated static func computeStats(
+        assets: [Asset],
+        entityProfiles: [String: EntityProfile],
+        profileImageFileNames: Set<String>,
+        akaMap: [String: String],
+        smartCollections: [SmartCollection]
+    ) -> DashboardStats {
+        var stats = DashboardStats()
+        let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
 
         var actorNameSet = Set<String>()
         var tagSet = Set<String>()
@@ -96,47 +152,45 @@ struct DashboardView: View {
             actorNameSet.insert(String(key.dropFirst(6)))
         }
 
-        totalActors = actorNameSet.count
-        totalTags = tagSet.count
+        stats.totalActors = actorNameSet.count
+        stats.totalTags = tagSet.count
 
         // Smart Shelves: compute each pool once here (cheap sorts/filters over
         // the assets array), caching the preview strip + total count. Recomputed
         // on the same triggers as the rest of the dashboard (assets/profiles
         // change → "ReloadAssets").
-        var previews: [LibraryQuery: [Asset]] = [:]
-        var counts: [LibraryQuery: Int] = [:]
         for query in LibraryQuery.allCases {
             let full = query.run(assets: assets)
-            counts[query] = full.count
-            previews[query] = Array(full.prefix(Self.shelfPreviewCount))
+            stats.shelfCounts[query] = full.count
+            stats.shelfPreviews[query] = Array(full.prefix(Self.shelfPreviewCount))
         }
-        shelfPreviews = previews
-        shelfCounts = counts
 
         // Smart Collections: each collection's contents are the assets matching
         // its saved AssetFilterCriteria (the same shared matcher the All Assets
         // grid uses when a collection is selected).
-        var collPreviews: [String: [Asset]] = [:]
-        var collCounts: [String: Int] = [:]
         for collection in smartCollections {
-            guard let criteria = try? JSONDecoder().decode(AssetFilterCriteria.self, from: collection.filterData) else { continue }
+            // A collection whose saved filter can't decode must LOOK broken,
+            // not identical to one that genuinely matches nothing
+            // (DEFECT_INVENTORY L6).
+            guard let criteria = try? JSONDecoder().decode(AssetFilterCriteria.self, from: collection.filterData) else {
+                stats.unreadableCollectionIDs.insert(collection.id)
+                continue
+            }
             let matched = assets.filter { asset in
                 criteria.matches(asset,
                                  mappedActors: AssetFilterCriteria.mappedActors(for: asset, akaMap: akaMap),
                                  entityProfiles: entityProfiles)
             }
-            collCounts[collection.id] = matched.count
-            collPreviews[collection.id] = Array(matched
+            stats.collectionCounts[collection.id] = matched.count
+            stats.collectionPreviews[collection.id] = Array(matched
                 .sorted { $0.createdAt > $1.createdAt }
                 .prefix(Self.shelfPreviewCount))
         }
-        collectionPreviews = collPreviews
-        collectionCounts = collCounts
 
         let sortedProfiles = actorProfiles.values.sorted {
             ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
         }
-        recentlyAddedActors = Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
+        stats.recentlyAddedActors = Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
 
         // Every actor ever referenced, not just those with a saved profile —
         // an actor with no profile at all necessarily has no photo, so
@@ -154,7 +208,7 @@ struct DashboardView: View {
             }
             if needsAttention.count >= 10 { break }
         }
-        actorsNeedingAttention = needsAttention
+        stats.actorsNeedingAttention = needsAttention
 
         var cumulative = 0
         var result: [(date: Date, count: Int)] = []
@@ -164,7 +218,8 @@ struct DashboardView: View {
             cumulative += countsByDay[startOfDay] ?? 0
             result.append((startOfDay, cumulative))
         }
-        growthData = result
+        stats.growthData = result
+        return stats
     }
     
     var body: some View {
@@ -424,7 +479,9 @@ struct DashboardView: View {
                         count: collectionCounts[sc.id] ?? 0,
                         previews: collectionPreviews[sc.id] ?? [],
                         expanded: isCollectionExpanded(sc.id),
-                        emptyText: "Nothing matches this collection right now.",
+                        emptyText: unreadableCollectionIDs.contains(sc.id)
+                            ? "This collection's saved filter couldn't be read. Delete it and save it again."
+                            : "Nothing matches this collection right now.",
                         onToggle: { toggleCollection(sc.id) },
                         onSeeAll: { sidebarSelection = [.smartCollection(sc.id, sc.name)] })
                     .contextMenu {

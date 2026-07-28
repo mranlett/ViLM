@@ -57,6 +57,27 @@ private enum FailedProfileURLs {
     }
 }
 
+// URLs a card is currently downloading. N visible cards for the same actor
+// used to fire N parallel downloads of one photo, racing last-write-wins
+// writes to the same file (DEFECT_INVENTORY L4). The first card claims the
+// URL; the rest skip — the file lands on disk once and later appearances
+// load it locally.
+private enum InFlightProfileURLs {
+    nonisolated(unsafe) private static var urls = Set<String>()
+    private static let lock = NSLock()
+
+    /// True if the claim was acquired (nothing else is downloading this URL).
+    static func begin(_ url: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return urls.insert(url).inserted
+    }
+
+    static func end(_ url: String) {
+        lock.lock(); defer { lock.unlock() }
+        urls.remove(url)
+    }
+}
+
 struct ProfileImageView<Content: View, Placeholder: View>: View {
     let libraryURL: URL?
     let entityId: String
@@ -151,6 +172,10 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         // dead link fires a fresh HTTP request every time its card scrolls
         // into view.
         guard !FailedProfileURLs.contains(photoUrlString) else { return }
+
+        // De-duplicate concurrent downloads of the same URL (L4).
+        guard InFlightProfileURLs.begin(photoUrlString) else { return }
+        defer { InFlightProfileURLs.end(photoUrlString) }
 
         do {
             try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true, attributes: nil)

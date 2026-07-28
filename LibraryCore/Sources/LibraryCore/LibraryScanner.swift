@@ -13,7 +13,8 @@ public class LibraryScanner {
     
     public func scan(at rootURL: URL) async throws {
         let fileManager = FileManager.default
-        
+        var failedPaths: [String] = []
+
         // Only look for videos, skip the hidden .catalog folder
         let options: FileManager.DirectoryEnumerationOptions = [.skipsHiddenFiles, .skipsPackageDescendants]
         
@@ -47,10 +48,30 @@ public class LibraryScanner {
                     relativePath: relativePath,
                     fileName: fileURL.lastPathComponent
                 )
-                
-                // saveAsset is INSERT OR IGNORE, so re-scanning known files is a no-op.
-                try store.saveAsset(asset)
+
+                // saveAsset is INSERT OR IGNORE, so re-scanning known files
+                // is a no-op. One bad row must not abandon the rest of the
+                // walk (DEFECT_INVENTORY L2) — collect failures, keep
+                // scanning, and report the aggregate at the end.
+                do {
+                    try store.saveAsset(asset)
+                } catch {
+                    failedPaths.append(relativePath)
+                }
             }
         }
+
+        if !failedPaths.isEmpty {
+            throw ScanError(failedPaths: failedPaths)
+        }
+    }
+}
+
+/// Files that couldn't be indexed during a scan (the rest of the scan
+/// completed normally).
+public struct ScanError: Error, LocalizedError {
+    public let failedPaths: [String]
+    public var errorDescription: String? {
+        "\(failedPaths.count) file\(failedPaths.count == 1 ? "" : "s") couldn't be added to the library."
     }
 }

@@ -663,6 +663,13 @@ struct ActorGridView: View {
                 // Assuming header is first line
                 let rows = records.dropFirst()
 
+                // Merged rows are collected first and written as ONE
+                // transaction at the end — a mid-file failure imports nothing
+                // rather than an invisible partial batch (DEFECT_INVENTORY M4).
+                // Keyed by id so a later row for the same actor merges on top
+                // of the earlier row's result, as sequential saves used to.
+                var merged: [String: EntityProfile] = [:]
+
                 for columns in rows {
                     if columns.count >= 4 {
                         let name = columns[0]
@@ -680,7 +687,7 @@ struct ActorGridView: View {
                         // profile", and the full-row save below then wiped the
                         // actor's tags/photos/AKAs (DEFECT_INVENTORY C3, the
                         // third instance of this bug class).
-                        let existing = try store.fetchEntityProfile(for: entityId)
+                        let existing = try merged[entityId] ?? store.fetchEntityProfile(for: entityId)
 
                         func cell(_ index: Int) -> String? {
                             guard index < columns.count, !columns[index].isEmpty else { return nil }
@@ -703,9 +710,11 @@ struct ActorGridView: View {
                             akas: existing?.akas ?? [],
                             createdAt: existing?.createdAt ?? Date()
                         )
-                        try store.saveEntityProfile(profile)
+                        merged[entityId] = profile
                     }
                 }
+
+                try store.saveEntityProfiles(Array(merged.values))
 
                 await MainActor.run {
                     NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)

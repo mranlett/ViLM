@@ -180,6 +180,74 @@ final class LibraryStoreTests: XCTestCase {
         try snapStore.runIntegrityCheck()
     }
 
+    func testPlannedProfileImageRenamesMapsPrimaryAndGalleryOnly() {
+        let files = [
+            "actor_jane.jpg",           // primary → renamed
+            "actor_jane_abc123.jpg",    // gallery → renamed, hash suffix kept
+            "actor_janet.jpg",          // different entity → untouched
+            "actor_jane_note.txt",      // not a .jpg → untouched
+        ]
+        let moves = LibraryStore.plannedProfileImageRenames(
+            fileNames: files, oldSafeId: "actor_jane", newSafeId: "actor_janet")
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: moves.map { ($0.from, $0.to) }), [
+            "actor_jane.jpg": "actor_janet.jpg",
+            "actor_jane_abc123.jpg": "actor_janet_abc123.jpg",
+        ])
+    }
+
+    func testRenameMovesPhotoFilesWithTheProfileRow() throws {
+        let old = TagNormalizer.normalize(fullTag: "actor:Jane")
+        let new = TagNormalizer.normalize(fullTag: "actor:Janet")
+        try store.saveEntityProfile(EntityProfile(id: old, bio: "kept", galleryUrls: ["https://x/1.jpg"]))
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
+        let oldSafe = old.replacingOccurrences(of: ":", with: "_")
+        let newSafe = new.replacingOccurrences(of: ":", with: "_")
+        try Data([1]).write(to: profilesDir.appendingPathComponent("\(oldSafe).jpg"))
+        try Data([2]).write(to: profilesDir.appendingPathComponent("\(oldSafe)_h1.jpg"))
+
+        try store.renameTagGlobally(oldTag: old, newTag: new)
+
+        XCTAssertNil(try store.fetchEntityProfile(for: old))
+        XCTAssertEqual(try store.fetchEntityProfile(for: new)?.bio, "kept")
+        XCTAssertEqual(try Data(contentsOf: profilesDir.appendingPathComponent("\(newSafe).jpg")), Data([1]))
+        XCTAssertEqual(try Data(contentsOf: profilesDir.appendingPathComponent("\(newSafe)_h1.jpg")), Data([2]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profilesDir.appendingPathComponent("\(oldSafe).jpg").path))
+    }
+
+    func testRenameOntoExistingProfileKeepsDestinationPhotoAndDropsOrphan() throws {
+        // Merging jane INTO janet where janet already has a primary photo:
+        // the destination's file wins (matching the merge's field semantics)
+        // and jane's now-unreferenced primary is cleaned up, not orphaned.
+        let old = TagNormalizer.normalize(fullTag: "actor:Jane")
+        let new = TagNormalizer.normalize(fullTag: "actor:Janet")
+        try store.saveEntityProfile(EntityProfile(id: old, photoUrl: "https://x/jane.jpg"))
+        try store.saveEntityProfile(EntityProfile(id: new, bio: "dest", photoUrl: "https://x/janet.jpg"))
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
+        let oldSafe = old.replacingOccurrences(of: ":", with: "_")
+        let newSafe = new.replacingOccurrences(of: ":", with: "_")
+        try Data([1]).write(to: profilesDir.appendingPathComponent("\(oldSafe).jpg"))
+        try Data([9]).write(to: profilesDir.appendingPathComponent("\(newSafe).jpg"))
+
+        try store.renameTagGlobally(oldTag: old, newTag: new)
+
+        let merged = try XCTUnwrap(store.fetchEntityProfile(for: new))
+        XCTAssertEqual(merged.photoUrl, "https://x/janet.jpg", "destination's primary wins the merge")
+        XCTAssertEqual(try Data(contentsOf: profilesDir.appendingPathComponent("\(newSafe).jpg")), Data([9]),
+                       "destination's photo bytes are untouched")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profilesDir.appendingPathComponent("\(oldSafe).jpg").path),
+                       "the unreferenced source photo is cleaned up after the commit")
+    }
+
+    func testSaveEntityProfilesIsOneAtomicBatch() throws {
+        let profiles = (1...3).map { EntityProfile(id: "actor:batch\($0)", bio: "b\($0)") }
+        try store.saveEntityProfiles(profiles)
+        for p in profiles {
+            XCTAssertEqual(try store.fetchEntityProfile(for: p.id)?.bio, p.bio)
+        }
+    }
+
     // MARK: - Entity Profiles
 
     func testEntityProfileRoundTrip() throws {

@@ -68,11 +68,20 @@ public struct VideoMoveOutcome: Sendable {
 public final class VideoTransferService {
     public init() {}
 
-    // Session cache of file content hashes, keyed by path. A given file's
-    // bytes don't change within a transfer session, so the same file is never
-    // re-hashed for both the duplicate scan and a later copy-verify.
+    // Session cache of file content hashes, keyed by path + size + mtime so
+    // an edit-in-place (trim/flip) can never satisfy a lookup with the
+    // pre-edit hash. Today every call site builds a fresh service per
+    // operation, but path-only keying was correct only *because* of that —
+    // cheap insurance against a future shared instance (DEFECT_INVENTORY L10).
     private var hashCache: [String: String] = [:]
     private let hashLock = NSLock()
+
+    private static func hashCacheKey(for url: URL) -> String {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? Int64) ?? -1
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+        return "\(url.path)|\(size)|\(mtime)"
+    }
 
     // Verification hook for the copy-verify step: given the freshly-written
     // destination copy, returns the hash compared against the source's. Split
@@ -87,8 +96,9 @@ public final class VideoTransferService {
     /// SHA-256 of a file's bytes, streamed in chunks so multi-GB videos never
     /// load fully into memory. Cached per path for the session.
     public func contentHash(of url: URL) throws -> String {
+        let key = Self.hashCacheKey(for: url)
         hashLock.lock()
-        if let cached = hashCache[url.path] {
+        if let cached = hashCache[key] {
             hashLock.unlock()
             return cached
         }
@@ -97,7 +107,7 @@ public final class VideoTransferService {
         let hash = try Self.streamingSHA256(of: url)
 
         hashLock.lock()
-        hashCache[url.path] = hash
+        hashCache[key] = hash
         hashLock.unlock()
         return hash
     }

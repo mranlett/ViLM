@@ -589,9 +589,22 @@ struct ContentView: View {
 
     private func performPendingQuickActionIfReady() {
         guard let action = quickActionRouter.pending else { return }
-        // Wait until the library + its assets have loaded (a cold launch from a
-        // quick action reaches here before loadLastLibrary() finishes).
-        guard selectedLibraryURL != nil, !assets.isEmpty else { return }
+        // A tap that couldn't run promptly must not fire minutes later as a
+        // surprise autoplay when a library finally loads (DEFECT_INVENTORY M6).
+        if let since = quickActionRouter.pendingSince, Date().timeIntervalSince(since) > 60 {
+            quickActionRouter.pending = nil
+            return
+        }
+        // No library yet: keep waiting — a cold launch from a quick action
+        // reaches here before loadLastLibrary() finishes.
+        guard selectedLibraryURL != nil else { return }
+        // Library open but EMPTY: the action can never become runnable here,
+        // so consume it with feedback instead of leaving it pending.
+        guard !assets.isEmpty else {
+            quickActionRouter.pending = nil
+            AppErrorReporter.report("Quick actions need videos in the library — this one is empty.")
+            return
+        }
         quickActionRouter.pending = nil
         performQuickAction(action)
     }
@@ -925,6 +938,7 @@ struct ContentView: View {
             // Keep the scope open for ongoing access.
             beginSecurityScope(for: url)
 
+            wipeTransientEditingFiles(in: url)
             let store = try LibraryStore(at: url)
             self.selectedLibraryURL = url
             self.assets = try store.fetchAllAssets()
@@ -942,9 +956,19 @@ struct ContentView: View {
         }
     }
 
+    /// `.catalog/editing` holds in-progress edit copies that only a
+    /// *successful* edit cleans up — after a crash mid-edit they'd linger
+    /// (multi-GB video files) for the library's lifetime. No edit can be in
+    /// flight at open time, so wiping here is always safe (DEFECT_INVENTORY M3).
+    private func wipeTransientEditingFiles(in libraryURL: URL) {
+        try? FileManager.default.removeItem(
+            at: libraryURL.appendingPathComponent(".catalog/editing", isDirectory: true))
+    }
+
     func processFolder(at url: URL) {
         // Scope stays open for the life of the active library (no defer stop).
         beginSecurityScope(for: url)
+        wipeTransientEditingFiles(in: url)
 
         let catalogURL = url.appendingPathComponent(".catalog")
         let thumbsURL = catalogURL.appendingPathComponent("thumbnails")
@@ -1037,6 +1061,7 @@ struct ContentView: View {
                     }
                 } catch {
                     print("Scan failed: \(error)")
+                    AppErrorReporter.report("Library scan problem: \(error.localizedDescription)")
                 }
             }
         } catch {
@@ -1090,6 +1115,11 @@ struct ContentView: View {
                 }
             } catch {
                 print("Failed to load entity profiles: \(error)")
+                // Every dependent screen (Dashboard attention lists, actor
+                // gallery, filters) silently computes against stale/empty
+                // profile data until the next reload — the user must know
+                // (DEFECT_INVENTORY L8).
+                AppErrorReporter.report("Couldn't load actor profiles — galleries and filters may be incomplete. Pull to refresh or reopen the library.")
             }
         }
     }

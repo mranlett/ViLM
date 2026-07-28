@@ -11,7 +11,13 @@ import LibraryCore
 
 final class QuickActionRouter: ObservableObject {
     static let shared = QuickActionRouter()
-    @Published var pending: QuickAction?
+    @Published var pending: QuickAction? {
+        didSet { pendingSince = pending == nil ? nil : Date() }
+    }
+    /// When `pending` was set — lets ContentView expire a stale tap instead
+    /// of firing it minutes later against whatever library opens next
+    /// (DEFECT_INVENTORY M6).
+    private(set) var pendingSince: Date?
     private init() {}
 }
 

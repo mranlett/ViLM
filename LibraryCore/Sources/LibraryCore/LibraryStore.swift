@@ -437,12 +437,97 @@ public class LibraryStore {
     func saveEntityProfile(_ profile: EntityProfile, in db: Database) throws {
         try profile.save(db)
     }
+
+    /// Saves every profile in ONE transaction: all rows commit together or
+    /// none do. This is what batch imports (CSV) should use — per-row saves
+    /// leave an invisible partial import behind a mid-file failure
+    /// (DEFECT_INVENTORY M4).
+    public func saveEntityProfiles(_ profiles: [EntityProfile]) throws {
+        try performInTransaction { db in
+            for profile in profiles {
+                try saveEntityProfile(profile, in: db)
+            }
+        }
+    }
     
+    /// Filenames under `.catalog/profiles` that belong to the entity with
+    /// `oldSafeId`, mapped to their names under `newSafeId`: the primary
+    /// ("old.jpg" → "new.jpg") and gallery photos ("old_<hash>.jpg" →
+    /// "new_<hash>.jpg"). Unrelated files are excluded. Pure, for testability.
+    static func plannedProfileImageRenames(
+        fileNames: [String], oldSafeId: String, newSafeId: String
+    ) -> [(from: String, to: String)] {
+        fileNames.compactMap { name in
+            if name == "\(oldSafeId).jpg" {
+                return (name, "\(newSafeId).jpg")
+            }
+            if name.hasPrefix("\(oldSafeId)_") && name.hasSuffix(".jpg") {
+                return (name, newSafeId + name.dropFirst(oldSafeId.count))
+            }
+            return nil
+        }
+    }
+
     public func renameTagGlobally(oldTag: String, newTag: String) throws {
         let normalizedOld = TagNormalizer.normalize(fullTag: oldTag)
         let normalizedNew = TagNormalizer.normalize(fullTag: newTag)
         if normalizedOld == normalizedNew { return }
-        
+
+        // Move the entity's photo files BEFORE the DB commit, with rollback
+        // (DEFECT_INVENTORY M1): the old order committed the rename first and
+        // then moved files with swallowed errors, so any failure left the
+        // renamed profile pointing at filenames that no longer match — photos
+        // silently vanished from the UI. Now a failed move aborts with the
+        // catalog untouched, and a failed DB write moves the files back;
+        // either way disk and database agree, and errors reach the caller.
+        let oldSafeId = normalizedOld.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let newSafeId = normalizedNew.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        var performedMoves: [(from: URL, to: URL)] = []
+        // A destination file that already exists means the merge target owns
+        // that photo slot (same content token). The merged row keeps the
+        // destination's file, so the source becomes unreferenced — but it's
+        // only safe to delete once the DB commit has actually happened.
+        var collidingSources: [URL] = []
+        let rollbackMoves = {
+            for (from, to) in performedMoves.reversed() {
+                try? FileManager.default.moveItem(at: to, to: from)
+            }
+        }
+        if FileManager.default.fileExists(atPath: profilesDir.path) {
+            let names = try FileManager.default.contentsOfDirectory(atPath: profilesDir.path)
+            for move in Self.plannedProfileImageRenames(fileNames: names, oldSafeId: oldSafeId, newSafeId: newSafeId) {
+                let from = profilesDir.appendingPathComponent(move.from)
+                let to = profilesDir.appendingPathComponent(move.to)
+                if FileManager.default.fileExists(atPath: to.path) {
+                    collidingSources.append(from)
+                    continue
+                }
+                do {
+                    try FileManager.default.moveItem(at: from, to: to)
+                    performedMoves.append((from, to))
+                } catch {
+                    rollbackMoves()
+                    throw error
+                }
+            }
+        }
+
+        do {
+            try renameTagInDatabase(normalizedOld: normalizedOld, normalizedNew: normalizedNew)
+        } catch {
+            rollbackMoves()
+            throw error
+        }
+
+        // Committed: remove the now-unreferenced colliding sources rather
+        // than leaving invisible orphans on disk.
+        for url in collidingSources {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func renameTagInDatabase(normalizedOld: String, normalizedNew: String) throws {
         try dbQueue.write { db in
             let assets = try Asset.fetchAll(db)
             for var asset in assets {
@@ -510,31 +595,6 @@ public class LibraryStore {
 
                 // Old profile must be deleted since the tag is gone
                 _ = try oldProfile.delete(db)
-            }
-        }
-        
-        // Handle renaming image files on disk
-        let oldSafeId = normalizedOld.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let newSafeId = normalizedNew.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        
-        if FileManager.default.fileExists(atPath: profilesDir.path) {
-            do {
-                let files = try FileManager.default.contentsOfDirectory(at: profilesDir, includingPropertiesForKeys: nil)
-                for file in files {
-                    let fileName = file.lastPathComponent
-                    if fileName == "\(oldSafeId).jpg" {
-                        let newFile = profilesDir.appendingPathComponent("\(newSafeId).jpg")
-                        try? FileManager.default.moveItem(at: file, to: newFile)
-                    } else if fileName.hasPrefix("\(oldSafeId)_") && fileName.hasSuffix(".jpg") {
-                        let suffix = String(fileName.dropFirst(oldSafeId.count))
-                        let newFileName = newSafeId + suffix
-                        let newFile = profilesDir.appendingPathComponent(newFileName)
-                        try? FileManager.default.moveItem(at: file, to: newFile)
-                    }
-                }
-            } catch {
-                print("Failed to rename profile images: \(error)")
             }
         }
     }

@@ -9,6 +9,11 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+public enum ContactSheetError: Error {
+    /// The sheet bitmap couldn't be composed (context/image allocation failed).
+    case compositionFailed
+}
+
 public final class ContactSheetService {
     private let store: LibraryStore
 
@@ -97,14 +102,14 @@ public final class ContactSheetService {
 
         guard !images.isEmpty else { return }
 
-        let sheetImage = composeGrid(
+        guard let sheetImage = composeGrid(
             images: images,
             columns: columns,
             rows: rows,
             cellSize: cellSize,
             margin: margin,
             backgroundGray: backgroundGray
-        )
+        ) else { throw ContactSheetError.compositionFailed }
 
         try writeJPEG(cgImage: sheetImage, to: destinationURL, quality: jpegQuality)
     }
@@ -246,7 +251,7 @@ public final class ContactSheetService {
         cellSize: CGSize,
         margin: CGFloat,
         backgroundGray: CGFloat
-    ) -> CGImage {
+    ) -> CGImage? {
         let cols = max(1, columns)
         let rws = max(1, rows)
 
@@ -256,7 +261,10 @@ public final class ContactSheetService {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
 
-        let ctx = CGContext(
+        // Context/image creation can fail under memory pressure or
+        // pathological sizes — that's a failed generation to report, not a
+        // crash (DEFECT_INVENTORY L3).
+        guard let ctx = CGContext(
             data: nil,
             width: Int(sheetWidth),
             height: Int(sheetHeight),
@@ -264,7 +272,7 @@ public final class ContactSheetService {
             bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: bitmapInfo
-        )!
+        ) else { return nil }
 
         // Background
         ctx.setFillColor(CGColor(gray: backgroundGray, alpha: 1.0))
@@ -289,7 +297,7 @@ public final class ContactSheetService {
             drawAspectFill(image: img, in: rect, context: ctx)
         }
 
-        return ctx.makeImage()!
+        return ctx.makeImage()
     }
 
     private func drawAspectFill(image: CGImage, in rect: CGRect, context ctx: CGContext) {

@@ -63,6 +63,7 @@ struct SingleInspectorView: View {
     @Binding var autoPlayAssetID: UUID?
     
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
@@ -536,6 +537,18 @@ struct SingleInspectorView: View {
             commitSeriesNameDraft()
             commitEpisodeTitleDraft()
             playback.player.pause()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Leaving the foreground is the last reliable moment before a
+            // possible swipe-kill: flush the debounced notes/series/episode
+            // drafts now, or an edit typed in the final ~600ms dies with the
+            // process (DEFECT_INVENTORY L9).
+            if newPhase != .active {
+                notesSaveTask?.cancel()
+                commitNotesDraft()
+                commitSeriesNameDraft()
+                commitEpisodeTitleDraft()
+            }
         }
         .onChange(of: asset.id) { _, _ in
             #if os(macOS)
@@ -1289,57 +1302,26 @@ struct SingleInspectorView: View {
 
     private func deleteVideo() {
         guard let url = libraryURL else { return }
-        
-        let videoURL = url.appendingPathComponent(asset.relativePath)
-        let sidecarURL = videoURL.deletingPathExtension().appendingPathExtension("json")
-        let thumbnailURL = url.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg")
-        let contactSheetURL = url.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
 
-        // The video file is the gating step: if it exists and can't be
-        // trashed, ABORT without touching the catalog — deleting the row
-        // anyway would permanently lose the video's metadata and markers
-        // while its file lives on (and a rescan would re-add it as a blank
-        // asset). A file that's already gone is fine to clean up after.
-        if FileManager.default.fileExists(atPath: videoURL.path) {
-            do {
-                try FileManager.default.trashItem(at: videoURL, resultingItemURL: nil)
-            } catch {
-                print("Failed to trash video: \(error)")
-                AppErrorReporter.report("Couldn't move the video file to the Trash, so the video was NOT removed from the library: \(error.localizedDescription)")
-                return
-            }
-        }
-
+        // One shared implementation of "delete a video" (DEFECT_INVENTORY M5):
+        // this used to be a hand-rolled copy of VideoTransferService's logic
+        // and the two had drifted. The service is the hardened path — video
+        // file first (a throw aborts with the catalog intact), then sidecar,
+        // marker previews, poster, contact sheet, and fingerprint entry, DB
+        // row last.
         do {
-            try FileManager.default.trashItem(at: sidecarURL, resultingItemURL: nil)
-        } catch {
-            print("Failed to trash sidecar: \(error)")
-        }
+            try VideoTransferService().deleteVideoAndArtifacts(asset, in: url, toTrash: true)
 
-        // Marker preview files must go before the row cascade deletes the
-        // marker rows (their ids are unrecoverable afterwards).
-        for marker in sceneMarkers {
-            try? FileManager.default.removeItem(
-                at: url.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg"))
-        }
-        try? FileManager.default.removeItem(at: thumbnailURL)
-        try? FileManager.default.removeItem(at: contactSheetURL)
-        
-        // Remove from DB and memory
-        do {
-            let store = try LibraryStore(at: url)
-            try store.deleteAsset(asset)
-            
             // Clear selection and close inspector
             selectedAssetBinding.removeAll()
-            
+
             // Remove from global assets list
             if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                 assets.remove(at: index)
             }
         } catch {
-            print("Failed to delete asset from store: \(error)")
-            AppErrorReporter.report("Couldn't remove the video from the library: \(error.localizedDescription)")
+            print("Failed to delete video: \(error)")
+            AppErrorReporter.report("Couldn't delete the video, so it was NOT removed from the library: \(error.localizedDescription)")
         }
     }
 

@@ -89,6 +89,10 @@ struct LibraryBackupView: View {
             ) { result in
                 if case .failure(let error) = result { errorMessage = "Save failed: \(error.localizedDescription)" }
                 else { didSave = true }
+                // Saved or failed, the temp archive has served its purpose —
+                // these are multi-hundred-MB files that otherwise linger
+                // until an OS purge (DEFECT_INVENTORY M3).
+                deleteTempArchive()
             }
             .fileImporter(isPresented: $isShowingArchivePicker, allowedContentTypes: [BackupDocument.backupType]) {
                 handlePickedArchive($0)
@@ -150,6 +154,7 @@ struct LibraryBackupView: View {
     }
 
     private func buildBackup() async {
+        deleteTempArchive() // a re-run after a cancelled save must not leak the prior archive
         isBuilding = true
         let url = openLibraryURL
         do {
@@ -291,7 +296,17 @@ struct LibraryBackupView: View {
 
     // MARK: - Shared
 
-    private func finish() { releaseScopes(); dismiss() }
+    private func finish() { releaseScopes(); deleteTempArchive(); dismiss() }
+
+    /// Removes the exported temp .vilmbackup once it's saved, failed, or
+    /// abandoned (sheet dismissed / save sheet cancelled — cancellation
+    /// doesn't invoke the fileExporter callback, so finish() covers it).
+    private func deleteTempArchive() {
+        if let archiveURL {
+            try? FileManager.default.removeItem(at: archiveURL)
+        }
+        archiveURL = nil
+    }
 
     private func releaseScopes() {
         if let s = scopedArchive { s.stopAccessingSecurityScopedResource(); scopedArchive = nil }

@@ -84,8 +84,13 @@ final class VideoPlaybackController {
             player.play()
         }
 
-        // Clear one-shot seek request
-        pendingSeekSeconds = nil
+        // Clear the one-shot seek request — but only if it's still OURS. A
+        // second seek can land while this one awaits AVPlayer (both run on
+        // the MainActor, but they interleave across the suspension), and an
+        // unconditional clear would silently drop it (DEFECT_INVENTORY L1).
+        if pendingSeekSeconds == seconds {
+            pendingSeekSeconds = nil
+        }
     }
 }
 

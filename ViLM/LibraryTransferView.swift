@@ -521,26 +521,32 @@ struct LibraryTransferView: View {
             var rows: [MoveRow] = []
             var profiles: [String: EntityProfile] = [:]
             var akaMap: [String: String] = [:]
-            if let store = try? LibraryStore(at: src) {
-                if let assets = try? store.fetchAllAssets() {
-                    for asset in assets {
-                        let fileURL = src.appendingPathComponent(asset.relativePath)
-                        guard let size = VideoTransferService.fileSize(fileURL), size > 0 else { continue }
-                        rows.append(MoveRow(asset: asset, sizeBytes: size))
-                    }
+            do {
+                // A read failure must be REPORTED, not rendered as "No Videos
+                // to Move" — `try?` here made the two indistinguishable
+                // (DEFECT_INVENTORY L5).
+                let store = try LibraryStore(at: src)
+                for asset in try store.fetchAllAssets() {
+                    let fileURL = src.appendingPathComponent(asset.relativePath)
+                    guard let size = VideoTransferService.fileSize(fileURL), size > 0 else { continue }
+                    rows.append(MoveRow(asset: asset, sizeBytes: size))
                 }
                 // Profiles + AKA map (from the source library) power the
                 // actor-metadata filters and alias resolution, mirroring how
                 // ContentView builds them for the All Assets grid.
-                if let allProfiles = try? store.fetchAllEntityProfiles() {
-                    for profile in allProfiles {
-                        profiles[profile.id] = profile
-                        if profile.id.hasPrefix("actor:") {
-                            let mainName = String(profile.id.dropFirst(6))
-                            for aka in profile.akas { akaMap[aka] = mainName }
-                        }
+                for profile in try store.fetchAllEntityProfiles() {
+                    profiles[profile.id] = profile
+                    if profile.id.hasPrefix("actor:") {
+                        let mainName = String(profile.id.dropFirst(6))
+                        for aka in profile.akas { akaMap[aka] = mainName }
                     }
                 }
+            } catch {
+                await MainActor.run {
+                    self.isLoadingMoveList = false
+                    self.errorMessage = "Couldn't read that library's catalog: \(error.localizedDescription)"
+                }
+                return
             }
             rows.sort { ($0.asset.videoName ?? $0.asset.fileName).localizedStandardCompare($1.asset.videoName ?? $1.asset.fileName) == .orderedAscending }
             let finalRows = rows
