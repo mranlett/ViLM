@@ -202,6 +202,15 @@ public class LibraryStore {
             }
         }
 
+        migrator.registerMigration("v15") { db in
+            // v15: actor favorite rating (1–5, nullable). Additive only — the
+            // backup feature requires migrations never drop/rewrite columns so
+            // old .vilmbackup archives always restore.
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "rating", .integer)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -215,18 +224,39 @@ public class LibraryStore {
         }
     }
 
+    // MARK: - Transactions
+
+    /// Runs `body` inside a single database transaction: every write in it
+    /// commits together or rolls back together. This is what makes multi-record
+    /// operations (restore-merge, batch imports) atomic instead of N
+    /// independent transactions. Internal because it hands out the GRDB
+    /// `Database` handle; inside `body`, use the `(…, in: db)` method variants —
+    /// the plain public methods each open their own transaction and must NOT be
+    /// called from within `body` (GRDB connections are not reentrant).
+    func performInTransaction<T>(_ body: (Database) throws -> T) throws -> T {
+        try dbQueue.write(body)
+    }
+
     // MARK: - Smart Collections
-    
+
     public func fetchAllSmartCollections() throws -> [SmartCollection] {
         try dbQueue.read { db in
-            try SmartCollection.order(Column("createdAt").asc).fetchAll(db)
+            try fetchAllSmartCollections(in: db)
         }
     }
-    
+
+    func fetchAllSmartCollections(in db: Database) throws -> [SmartCollection] {
+        try SmartCollection.order(Column("createdAt").asc).fetchAll(db)
+    }
+
     public func saveSmartCollection(_ collection: SmartCollection) throws {
         try dbQueue.write { db in
-            try collection.save(db)
+            try saveSmartCollection(collection, in: db)
         }
+    }
+
+    func saveSmartCollection(_ collection: SmartCollection, in db: Database) throws {
+        try collection.save(db)
     }
     
     public func deleteSmartCollection(id: String) throws {
@@ -239,17 +269,25 @@ public class LibraryStore {
 
     public func fetchSceneMarkers(for assetId: Asset.ID) throws -> [SceneMarker] {
         try dbQueue.read { db in
-            try SceneMarker
-                .filter(Column("asset_id") == assetId.uuidString)
-                .order(Column("timestamp_seconds").asc)
-                .fetchAll(db)
+            try fetchSceneMarkers(for: assetId, in: db)
         }
+    }
+
+    func fetchSceneMarkers(for assetId: Asset.ID, in db: Database) throws -> [SceneMarker] {
+        try SceneMarker
+            .filter(Column("asset_id") == assetId.uuidString)
+            .order(Column("timestamp_seconds").asc)
+            .fetchAll(db)
     }
 
     public func saveSceneMarker(_ marker: SceneMarker) throws {
         try dbQueue.write { db in
-            try marker.save(db)
+            try saveSceneMarker(marker, in: db)
         }
+    }
+
+    func saveSceneMarker(_ marker: SceneMarker, in db: Database) throws {
+        try marker.save(db)
     }
 
     public func deleteSceneMarker(id: SceneMarker.ID) throws {
@@ -260,8 +298,12 @@ public class LibraryStore {
     
     public func updateAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
-            try asset.update(db)
+            try updateAsset(asset, in: db)
         }
+    }
+
+    func updateAsset(_ asset: Asset, in db: Database) throws {
+        try asset.update(db)
     }
 
     /// Inserts a fully-populated asset row (every column), unlike the
@@ -270,8 +312,12 @@ public class LibraryStore {
     /// transfer tool to persist a moved asset's complete metadata in one shot.
     public func insertAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
-            try asset.insert(db)
+            try insertAsset(asset, in: db)
         }
+    }
+
+    func insertAsset(_ asset: Asset, in db: Database) throws {
+        try asset.insert(db)
     }
 
     public func fetchAllAssets() throws -> [Asset] {
@@ -289,8 +335,12 @@ public class LibraryStore {
     
     public func fetchAllEntityProfiles() throws -> [EntityProfile] {
         try dbQueue.read { db in
-            try EntityProfile.fetchAll(db)
+            try fetchAllEntityProfiles(in: db)
         }
+    }
+
+    func fetchAllEntityProfiles(in db: Database) throws -> [EntityProfile] {
+        try EntityProfile.fetchAll(db)
     }
     
     public func resolveActorAKA(for normalizedName: String) throws -> String {
@@ -312,8 +362,12 @@ public class LibraryStore {
 
     public func saveEntityProfile(_ profile: EntityProfile) throws {
         try dbQueue.write { db in
-            try profile.save(db)
+            try saveEntityProfile(profile, in: db)
         }
+    }
+
+    func saveEntityProfile(_ profile: EntityProfile, in db: Database) throws {
+        try profile.save(db)
     }
     
     public func renameTagGlobally(oldTag: String, newTag: String) throws {
@@ -359,6 +413,7 @@ public class LibraryStore {
                     dest.hairColor = dest.hairColor ?? oldProfile.hairColor
                     dest.birthYear = dest.birthYear ?? oldProfile.birthYear
                     dest.countryOfOrigin = dest.countryOfOrigin ?? oldProfile.countryOfOrigin
+                    dest.rating = dest.rating ?? oldProfile.rating
                     dest.tags = (dest.tags + oldProfile.tags.filter { !dest.tags.contains($0) })
                     dest.galleryUrls = (dest.galleryUrls + oldProfile.galleryUrls.filter { !dest.galleryUrls.contains($0) })
                     dest.akas = (dest.akas + oldProfile.akas.filter { !dest.akas.contains($0) })
@@ -376,6 +431,7 @@ public class LibraryStore {
                         hairColor: oldProfile.hairColor,
                         birthYear: oldProfile.birthYear,
                         countryOfOrigin: oldProfile.countryOfOrigin,
+                        rating: oldProfile.rating,
                         tags: oldProfile.tags,
                         galleryUrls: oldProfile.galleryUrls,
                         akas: oldProfile.akas,
@@ -417,8 +473,12 @@ public class LibraryStore {
     
     public func deleteAsset(_ asset: Asset) throws {
         try dbQueue.write { db in
-            _ = try asset.delete(db)
+            try deleteAsset(asset, in: db)
         }
+    }
+
+    func deleteAsset(_ asset: Asset, in db: Database) throws {
+        _ = try asset.delete(db)
     }
 
     /// Standardizes a series name: every asset whose `videoName` is one of

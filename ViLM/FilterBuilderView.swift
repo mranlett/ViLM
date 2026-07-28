@@ -118,6 +118,29 @@ struct FilterBuilderView: View {
                         }
                     }
                 }
+
+                Section(
+                    header: Text("Minimum Actor Rating"),
+                    footer: Text("Shows videos featuring at least one actor you've rated this highly.")
+                ) {
+                    Stepper(value: Binding(
+                        get: { criteria.minActorRating ?? 0 },
+                        set: { criteria.minActorRating = $0 == 0 ? nil : $0 }
+                    ), in: 0...5) {
+                        HStack {
+                            Text("Actor:")
+                            if let rating = criteria.minActorRating {
+                                HStack(spacing: 2) {
+                                    ForEach(0..<rating, id: \.self) { _ in
+                                        Image(systemName: "star.fill").foregroundColor(.yellow)
+                                    }
+                                }
+                            } else {
+                                Text("Any")
+                            }
+                        }
+                    }
+                }
                 DisclosureGroup("Actors", isExpanded: $isActorsExpanded) {
                     AlphaPickerView(filter: $actorAlphaFilter)
                         .padding(.vertical, 4)

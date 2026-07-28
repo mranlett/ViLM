@@ -30,6 +30,12 @@ public struct LibraryBackupService {
 
     private static let catalogDirName = ".catalog"
 
+    /// Test seam (default-preserving, like `fileRemover`): called after each
+    /// asset's rows are written inside the restore-merge transaction. Tests
+    /// inject a throw partway through to prove a mid-merge failure rolls the
+    /// entire merge back instead of committing a half-merged library.
+    var postAssetWriteHook: ((Asset) throws -> Void)? = nil
+
     // MARK: - Export
 
     /// Compresses `libraryURL`'s `.catalog` into a `.vilmbackup` archive in the
@@ -68,11 +74,32 @@ public struct LibraryBackupService {
         if FileManager.default.fileExists(atPath: targetCatalog.path) {
             throw LibraryBackupError.targetNotEmpty
         }
+        // Extract to scratch and move into place only on success: a failed
+        // extraction (corrupt archive, disk full) must not leave a partial
+        // `.catalog` in the target, which would make every retry fail with a
+        // misleading `.targetNotEmpty` (DEFECT_INVENTORY M2).
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vilmbackup-restore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let scratchCatalog = scratch.appendingPathComponent(Self.catalogDirName, isDirectory: true)
+        try FileManager.default.createDirectory(at: scratchCatalog, withIntermediateDirectories: true)
+        try Self.extract(archiveURL: archiveURL, into: scratchCatalog)
+
+        // It must open (and migrate) cleanly — validated on the scratch copy,
+        // before anything touches the target. Evict afterwards so no cached
+        // connection points at the directory we're about to move.
         LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-        try FileManager.default.createDirectory(at: targetCatalog, withIntermediateDirectories: true)
-        try Self.extract(archiveURL: archiveURL, into: targetCatalog)
-        // It must open (and migrate) cleanly.
-        _ = try LibraryStore(at: targetLibraryURL).fetchAllAssets()
+        _ = try LibraryStore(at: scratch).fetchAllAssets()
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+
+        do {
+            try FileManager.default.moveItem(at: scratchCatalog, to: targetCatalog)
+        } catch {
+            // A cross-volume move is copy-then-delete; clean up any partial
+            // copy so the target folder stays retryable.
+            try? FileManager.default.removeItem(at: targetCatalog)
+            throw error
+        }
     }
 
     // MARK: - Restore over an existing library (merge)
@@ -132,53 +159,97 @@ public struct LibraryBackupService {
         try withExtractedArchive(archiveURL) { archiveStore in
             LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
             let destStore = try LibraryStore(at: destinationLibraryURL)
+
+            // Gather everything from the archive up front (reads on a separate
+            // scratch database) so the destination's write phase below stays
+            // short and purely local.
             let archiveAssets = try archiveStore.fetchAllAssets()
-            let destByID = Dictionary(uniqueKeysWithValues: try destStore.fetchAllAssets().map { ($0.id, $0) })
+            var archiveMarkers: [Asset.ID: [SceneMarker]] = [:]
+            for asset in archiveAssets {
+                archiveMarkers[asset.id] = try archiveStore.fetchSceneMarkers(for: asset.id)
+            }
+            let archiveCollections = try archiveStore.fetchAllSmartCollections()
+            let actorExport = try archiveStore.exportActorLibrary()
+
+            let destAssets = try destStore.fetchAllAssets()
+            let destByID = Dictionary(uniqueKeysWithValues: destAssets.map { ($0.id, $0) })
+            // relative_path is UNIQUE — an archived asset whose path is now
+            // occupied by a *different* asset (file re-added/renamed since the
+            // backup) must not abort the merge with a constraint violation
+            // (DEFECT_INVENTORY H4); it gets a "-restored" suffixed path and
+            // its file reconnects via Check for Changes like any restored row.
+            var takenPaths = Set(destAssets.map(\.relativePath))
 
             var inserted = 0, merged = 0, discarded = 0
 
-            // Assets: insert new, field-merge shared.
-            for asset in archiveAssets {
-                if let existing = destByID[asset.id] {
-                    try destStore.updateAsset(MergeSemantics.mergeAsset(source: asset, into: existing))
-                    merged += 1
-                } else {
-                    try destStore.insertAsset(asset)
-                    inserted += 1
+            // The entire destination write phase is ONE transaction
+            // (DEFECT_INVENTORY H3): any mid-merge error — disk full, scope
+            // revocation, a bad record — rolls everything back instead of
+            // committing a half-merged library, and the former `try?` unions
+            // now propagate instead of failing silently. Actor photo writes
+            // inside the actor merge are additive/content-addressed, so
+            // orphaned files from a rollback are harmless.
+            let actorResult = try destStore.performInTransaction { db in
+                // Assets: insert new, field-merge shared.
+                for asset in archiveAssets {
+                    if let existing = destByID[asset.id] {
+                        try destStore.updateAsset(MergeSemantics.mergeAsset(source: asset, into: existing), in: db)
+                        merged += 1
+                    } else {
+                        var adjusted = asset
+                        if takenPaths.contains(adjusted.relativePath) {
+                            let ext = (adjusted.relativePath as NSString).pathExtension
+                            let base = (adjusted.relativePath as NSString).deletingPathExtension
+                            var candidate = ext.isEmpty ? "\(base)-restored" : "\(base)-restored.\(ext)"
+                            var n = 1
+                            while takenPaths.contains(candidate) {
+                                n += 1
+                                candidate = ext.isEmpty ? "\(base)-restored-\(n)" : "\(base)-restored-\(n).\(ext)"
+                            }
+                            adjusted.relativePath = candidate
+                        }
+                        try destStore.insertAsset(adjusted, in: db)
+                        takenPaths.insert(adjusted.relativePath)
+                        inserted += 1
+                    }
+                    // Scene markers for this asset: union by id (archive adds only).
+                    let existingMarkerIDs = Set(try destStore.fetchSceneMarkers(for: asset.id, in: db).map(\.id))
+                    for marker in archiveMarkers[asset.id] ?? []
+                    where !existingMarkerIDs.contains(marker.id) {
+                        try destStore.saveSceneMarker(marker, in: db)
+                    }
+                    try postAssetWriteHook?(asset)
                 }
-                // Scene markers for this asset: union by id (archive adds only).
-                let existingMarkerIDs = Set(((try? destStore.fetchSceneMarkers(for: asset.id)) ?? []).map(\.id))
-                for marker in (try? archiveStore.fetchSceneMarkers(for: asset.id)) ?? []
-                where !existingMarkerIDs.contains(marker.id) {
-                    try? destStore.saveSceneMarker(marker)
+
+                // Smart collections: union by id.
+                let existingCollectionIDs = Set(try destStore.fetchAllSmartCollections(in: db).map(\.id))
+                for collection in archiveCollections
+                where !existingCollectionIDs.contains(collection.id) {
+                    try destStore.saveSmartCollection(collection, in: db)
                 }
-            }
 
-            // Smart collections: union by id.
-            let existingCollectionIDs = Set(((try? destStore.fetchAllSmartCollections()) ?? []).map(\.id))
-            for collection in (try? archiveStore.fetchAllSmartCollections()) ?? []
-            where !existingCollectionIDs.contains(collection.id) {
-                try? destStore.saveSmartCollection(collection)
-            }
+                // Actor profiles + photos: the full Actor Merge engine.
+                let actorResult = try destStore.applyActorMerge(actorExport, in: db)
 
-            // Actor profiles + photos: the full Actor Merge engine.
-            let actorResult = try destStore.applyActorMerge(try archiveStore.exportActorLibrary())
+                // Case A discards (destination-only videos the user chose to drop).
+                for id in discardAssetIDs {
+                    if let asset = destByID[id] {
+                        try destStore.deleteAsset(asset, in: db) // cascade-deletes its markers
+                        discarded += 1
+                    }
+                }
+
+                return actorResult
+            }
 
             // Cached visuals: copy archive files that the library doesn't have
             // (new assets' thumbnails), never overwriting current ones.
+            // Additive file copies stay outside the transaction by design.
             let archiveCatalog = archiveStore.libraryURL.appendingPathComponent(Self.catalogDirName)
             let destCatalog = destinationLibraryURL.appendingPathComponent(Self.catalogDirName)
             for subdir in ["thumbnails", "contactSheets", "markers"] {
                 Self.copyMissingFiles(from: archiveCatalog.appendingPathComponent(subdir),
                                       to: destCatalog.appendingPathComponent(subdir))
-            }
-
-            // Case A discards (destination-only videos the user chose to drop).
-            for id in discardAssetIDs {
-                if let asset = destByID[id] {
-                    try? destStore.deleteAsset(asset) // cascade-deletes its markers
-                    discarded += 1
-                }
             }
 
             return LibraryRestoreResult(

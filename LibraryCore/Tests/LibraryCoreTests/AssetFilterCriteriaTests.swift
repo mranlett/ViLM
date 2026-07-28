@@ -165,6 +165,47 @@ final class AssetFilterCriteriaTests: XCTestCase {
                                profiles: ["actor:Jane": EntityProfile(id: "actor:Jane", tags: ["tag:Extra"])]))
     }
 
+    // MARK: - Minimum actor rating (matched through featured actors' profiles)
+
+    func testMinActorRatingMatchesWhenAnyFeaturedActorQualifies() {
+        var criteria = AssetFilterCriteria()
+        criteria.minActorRating = 4
+        let profiles = [
+            "actor:Jane": EntityProfile(id: "actor:Jane", rating: 5),
+            "actor:John": EntityProfile(id: "actor:John", rating: 2)
+        ]
+        // One qualifying actor is enough, even alongside a low-rated one.
+        XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane", "actor:John"]), profiles: profiles))
+        // Exactly at the bar counts.
+        XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane"]),
+                              profiles: ["actor:Jane": EntityProfile(id: "actor:Jane", rating: 4)]))
+    }
+
+    func testMinActorRatingRejectsLowRatedUnratedAndUnprofiled() {
+        var criteria = AssetFilterCriteria()
+        criteria.minActorRating = 4
+        XCTAssertFalse(matches(criteria, asset(tags: ["actor:John"]),
+                               profiles: ["actor:John": EntityProfile(id: "actor:John", rating: 3)]))
+        XCTAssertFalse(matches(criteria, asset(tags: ["actor:John"]),
+                               profiles: ["actor:John": EntityProfile(id: "actor:John")]), "unrated actor doesn't qualify")
+        XCTAssertFalse(matches(criteria, asset(tags: ["actor:Nobody"]), profiles: [:]), "no profile at all doesn't qualify")
+        XCTAssertFalse(criteria.isEmpty, "an active actor-rating bar counts as a filter")
+    }
+
+    func testFilterSavedBeforeActorRatingFieldStillDecodes() throws {
+        // A default filter persisted by an older build has no minActorRating
+        // key — decoding must succeed with the field nil (saved default
+        // filters and Smart Collections must survive the upgrade).
+        var old = AssetFilterCriteria()
+        old.minRating = 3
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as! [String: Any]
+        json.removeValue(forKey: "minActorRating")
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try JSONDecoder().decode(AssetFilterCriteria.self, from: data)
+        XCTAssertNil(decoded.minActorRating)
+        XCTAssertEqual(decoded.minRating, 3)
+    }
+
     // MARK: - Combined criteria
 
     func testAllSpecifiedCriteriaMustPassTogether() {

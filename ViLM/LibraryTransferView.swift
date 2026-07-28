@@ -141,6 +141,11 @@ struct LibraryTransferView: View {
         .frame(minWidth: 520, minHeight: 520)
         #endif
         .onDisappear { stopOtherScope() }
+        // A swipe-dismiss mid-operation shouldn't be possible; and if the view
+        // is torn down anyway, each batch operation holds its own security-
+        // scope claims (ScopedOperation), so stopOtherScope above can't cut
+        // off in-flight file access (DEFECT_INVENTORY H5).
+        .interactiveDismissDisabled(isMoving || isScanningDups || isApplyingDups)
     }
 
     // MARK: - Choose library
@@ -561,16 +566,18 @@ struct LibraryTransferView: View {
         var actorPhotos = 0
         var warnings: [String] = []
         var failures: [String] = []
-        for (index, asset) in toMove.enumerated() {
-            await MainActor.run { moveProgress = "Moving \(index + 1) of \(toMove.count)…" }
-            do {
-                let outcome = try await service.moveVideo(asset, from: src, to: dst)
-                moved += 1
-                actorsTransferred += outcome.actorsTransferred
-                actorPhotos += outcome.actorPhotosTransferred
-                if let w = outcome.warning { warnings.append(w) }
-            } catch {
-                failures.append("\(asset.fileName): \(error.localizedDescription)")
+        await ScopedOperation.run(holding: [src, dst]) {
+            for (index, asset) in toMove.enumerated() {
+                await MainActor.run { moveProgress = "Moving \(index + 1) of \(toMove.count)…" }
+                do {
+                    let outcome = try await service.moveVideo(asset, from: src, to: dst)
+                    moved += 1
+                    actorsTransferred += outcome.actorsTransferred
+                    actorPhotos += outcome.actorPhotosTransferred
+                    if let w = outcome.warning { warnings.append(w) }
+                } catch {
+                    failures.append("\(asset.fileName): \(error.localizedDescription)")
+                }
             }
         }
         let summary = Self.moveSummaryText(
@@ -596,7 +603,8 @@ struct LibraryTransferView: View {
         let openURL = openLibraryURL
         let service = VideoTransferService()
 
-        let result: [DupMatch] = await Task.detached(priority: .userInitiated) {
+        let result: [DupMatch] = await ScopedOperation.run(holding: [openURL, otherURL]) {
+            await Task.detached(priority: .userInitiated) {
             guard let openStore = try? LibraryStore(at: openURL),
                   let otherStore = try? LibraryStore(at: otherURL),
                   let openAssets = try? openStore.fetchAllAssets(),
@@ -654,7 +662,8 @@ struct LibraryTransferView: View {
             }
             matches.sort { ($0.openAsset.videoName ?? $0.openAsset.fileName).localizedStandardCompare($1.openAsset.videoName ?? $1.openAsset.fileName) == .orderedAscending }
             return matches
-        }.value
+            }.value
+        }
 
         await MainActor.run {
             dupMatches = result
@@ -671,24 +680,26 @@ struct LibraryTransferView: View {
         guard !decided.isEmpty else { return }
         isApplyingDups = true
 
-        let (deleted, failures): (Int, [String]) = await Task.detached(priority: .userInitiated) {
-            let service = VideoTransferService()
-            var deleted = 0
-            var failures: [String] = []
-            for match in decided {
-                // Delete the copy the user did NOT choose to keep.
-                let (asset, lib): (Asset, URL) = match.keep == .open
-                    ? (match.otherAsset, otherURL)
-                    : (match.openAsset, openURL)
-                do {
-                    try service.deleteVideoAndArtifacts(asset, in: lib, toTrash: true)
-                    deleted += 1
-                } catch {
-                    failures.append("\(asset.fileName): \(error.localizedDescription)")
+        let (deleted, failures): (Int, [String]) = await ScopedOperation.run(holding: [openURL, otherURL]) {
+            await Task.detached(priority: .userInitiated) {
+                let service = VideoTransferService()
+                var deleted = 0
+                var failures: [String] = []
+                for match in decided {
+                    // Delete the copy the user did NOT choose to keep.
+                    let (asset, lib): (Asset, URL) = match.keep == .open
+                        ? (match.otherAsset, otherURL)
+                        : (match.openAsset, openURL)
+                    do {
+                        try service.deleteVideoAndArtifacts(asset, in: lib, toTrash: true)
+                        deleted += 1
+                    } catch {
+                        failures.append("\(asset.fileName): \(error.localizedDescription)")
+                    }
                 }
-            }
-            return (deleted, failures)
-        }.value
+                return (deleted, failures)
+            }.value
+        }
 
         await MainActor.run {
             isApplyingDups = false

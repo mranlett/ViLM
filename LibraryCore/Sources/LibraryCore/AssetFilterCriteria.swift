@@ -39,9 +39,12 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     public var selectedActorGenders: Set<String> = []
     public var actorCountriesLogic: Logic = .or
     public var selectedActorCountries: Set<String> = []
+    /// Matches videos featuring at least one actor rated ≥ this (nil = any).
+    /// Optional, so filters saved before this field existed still decode.
+    public var minActorRating: Int? = nil
 
     public var isEmpty: Bool {
-        reviewStatus == .all && minRating == nil &&
+        reviewStatus == .all && minRating == nil && minActorRating == nil &&
         selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
         selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
     }
@@ -154,6 +157,14 @@ extension AssetFilterCriteria {
                 if !selectedActorCountries.isSubset(of: allCountriesInVideo) { return false }
             } else {
                 if selectedActorCountries.isDisjoint(with: allCountriesInVideo) { return false }
+            }
+        }
+
+        // At least one featured actor rated at or above the bar. A video with
+        // no rated actors (or no profiled actors at all) doesn't qualify.
+        if let minActorRating {
+            guard assetActorProfiles.contains(where: { ($0.rating ?? 0) >= minActorRating }) else {
+                return false
             }
         }
 

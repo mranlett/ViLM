@@ -6,6 +6,7 @@
 // tags/AKAs are unioned; photos are additive and deduplicated by content hash.
 
 import Foundation
+import GRDB
 
 /// A single photo file bundled with an actor library export. `sourceToken` is
 /// the original `galleryUrls` entry (or `photoUrl`) this photo corresponds to
@@ -158,7 +159,19 @@ extension LibraryStore {
     /// untouched.
     @discardableResult
     public func applyActorMerge(_ export: ActorLibraryExport) throws -> ActorMergeResult {
-        let existingProfiles = Dictionary(uniqueKeysWithValues: try fetchAllEntityProfiles().map { ($0.id, $0) })
+        try performInTransaction { db in
+            try applyActorMerge(export, in: db)
+        }
+    }
+
+    /// Transaction-scoped variant, for callers composing the actor merge into
+    /// a larger atomic operation (the full-library restore-merge). Photo file
+    /// writes happen inline — they're additive and content-addressed, so
+    /// orphans from a rolled-back transaction are harmless and get rewritten
+    /// on retry.
+    @discardableResult
+    func applyActorMerge(_ export: ActorLibraryExport, in db: Database) throws -> ActorMergeResult {
+        let existingProfiles = Dictionary(uniqueKeysWithValues: try fetchAllEntityProfiles(in: db).map { ($0.id, $0) })
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
         let photosByActor = Dictionary(grouping: export.photos, by: \.actorId)
@@ -216,12 +229,13 @@ extension LibraryStore {
                 hairColor: MergeSemantics.coalesce(imported.hairColor, existing?.hairColor),
                 birthYear: imported.birthYear ?? existing?.birthYear,
                 countryOfOrigin: MergeSemantics.coalesce(imported.countryOfOrigin, existing?.countryOfOrigin),
+                rating: imported.rating ?? existing?.rating,
                 tags: MergeSemantics.union(imported.tags, existing?.tags ?? []),
                 galleryUrls: mergedGalleryUrls,
                 akas: MergeSemantics.union(imported.akas, existing?.akas ?? []),
                 createdAt: existing?.createdAt ?? imported.createdAt
             )
-            try saveEntityProfile(merged)
+            try saveEntityProfile(merged, in: db)
 
             if existing == nil { newActorCount += 1 } else { updatedActorCount += 1 }
         }

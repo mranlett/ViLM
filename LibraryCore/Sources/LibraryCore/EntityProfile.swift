@@ -16,6 +16,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public var hairColor: String?
     public var birthYear: Int?
     public var countryOfOrigin: String?
+    /// 1–5 star favorite rating (nil = unrated). Added in schema v15.
+    public var rating: Int?
     public var createdAt: Date?
     
     public var age: Int? {
@@ -31,7 +33,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date()) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date()) {
         self.id = id
         self.bio = bio
         self.photoUrl = photoUrl
@@ -40,6 +42,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.hairColor = hairColor
         self.birthYear = birthYear
         self.countryOfOrigin = countryOfOrigin
+        self.rating = rating
         self.tags = tags
         self.galleryUrls = galleryUrls
         self.akas = akas
@@ -55,6 +58,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case hairColor = "hair_color"
         case birthYear = "birth_year"
         case countryOfOrigin = "country_of_origin"
+        case rating
         case tags
         case galleryUrls = "gallery_urls"
         case akas
@@ -71,6 +75,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.hairColor = try container.decodeIfPresent(String.self, forKey: .hairColor)
         self.birthYear = try container.decodeIfPresent(Int.self, forKey: .birthYear)
         self.countryOfOrigin = try container.decodeIfPresent(String.self, forKey: .countryOfOrigin)
+        self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
         
         var decodedTags: [String] = []
@@ -113,6 +118,7 @@ extension EntityProfile {
         container["hair_color"] = hairColor
         container["birth_year"] = birthYear
         container["country_of_origin"] = countryOfOrigin
+        container["rating"] = rating
         container["created_at"] = createdAt
         
         if let data = try? JSONEncoder().encode(tags),

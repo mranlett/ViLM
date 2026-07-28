@@ -207,6 +207,12 @@ struct ActorGridView: View {
                 actorProfiles["actor:\(actor)"]?.birthYear == nil
             }
         }
+
+        if let minRating = filterCriteria.minRating {
+            result = result.filter { actor in
+                (actorProfiles["actor:\(actor)"]?.rating ?? 0) >= minRating
+            }
+        }
         
         if !filterCriteria.selectedTags.isEmpty {
             result = result.filter { actor in
@@ -259,6 +265,11 @@ struct ActorGridView: View {
                 let dateA = actorProfiles["actor:\(a)"]?.createdAt ?? Date.distantPast
                 let dateB = actorProfiles["actor:\(b)"]?.createdAt ?? Date.distantPast
                 if dateA != dateB { return factor == 1 ? dateA < dateB : dateA > dateB }
+                return factor == 1 ? a < b : a > b
+            case .rating:
+                let ratingA = actorProfiles["actor:\(a)"]?.rating ?? 0
+                let ratingB = actorProfiles["actor:\(b)"]?.rating ?? 0
+                if ratingA != ratingB { return factor == 1 ? ratingA < ratingB : ratingA > ratingB }
                 return factor == 1 ? a < b : a > b
             }
         }
@@ -593,7 +604,7 @@ struct ActorGridView: View {
     // MARK: - CSV Logic
     
     private func exportCSV() {
-        var csvString = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin\n"
+        var csvString = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating\n"
         for actor in allUniqueActors {
             let profile = actorProfiles["actor:\(actor)"]
             let name = escapeCSV(actor)
@@ -606,8 +617,9 @@ struct ActorGridView: View {
             // CSV can't reliably carry flag emoji, so export the country name
             // only; import re-adds the flag.
             let country = escapeCSV(CountryFlagHelper.strippedOfFlag(profile?.countryOfOrigin ?? ""))
+            let rating = escapeCSV(profile?.rating.map { String($0) } ?? "")
             
-            csvString.append("\(name),\(bio),\(photoUrl),\(homePage),\(gender),\(hairColor),\(birthYear),\(country)\n")
+            csvString.append("\(name),\(bio),\(photoUrl),\(homePage),\(gender),\(hairColor),\(birthYear),\(country),\(rating)\n")
         }
         csvDocument = CSVDocument(text: csvString)
         isShowingExportPicker = true
@@ -663,7 +675,12 @@ struct ActorGridView: View {
                         // once — so a blank cell must leave the existing value
                         // alone, and tags/gallery photos/AKAs (which this CSV
                         // format doesn't even represent) must always survive.
-                        let existing = try? store.fetchEntityProfile(for: entityId)
+                        // A THROWING fetch must abort the import (outer catch →
+                        // toast) — `try?` here conflated "fetch failed" with "no
+                        // profile", and the full-row save below then wiped the
+                        // actor's tags/photos/AKAs (DEFECT_INVENTORY C3, the
+                        // third instance of this bug class).
+                        let existing = try store.fetchEntityProfile(for: entityId)
 
                         func cell(_ index: Int) -> String? {
                             guard index < columns.count, !columns[index].isEmpty else { return nil }
@@ -680,6 +697,7 @@ struct ActorGridView: View {
                             birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
                             // Re-attach the flag emoji the export stripped out.
                             countryOfOrigin: cell(7).map { CountryFlagHelper.withFlag($0) } ?? existing?.countryOfOrigin,
+                            rating: cell(8).flatMap(Int.init) ?? existing?.rating,
                             tags: existing?.tags ?? [],
                             galleryUrls: existing?.galleryUrls ?? [],
                             akas: existing?.akas ?? [],

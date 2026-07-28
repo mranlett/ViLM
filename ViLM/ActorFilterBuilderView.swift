@@ -48,6 +48,23 @@ struct ActorFilterBuilderView: View {
                     Toggle("Missing Photos Only", isOn: $criteria.showMissingPhotosOnly)
                     Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
                 }
+
+                Section("Minimum Rating") {
+                    HStack(spacing: 6) {
+                        ForEach(1...5, id: \.self) { star in
+                            Image(systemName: star <= (criteria.minRating ?? 0) ? "star.fill" : "star")
+                                .foregroundColor(.yellow)
+                                .onTapGesture {
+                                    // Tap the current minimum again to clear it.
+                                    criteria.minRating = (criteria.minRating == star) ? nil : star
+                                }
+                                .accessibilityLabel("\(star) star\(star == 1 ? "" : "s") minimum")
+                        }
+                        Spacer()
+                        Text(criteria.minRating.map { "\($0)+ stars" } ?? "Any")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
                 
                 DisclosureGroup("Gender", isExpanded: $isGendersExpanded) {
                     multiSelectionSection(

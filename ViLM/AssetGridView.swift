@@ -90,6 +90,8 @@ struct AssetsGridView: View {
     @State private var displayedAssets: [Asset] = []
     // Seasons the user has collapsed in the grouped series view (nil season = Int.min).
     @State private var collapsedSeasons: Set<Int> = []
+    // A–Z letter strip over display titles ("#" = non-letter starts).
+    @State private var alphaFilter: Character? = nil
 
     // Bundles the cheap-to-compare filter inputs for a single onChange.
     private struct FilterInputs: Equatable {
@@ -98,6 +100,7 @@ struct AssetsGridView: View {
         let filterCriteria: AssetFilterCriteria
         let sortOption: SortOption
         let sortAscending: Bool
+        let alphaFilter: Character?
     }
 
     private var filterInputs: FilterInputs {
@@ -106,7 +109,8 @@ struct AssetsGridView: View {
             searchText: debouncedSearchText,
             filterCriteria: filterCriteria,
             sortOption: sortOption,
-            sortAscending: sortAscending
+            sortAscending: sortAscending,
+            alphaFilter: alphaFilter
         )
     }
 
@@ -170,6 +174,18 @@ struct AssetsGridView: View {
 
             if !matchesSearch(asset, query: debouncedSearchText) {
                 return false
+            }
+
+            // A–Z strip: first letter of the display title; "#" catches
+            // titles that don't start with a letter.
+            if let letter = alphaFilter {
+                let first = (asset.videoName ?? asset.fileName)
+                    .trimmingCharacters(in: .whitespaces).first
+                if letter == "#" {
+                    if first?.isLetter == true { return false }
+                } else {
+                    guard let first, String(first).uppercased() == String(letter) else { return false }
+                }
             }
 
             return true
@@ -266,6 +282,14 @@ struct AssetsGridView: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
                     .padding(.top, 12)
+                }
+
+                // A–Z jump strip for the video grid (hidden while viewing the
+                // actors result mode — it filters by video title).
+                if !(isFiltered && resultViewMode == .actors) {
+                    AlphaPickerView(filter: $alphaFilter)
+                        .padding(.horizontal)
+                        .padding(.top, 10)
                 }
 
                 if isFiltered && resultViewMode == .actors {
@@ -375,6 +399,8 @@ struct AssetsGridView: View {
             }
         }
         .onChange(of: sidebarSelection) { _, newSelection in
+            // The letter strip is scoped to the current browsing context.
+            alphaFilter = nil
             if let first = newSelection.first {
                 switch first {
                 case .actor(let name):

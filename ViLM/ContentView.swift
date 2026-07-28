@@ -962,7 +962,13 @@ struct ContentView: View {
 
             Task {
                 do {
-                    try await scanner.scan(at: url)
+                    // The scan holds its own claim on the library's security
+                    // scope: switching libraries mid-scan revokes the session
+                    // scope (beginSecurityScope), which used to cut off file
+                    // access under this loop (DEFECT_INVENTORY H5).
+                    try await ScopedOperation.run(holding: [url]) {
+                        try await scanner.scan(at: url)
+                    }
                     let initialAssets = try store.fetchAllAssets()
 
                     await MainActor.run {
@@ -998,30 +1004,35 @@ struct ContentView: View {
 
                     // Generate images in background task to not block UI updates.
                     Task {
-                        // Refreshing the grid after every single thumbnail
-                        // thrashes the UI on large imports. Coalesce to at most
-                        // one refresh every ~1.5s; the per-thumbnail views pick
-                        // up newly-generated files on each refresh tick.
-                        var lastRefresh = Date.distantPast
-                        let refreshInterval: TimeInterval = 1.5
+                        // This long-running loop holds its own scope claim too
+                        // (H5, same as the scan above) — it can still be
+                        // generating thumbnails minutes after a library switch.
+                        await ScopedOperation.run(holding: [url]) {
+                            // Refreshing the grid after every single thumbnail
+                            // thrashes the UI on large imports. Coalesce to at most
+                            // one refresh every ~1.5s; the per-thumbnail views pick
+                            // up newly-generated files on each refresh tick.
+                            var lastRefresh = Date.distantPast
+                            let refreshInterval: TimeInterval = 1.5
 
-                        for asset in initialAssets {
-                            try? await service.generateContactSheet(for: asset, libraryURL: url)
-                            try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
+                            for asset in initialAssets {
+                                try? await service.generateContactSheet(for: asset, libraryURL: url)
+                                try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
 
-                            if Date().timeIntervalSince(lastRefresh) >= refreshInterval {
-                                lastRefresh = Date()
-                                await MainActor.run {
-                                    self.gridRefreshID = UUID()
+                                if Date().timeIntervalSince(lastRefresh) >= refreshInterval {
+                                    lastRefresh = Date()
+                                    await MainActor.run {
+                                        self.gridRefreshID = UUID()
+                                    }
                                 }
                             }
-                        }
 
-                        // FINAL REFRESH: ensures the UI sees the new files on disk
-                        let finalAssets = (try? store.fetchAllAssets()) ?? initialAssets
-                        await MainActor.run {
-                            self.assets = finalAssets
-                            self.gridRefreshID = UUID()
+                            // FINAL REFRESH: ensures the UI sees the new files on disk
+                            let finalAssets = (try? store.fetchAllAssets()) ?? initialAssets
+                            await MainActor.run {
+                                self.assets = finalAssets
+                                self.gridRefreshID = UUID()
+                            }
                         }
                     }
                 } catch {

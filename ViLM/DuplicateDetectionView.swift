@@ -310,6 +310,12 @@ struct DuplicateDetectionView: View {
                     if let cached = cache.validHashes(
                         relativePath: asset.relativePath, sizeBytes: m.sizeBytes, modified: m.modified) {
                         fingerprints[id] = cached
+                        // Light progress so a resumed scan visibly races
+                        // through the already-fingerprinted videos.
+                        if processed % 25 == 0 || processed == totalCandidates {
+                            let progress = "Checking cached fingerprints (\(processed) of \(totalCandidates))…"
+                            await MainActor.run { scanProgress = progress }
+                        }
                         continue
                     }
                     let progress = "Fingerprinting videos (\(processed) of \(totalCandidates))…"
@@ -319,9 +325,14 @@ struct DuplicateDetectionView: View {
                     fingerprints[id] = hashes
                     cache.setHashes(hashes, relativePath: asset.relativePath,
                                     sizeBytes: m.sizeBytes, modified: m.modified)
+                    // Persist after EVERY new fingerprint: each one costs
+                    // seconds of frame decoding, the save costs milliseconds —
+                    // so a scan interrupted at video 600 of 1300 resumes from
+                    // 600 instead of starting over.
+                    cache.save()
                 }
             }
-            // Persist for the next scan (regenerable cache; prune dead paths).
+            // Final save prunes entries for deleted/renamed videos.
             cache.save(keepingPaths: Set(assetList.map(\.relativePath)))
 
             await MainActor.run { scanProgress = "Comparing fingerprints…" }

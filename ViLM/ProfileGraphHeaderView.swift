@@ -179,6 +179,17 @@ struct ProfileGraphHeaderView: View {
                             Text(bio).font(.body)
                         }
                         
+                        if let rating = profile.rating, rating > 0 {
+                            HStack(spacing: 2) {
+                                ForEach(1...5, id: \.self) { star in
+                                    Image(systemName: star <= rating ? "star.fill" : "star")
+                                        .font(.caption)
+                                        .foregroundColor(.yellow)
+                                }
+                            }
+                            .accessibilityLabel("Rated \(rating) of 5 stars")
+                        }
+
                         let metadataStrings: [String] = [
                             profile.gender.map { "Gender: \($0)" },
                             profile.hairColor.map { "Hair Color: \($0)" },

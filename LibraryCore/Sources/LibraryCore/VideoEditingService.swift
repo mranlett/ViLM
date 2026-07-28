@@ -178,8 +178,31 @@ public struct VideoEditingService {
         markerWork?(store)
         await ContactSheetService(store: store).regenerateAllVisuals(for: asset, libraryURL: libraryURL)
 
+        // The file's bytes changed, so its duplicate-scan fingerprint is
+        // stale — refresh it now (a few seconds on top of a re-encode)
+        // rather than leaving the invalidated entry for the next scan.
+        await Self.refreshFingerprint(relativePath: asset.relativePath, in: libraryURL)
+
         // Clean up the working directory so no in-progress copies linger.
         try? FileManager.default.removeItem(
             at: libraryURL.appendingPathComponent(".catalog/editing", isDirectory: true))
+    }
+
+    /// Re-fingerprints a video whose bytes just changed, replacing (or, when
+    /// the file can't be read, clearing) its cache entry so the duplicate scan
+    /// never sees a stale print and the next scan doesn't re-decode. Best
+    /// effort — the cache is regenerable.
+    static func refreshFingerprint(relativePath: String, in libraryURL: URL) async {
+        let url = libraryURL.appendingPathComponent(relativePath)
+        var prints = FrameFingerprintStore(libraryURL: libraryURL)
+        let hashes = await VideoDuplicateAnalyzer.intervalFingerprint(videoURL: url)
+        if hashes.isEmpty {
+            prints.removeEntry(relativePath: relativePath)
+        } else if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let size = attrs[.size] as? Int64 {
+            let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            prints.setHashes(hashes, relativePath: relativePath, sizeBytes: size, modified: mtime)
+        }
+        prints.save()
     }
 }

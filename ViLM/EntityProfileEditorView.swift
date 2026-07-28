@@ -42,6 +42,7 @@ struct EntityProfileEditorView: View {
     @State private var hairColor: String = ""
     @State private var birthYearString: String = ""
     @State private var countryOfOrigin: String = ""
+    @State private var rating: Int = 0
     
     @State private var tags: [String] = []
     @State private var akas: [String] = []
@@ -99,6 +100,7 @@ struct EntityProfileEditorView: View {
             }
         }
         _countryOfOrigin = State(initialValue: initialCountry)
+        _rating = State(initialValue: profile?.rating ?? 0)
         _tags = State(initialValue: profile?.tags ?? [])
         _akas = State(initialValue: profile?.akas ?? [])
         
@@ -278,7 +280,23 @@ struct EntityProfileEditorView: View {
                                 countryOfOrigin = "\(newValue.trimmingCharacters(in: .whitespaces)) \(flag)"
                             }
                         }
-                    
+
+                    // Favorite rating — same star control as videos; tapping
+                    // the current rating clears it.
+                    HStack(spacing: 6) {
+                        Text("Rating:").font(.subheadline).foregroundColor(.secondary)
+                        ForEach(1...5, id: \.self) { star in
+                            Image(systemName: star <= rating ? "star.fill" : "star")
+                                .foregroundColor(.yellow)
+                                .onTapGesture {
+                                    rating = (rating == star) ? 0 : star
+                                }
+                                .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
+                        }
+                        Spacer()
+                    }
+                    .accessibilityElement(children: .contain)
+
                     Text("Bio")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -404,6 +422,7 @@ struct EntityProfileEditorView: View {
                             hairColor: hairColor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : hairColor,
                             birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
                             countryOfOrigin: finalCountry.isEmpty ? nil : finalCountry,
+                            rating: rating == 0 ? nil : rating,
                             tags: tags,
                             galleryUrls: galleryUrls,
                             akas: akas
@@ -604,6 +623,12 @@ struct EntityProfileEditorView: View {
         }
 
         let fileURL = profilesDir.appendingPathComponent(fileName)
+
+        // Download-once contract: a photo already cached on disk is never
+        // re-fetched. Without this, every Save re-downloaded the primary and
+        // the entire gallery — hitting the network (and any now-broken hosts)
+        // just for editing an unrelated field like the rating.
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
         Task.detached {
             do {

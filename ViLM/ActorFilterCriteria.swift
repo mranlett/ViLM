@@ -8,7 +8,7 @@ import Foundation
 struct ActorFilterCriteria: Equatable, Codable {
     enum Logic: String, CaseIterable, Equatable, Codable { case and = "AND", or = "OR" }
 
-    enum SortOption: String, CaseIterable, Codable { case name = "Name", age = "Age", videoCount = "Video Count", dateAdded = "Date Added" }
+    enum SortOption: String, CaseIterable, Codable { case name = "Name", age = "Age", videoCount = "Video Count", dateAdded = "Date Added", rating = "Rating" }
 
     var showMissingPhotosOnly: Bool = false
     var showMissingGenderOnly: Bool = false
@@ -26,6 +26,9 @@ struct ActorFilterCriteria: Equatable, Codable {
     var matchEmptyCountry: Bool = false
     var matchEmptyBirthYear: Bool = false
 
+    // Minimum favorite rating (nil = any).
+    var minRating: Int? = nil
+
     var tagsLogic: Logic = .and
     var selectedTags: Set<String> = []
 
@@ -40,7 +43,7 @@ struct ActorFilterCriteria: Equatable, Codable {
     var isEmpty: Bool {
         !showMissingPhotosOnly && !showMissingGenderOnly && !showNeedingAttentionOnly &&
         selectedGenders.isEmpty && hairColor.isEmpty && country.isEmpty &&
-        !matchEmptyHairColor && !matchEmptyCountry && !matchEmptyBirthYear &&
+        !matchEmptyHairColor && !matchEmptyCountry && !matchEmptyBirthYear && minRating == nil &&
         selectedTags.isEmpty && minVideos == nil && maxVideos == nil && minAge == nil && maxAge == nil
     }
 
@@ -50,6 +53,7 @@ struct ActorFilterCriteria: Equatable, Codable {
         case showMissingPhotosOnly, showMissingGenderOnly, showNeedingAttentionOnly
         case selectedGenders, hairColor, country
         case matchEmptyHairColor, matchEmptyCountry, matchEmptyBirthYear
+        case minRating
         case tagsLogic, selectedTags
         case minVideos, maxVideos, minAge, maxAge
         case sortBy, sortDescending
@@ -70,6 +74,7 @@ struct ActorFilterCriteria: Equatable, Codable {
         matchEmptyHairColor = try c.decodeIfPresent(Bool.self, forKey: .matchEmptyHairColor) ?? false
         matchEmptyCountry = try c.decodeIfPresent(Bool.self, forKey: .matchEmptyCountry) ?? false
         matchEmptyBirthYear = try c.decodeIfPresent(Bool.self, forKey: .matchEmptyBirthYear) ?? false
+        minRating = try c.decodeIfPresent(Int.self, forKey: .minRating)
         tagsLogic = try c.decodeIfPresent(Logic.self, forKey: .tagsLogic) ?? .and
         selectedTags = try c.decodeIfPresent(Set<String>.self, forKey: .selectedTags) ?? []
         minVideos = try c.decodeIfPresent(Int.self, forKey: .minVideos)

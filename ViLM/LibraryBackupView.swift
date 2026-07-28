@@ -98,6 +98,11 @@ struct LibraryBackupView: View {
             }
             .onDisappear { releaseScopes() }
         }
+        // A swipe-dismiss mid-operation shouldn't be possible at all; and if
+        // the view *is* torn down some other way, each operation holds its own
+        // security-scope claims (ScopedOperation), so releasing ours above
+        // can't cut off in-flight file access (DEFECT_INVENTORY H5).
+        .interactiveDismissDisabled(isBuilding || isRestoring)
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 460)
         #endif
@@ -148,7 +153,9 @@ struct LibraryBackupView: View {
         isBuilding = true
         let url = openLibraryURL
         do {
-            let result = try await Task.detached(priority: .userInitiated) { try LibraryBackupService().exportBackup(of: url) }.value
+            let result = try await ScopedOperation.run(holding: [url]) {
+                try await Task.detached(priority: .userInitiated) { try LibraryBackupService().exportBackup(of: url) }.value
+            }
             await MainActor.run { archiveURL = result.archiveURL; isBuilding = false; isShowingSaveSheet = true }
         } catch {
             await MainActor.run { isBuilding = false; errorMessage = "Couldn't create the backup: \(error.localizedDescription)" }
@@ -200,9 +207,11 @@ struct LibraryBackupView: View {
     private func restoreIntoEmpty(archive: URL, target: URL) async {
         isRestoring = true; restoreStatus = "Restoring…"
         do {
-            try await Task.detached(priority: .userInitiated) {
-                try LibraryBackupService().restoreIntoEmpty(archiveURL: archive, targetLibraryURL: target)
-            }.value
+            try await ScopedOperation.run(holding: [archive, target]) {
+                try await Task.detached(priority: .userInitiated) {
+                    try LibraryBackupService().restoreIntoEmpty(archiveURL: archive, targetLibraryURL: target)
+                }.value
+            }
             await MainActor.run { isRestoring = false; restoredURL = target }
         } catch {
             await MainActor.run { isRestoring = false; errorMessage = "Restore failed: \(error.localizedDescription)" }
@@ -214,9 +223,11 @@ struct LibraryBackupView: View {
     private func planMerge(archive: URL, target: URL) async {
         isRestoring = true; restoreStatus = "Analyzing backup…"
         do {
-            let plan = try await Task.detached(priority: .userInitiated) {
-                try LibraryBackupService().planRestore(archiveURL: archive, destinationLibraryURL: target)
-            }.value
+            let plan = try await ScopedOperation.run(holding: [archive, target]) {
+                try await Task.detached(priority: .userInitiated) {
+                    try LibraryBackupService().planRestore(archiveURL: archive, destinationLibraryURL: target)
+                }.value
+            }
             await MainActor.run { isRestoring = false; mergeTarget = target; mergePlan = plan; discardIDs = [] }
         } catch {
             await MainActor.run { isRestoring = false; errorMessage = "Couldn't analyze the backup: \(error.localizedDescription)" }
@@ -266,10 +277,12 @@ struct LibraryBackupView: View {
         isRestoring = true; restoreStatus = "Merging…"
         let discards = discardIDs
         do {
-            try await Task.detached(priority: .userInitiated) {
-                _ = try LibraryBackupService().applyRestoreOverExisting(
-                    archiveURL: archive, destinationLibraryURL: target, discardAssetIDs: discards)
-            }.value
+            try await ScopedOperation.run(holding: [archive, target]) {
+                try await Task.detached(priority: .userInitiated) {
+                    _ = try LibraryBackupService().applyRestoreOverExisting(
+                        archiveURL: archive, destinationLibraryURL: target, discardAssetIDs: discards)
+                }.value
+            }
             await MainActor.run { isRestoring = false; mergePlan = nil; restoredURL = target }
         } catch {
             await MainActor.run { isRestoring = false; errorMessage = "Merge failed: \(error.localizedDescription)" }

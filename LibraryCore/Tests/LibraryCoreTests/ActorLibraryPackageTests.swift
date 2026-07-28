@@ -222,6 +222,27 @@ final class ActorLibraryPackageTests: XCTestCase {
         XCTAssertTrue(saved.galleryUrls.contains(importedToken), "the imported primary should still be added to the gallery")
     }
 
+    func testRatingPersistsAndMergesNonDestructively() throws {
+        // Round-trip through the v15 column.
+        try store.saveEntityProfile(EntityProfile(id: "actor:Jane Doe", rating: 4))
+        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Jane Doe")?.rating, 4)
+
+        // Merge: a nil imported rating keeps the destination's…
+        let keepExport = ActorLibraryExport(formatVersion: 1, exportedAt: Date(), profiles: [
+            EntityProfile(id: "actor:Jane Doe", rating: nil)
+        ], photos: [])
+        try store.applyActorMerge(keepExport)
+        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Jane Doe")?.rating, 4,
+                       "nil source rating must not wipe the destination's")
+
+        // …and a real imported rating wins the conflict.
+        let winExport = ActorLibraryExport(formatVersion: 1, exportedAt: Date(), profiles: [
+            EntityProfile(id: "actor:Jane Doe", rating: 5)
+        ], photos: [])
+        try store.applyActorMerge(winExport)
+        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Jane Doe")?.rating, 5)
+    }
+
     func testApplyLeavesUnmatchedActorsUntouched() throws {
         try store.saveEntityProfile(EntityProfile(id: "actor:Only In Destination", bio: "untouched"))
 
