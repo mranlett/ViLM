@@ -1,7 +1,12 @@
 // DuplicateDetectionView.swift
-// Settings tool: groups videos by exact file size (confirmed by duration) to
-// find likely duplicates, and deletes user-selected copies from disk and the
-// library.
+// Settings tool: finds duplicate videos in the open library in two tiers —
+// exact copies (same byte size + duration) and *visual matches* (same content
+// in a different encode: near-identical duration confirmed by perceptual
+// frame hashes, via VideoDuplicateAnalyzer). Each copy shows size, resolution,
+// bitrate, and duration with "Largest" / "Highest res" badges so it's obvious
+// at a glance which file is worth keeping. Deletion goes through
+// VideoTransferService.deleteVideoAndArtifacts (file-first ordering, Trash,
+// full artifact cleanup).
 
 import SwiftUI
 import LibraryCore
@@ -14,22 +19,40 @@ struct DuplicateDetectionView: View {
     let assets: [Asset]
     let onRefresh: () -> Void
 
-    struct DuplicateGroup: Identifiable, Sendable {
+    enum Confidence {
+        case exactCopy      // byte-identical size + duration
+        case visualMatch    // different encode, same content, same length
+        case overlapMatch   // same content, different length (trimmed copy)
+    }
+
+    struct FileMeta: Sendable {
+        var sizeBytes: Int64 = 0
+        var durationSeconds: Double?
+        var modified: TimeInterval = 0
+        var width: Int = 0
+        var height: Int = 0
+        var bitrateMbps: Double?
+    }
+
+    struct DuplicateGroup: Identifiable {
         let id = UUID()
-        let sizeBytes: Int64
-        let durationSeconds: Double?
+        let confidence: Confidence
         var items: [Asset]
+        /// For overlap groups: where the shorter copy's content starts in the
+        /// longer one (e.g. "matches from 0:30 in the longer file").
+        var note: String?
     }
 
     @State private var groups: [DuplicateGroup] = []
+    @State private var meta: [Asset.ID: FileMeta] = [:]
     @State private var isScanning = true
+    @State private var scanProgress = ""
     @State private var selectedForRemoval: Set<Asset.ID> = []
     @State private var isDeleting = false
     @State private var showDeleteConfirm = false
     @State private var errorMessage: String? = nil
 
     private var duplicateCount: Int {
-        // Total files that are copies (every group member beyond the first).
         groups.reduce(0) { $0 + max(0, $1.items.count - 1) }
     }
 
@@ -65,7 +88,7 @@ struct DuplicateDetectionView: View {
                         Task { await deleteSelected() }
                     }
                 } message: {
-                    Text("This permanently deletes \(selectedForRemoval.count) video file(s) from disk and removes them from the library. This cannot be undone.")
+                    Text("This moves \(selectedForRemoval.count) video file(s) to the Trash and removes them from the library.")
                 }
                 .alert("Error", isPresented: Binding(
                     get: { errorMessage != nil },
@@ -77,19 +100,29 @@ struct DuplicateDetectionView: View {
                 }
                 .task { await scan() }
         }
-        .frame(minWidth: 500, minHeight: 400)
+        // Size the window on macOS only — on iPhone a fixed minWidth forces
+        // the sheet wider than the screen, clipping content and the toolbar
+        // buttons (same class as the move-page overflow fix).
+        #if os(macOS)
+        .frame(minWidth: 560, minHeight: 420)
+        #endif
     }
 
     @ViewBuilder
     private var content: some View {
         if isScanning {
-            ProgressView("Scanning for duplicates…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 10) {
+                ProgressView(scanProgress.isEmpty ? "Scanning for duplicates…" : scanProgress)
+                Text("Exact copies are matched by size; look-alike encodes are confirmed by comparing sampled frames, which can take a moment.")
+                    .font(.caption).foregroundColor(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 32)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if groups.isEmpty {
             ContentUnavailableView(
                 "No Duplicates Found",
                 systemImage: "checkmark.seal",
-                description: Text("No videos share the same file size and duration.")
+                description: Text("No videos are byte-identical or visually match another video of the same length.")
             )
         } else {
             List {
@@ -101,7 +134,7 @@ struct DuplicateDetectionView: View {
                 ForEach(groups) { group in
                     Section(header: groupHeader(group)) {
                         ForEach(group.items) { asset in
-                            row(for: asset)
+                            row(for: asset, in: group)
                         }
                     }
                 }
@@ -110,10 +143,22 @@ struct DuplicateDetectionView: View {
     }
 
     private func groupHeader(_ group: DuplicateGroup) -> some View {
-        HStack {
-            Text(byteString(group.sizeBytes))
-            if let duration = group.durationSeconds {
-                Text("· \(durationString(duration))")
+        HStack(spacing: 6) {
+            switch group.confidence {
+            case .exactCopy:
+                Label("Exact copies", systemImage: "equal.circle.fill")
+                    .foregroundColor(.green)
+            case .visualMatch:
+                Label("Same content, different quality", systemImage: "sparkles.rectangle.stack")
+                    .foregroundColor(.orange)
+            case .overlapMatch:
+                Label("Overlapping content (trimmed?)", systemImage: "scissors")
+                    .foregroundColor(.purple)
+            }
+            if let note = group.note {
+                Text("· \(note)")
+            } else if let duration = group.items.first.flatMap({ meta[$0.id]?.durationSeconds }) {
+                Text("· \(Self.durationString(duration))")
             }
             Spacer()
             Text("\(group.items.count) copies")
@@ -121,15 +166,29 @@ struct DuplicateDetectionView: View {
         .font(.caption)
     }
 
-    private func row(for asset: Asset) -> some View {
-        HStack(spacing: 12) {
+    private func row(for asset: Asset, in group: DuplicateGroup) -> some View {
+        let m = meta[asset.id] ?? FileMeta()
+        let isLargest = group.items.count > 1
+            && m.sizeBytes == group.items.compactMap({ meta[$0.id]?.sizeBytes }).max()
+        let isHighestRes = group.items.count > 1 && m.width * m.height > 0
+            && m.width * m.height == group.items.compactMap({ meta[$0.id].map { $0.width * $0.height } }).max()
+
+        return HStack(spacing: 12) {
             Image(systemName: selectedForRemoval.contains(asset.id) ? "checkmark.circle.fill" : "circle")
                 .foregroundColor(selectedForRemoval.contains(asset.id) ? .red : .secondary)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(asset.fileName)
-                    .font(.callout)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(asset.fileName)
+                        .font(.callout)
+                        .lineLimit(1)
+                    if isHighestRes { qualityBadge("Highest res", color: .blue) }
+                    if isLargest { qualityBadge("Largest", color: .purple) }
+                }
+                // The at-a-glance comparison line: size · resolution · bitrate · duration.
+                Text(metaLine(m))
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(.secondary)
                 Text(asset.relativePath)
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -139,6 +198,22 @@ struct DuplicateDetectionView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { toggleSelection(asset.id) }
+    }
+
+    private func qualityBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.bold())
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.15)))
+            .foregroundColor(color)
+    }
+
+    private func metaLine(_ m: FileMeta) -> String {
+        var parts: [String] = [byteString(m.sizeBytes)]
+        if m.width > 0, m.height > 0 { parts.append("\(m.width)×\(m.height)") }
+        if let mbps = m.bitrateMbps { parts.append(String(format: "%.1f Mbps", mbps)) }
+        if let duration = m.durationSeconds { parts.append(Self.durationString(duration)) }
+        return parts.joined(separator: " · ")
     }
 
     private func toggleSelection(_ id: Asset.ID) {
@@ -152,94 +227,196 @@ struct DuplicateDetectionView: View {
     // MARK: - Scanning
 
     private func scan() async {
-        await MainActor.run { isScanning = true }
+        await MainActor.run { isScanning = true; scanProgress = "Reading video info…" }
         let lib = libraryURL
         let assetList = assets
 
-        let result = await Task.detached(priority: .userInitiated) { () -> [DuplicateGroup] in
-            // 1. Group by exact byte size (fast; from filesystem attributes).
-            var bySize: [Int64: [Asset]] = [:]
-            for asset in assetList {
+        let (resultGroups, resultMeta) = await Task.detached(priority: .userInitiated) { () -> ([DuplicateGroup], [Asset.ID: FileMeta]) in
+            // Phase 1: metadata for every video (size from the filesystem;
+            // duration/resolution from the container; bitrate estimated as
+            // size ÷ duration — the whole-file rate, which is what matters
+            // for comparing copies).
+            var meta: [Asset.ID: FileMeta] = [:]
+            for (index, asset) in assetList.enumerated() {
+                if index % 25 == 0 {
+                    let progress = "Reading video info (\(index + 1) of \(assetList.count))…"
+                    await MainActor.run { scanProgress = progress }
+                }
                 let url = lib.appendingPathComponent(asset.relativePath)
                 guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
                       let size = attrs[.size] as? Int64, size > 0 else { continue }
-                bySize[size, default: []].append(asset)
+                var m = FileMeta(sizeBytes: size)
+                m.modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                let avAsset = AVURLAsset(url: url)
+                if let duration = try? await avAsset.load(.duration).seconds, duration.isFinite, duration > 0 {
+                    m.durationSeconds = duration
+                    m.bitrateMbps = Double(size) * 8 / duration / 1_000_000
+                }
+                if let track = try? await avAsset.loadTracks(withMediaType: .video).first,
+                   let naturalSize = try? await track.load(.naturalSize),
+                   let transform = try? await track.load(.preferredTransform) {
+                    let rendered = CGRect(origin: .zero, size: naturalSize).applying(transform)
+                    m.width = Int(abs(rendered.width).rounded())
+                    m.height = Int(abs(rendered.height).rounded())
+                }
+                meta[asset.id] = m
+            }
+            let byID = Dictionary(uniqueKeysWithValues: assetList.map { ($0.id, $0) })
+
+            // Phase 2 — Tier 1: exact copies (same byte size, confirmed by
+            // rounded duration when known).
+            var groups: [DuplicateGroup] = []
+            var inExactGroup = Set<Asset.ID>()
+            var bySize: [Int64: [Asset]] = [:]
+            for asset in assetList {
+                guard let m = meta[asset.id] else { continue }
+                bySize[m.sizeBytes, default: []].append(asset)
+            }
+            for (_, candidates) in bySize where candidates.count > 1 {
+                var byDuration: [Int: [Asset]] = [:]
+                for asset in candidates {
+                    let key = meta[asset.id]?.durationSeconds.map { Int($0.rounded()) } ?? -1
+                    byDuration[key, default: []].append(asset)
+                }
+                for (_, sameDuration) in byDuration where sameDuration.count > 1 {
+                    groups.append(DuplicateGroup(confidence: .exactCopy, items: sameDuration))
+                    sameDuration.forEach { inExactGroup.insert($0.id) }
+                }
             }
 
-            // 2. For each size collision, confirm by duration (avoids the rare
-            //    case of two different videos with identical byte counts).
-            var groups: [DuplicateGroup] = []
-            for (size, candidates) in bySize where candidates.count > 1 {
-                var byDuration: [Int: [Asset]] = [:]
-                var unknownDuration: [Asset] = []
-                for asset in candidates {
-                    let url = lib.appendingPathComponent(asset.relativePath)
-                    if let duration = await Self.loadDuration(url), duration > 0 {
-                        byDuration[Int(duration.rounded()), default: []].append(asset)
-                    } else {
-                        unknownDuration.append(asset)
+            // Phase 3 — Tiers 2+3: one alignment engine for both re-encodes and
+            // trimmed copies. Every non-exact video within trim range of a
+            // neighbor gets a time-grid fingerprint (from the on-disk cache
+            // when its size+mtime are unchanged); two videos match when their
+            // hash sequences align at some offset — offset 0 with equal
+            // lengths is a re-encode, anything else is a trimmed/overlapping
+            // copy, labeled with where the shorter starts in the longer.
+            let windowInput: [(id: UUID, seconds: Double)] = assetList.compactMap { asset in
+                guard !inExactGroup.contains(asset.id),
+                      let seconds = meta[asset.id]?.durationSeconds else { return nil }
+                return (asset.id, seconds)
+            }
+            let windows = VideoDuplicateAnalyzer.durationWindows(
+                windowInput, tolerance: VideoDuplicateAnalyzer.maxTrimSeconds)
+
+            var cache = FrameFingerprintStore(libraryURL: lib)
+            var fingerprints: [Asset.ID: [UInt64]] = [:]
+            let totalCandidates = windows.reduce(0) { $0 + $1.count }
+            var processed = 0
+            for window in windows {
+                for id in window {
+                    processed += 1
+                    guard let asset = byID[id], let m = meta[id] else { continue }
+                    if let cached = cache.validHashes(
+                        relativePath: asset.relativePath, sizeBytes: m.sizeBytes, modified: m.modified) {
+                        fingerprints[id] = cached
+                        continue
                     }
-                }
-                for (seconds, group) in byDuration where group.count > 1 {
-                    groups.append(DuplicateGroup(sizeBytes: size, durationSeconds: Double(seconds), items: group))
-                }
-                // Same size but duration couldn't be read — still likely dupes.
-                if unknownDuration.count > 1 {
-                    groups.append(DuplicateGroup(sizeBytes: size, durationSeconds: nil, items: unknownDuration))
+                    let progress = "Fingerprinting videos (\(processed) of \(totalCandidates))…"
+                    await MainActor.run { scanProgress = progress }
+                    let hashes = await VideoDuplicateAnalyzer.intervalFingerprint(
+                        videoURL: lib.appendingPathComponent(asset.relativePath))
+                    fingerprints[id] = hashes
+                    cache.setHashes(hashes, relativePath: asset.relativePath,
+                                    sizeBytes: m.sizeBytes, modified: m.modified)
                 }
             }
-            return groups.sorted { $0.sizeBytes > $1.sizeBytes }
+            // Persist for the next scan (regenerable cache; prune dead paths).
+            cache.save(keepingPaths: Set(assetList.map(\.relativePath)))
+
+            await MainActor.run { scanProgress = "Comparing fingerprints…" }
+            var matchedPairs: [(UUID, UUID)] = []
+            var pairAlignments: [Set<UUID>: VideoDuplicateAnalyzer.AlignmentMatch] = [:]
+            for window in windows {
+                for i in 0..<window.count {
+                    for j in (i + 1)..<window.count {
+                        let idA = window[i], idB = window[j]
+                        guard let dA = meta[idA]?.durationSeconds, let dB = meta[idB]?.durationSeconds,
+                              abs(dA - dB) <= VideoDuplicateAnalyzer.maxTrimSeconds,
+                              let a = fingerprints[idA], let b = fingerprints[idB],
+                              let alignment = VideoDuplicateAnalyzer.bestAlignment(a, b) else { continue }
+                        matchedPairs.append((idA, idB))
+                        pairAlignments[Set([idA, idB])] = alignment
+                    }
+                }
+            }
+            for component in VideoDuplicateAnalyzer.groupMatchedPairs(matchedPairs) {
+                let items = component.compactMap { byID[$0] }
+                guard items.count > 1 else { continue }
+                let durations = items.compactMap { meta[$0.id]?.durationSeconds }
+                let sameLength = (durations.max() ?? 0) - (durations.min() ?? 0) <= 2.0
+                var note: String?
+                if !sameLength, items.count == 2,
+                   let alignment = pairAlignments[Set(items.map(\.id))], alignment.offsetSeconds > 0 {
+                    note = "shorter copy starts \(Self.durationString(alignment.offsetSeconds)) into the longer"
+                }
+                groups.append(DuplicateGroup(
+                    confidence: sameLength ? .visualMatch : .overlapMatch,
+                    items: items, note: note))
+            }
+
+            // Exact copies first, then visual matches, biggest files first.
+            let sorted = groups.sorted { lhs, rhs in
+                let lExact = lhs.confidence == .exactCopy, rExact = rhs.confidence == .exactCopy
+                if lExact != rExact { return lExact }
+                let lSize = lhs.items.compactMap { meta[$0.id]?.sizeBytes }.max() ?? 0
+                let rSize = rhs.items.compactMap { meta[$0.id]?.sizeBytes }.max() ?? 0
+                return lSize > rSize
+            }
+            return (sorted, meta)
         }.value
 
         await MainActor.run {
-            self.groups = result
+            self.groups = resultGroups
+            self.meta = resultMeta
             self.selectedForRemoval = []
             self.isScanning = false
         }
-    }
-
-    private static func loadDuration(_ url: URL) async -> Double? {
-        let asset = AVURLAsset(url: url)
-        guard let duration = try? await asset.load(.duration) else { return nil }
-        let seconds = CMTimeGetSeconds(duration)
-        return seconds.isFinite ? seconds : nil
     }
 
     // MARK: - Deletion
 
     private func deleteSelected() async {
         await MainActor.run { isDeleting = true }
-        let deleted = selectedForRemoval
-        do {
-            let store = try LibraryStore(at: libraryURL)
-            let fileManager = FileManager.default
-            for id in deleted {
-                guard let asset = assets.first(where: { $0.id == id }) else { continue }
-                let url = libraryURL.appendingPathComponent(asset.relativePath)
-                if fileManager.fileExists(atPath: url.path) {
-                    try? fileManager.removeItem(at: url)
+        let toDelete = selectedForRemoval
+        let lib = libraryURL
+        let assetList = assets
+
+        // Route through the shared delete (file-first ordering: a failed file
+        // removal aborts that video with its metadata intact; artifacts and
+        // marker previews are cleaned up; the file goes to the Trash).
+        let (deleted, failures) = await Task.detached(priority: .userInitiated) { () -> (Set<Asset.ID>, [String]) in
+            let service = VideoTransferService()
+            var deleted = Set<Asset.ID>()
+            var failures: [String] = []
+            for id in toDelete {
+                guard let asset = assetList.first(where: { $0.id == id }) else { continue }
+                do {
+                    try service.deleteVideoAndArtifacts(asset, in: lib, toTrash: true)
+                    deleted.insert(id)
+                } catch {
+                    failures.append("\(asset.fileName): \(error.localizedDescription)")
                 }
-                try store.deleteAsset(asset)
             }
-            await MainActor.run {
-                // Prune deleted items in place; groups that drop below two
-                // remaining copies are no longer duplicates.
-                groups = groups.compactMap { group in
-                    let remaining = group.items.filter { !deleted.contains($0.id) }
-                    guard remaining.count > 1 else { return nil }
-                    var updated = group
-                    updated.items = remaining
-                    return updated
-                }
-                selectedForRemoval.removeAll()
-                isDeleting = false
-                onRefresh()
+            return (deleted, failures)
+        }.value
+
+        await MainActor.run {
+            // Prune deleted items in place; groups that drop below two
+            // remaining copies are no longer duplicates.
+            groups = groups.compactMap { group in
+                let remaining = group.items.filter { !deleted.contains($0.id) }
+                guard remaining.count > 1 else { return nil }
+                var updated = group
+                updated.items = remaining
+                return updated
             }
-        } catch {
-            await MainActor.run {
-                isDeleting = false
-                errorMessage = "Failed to delete: \(error.localizedDescription)"
+            selectedForRemoval.removeAll()
+            isDeleting = false
+            if !failures.isEmpty {
+                errorMessage = "\(failures.count) couldn't be deleted (kept in the library):\n" + failures.prefix(5).joined(separator: "\n")
             }
+            onRefresh()
         }
     }
 
@@ -249,7 +426,9 @@ struct DuplicateDetectionView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func durationString(_ seconds: Double) -> String {
+    // Static + nonisolated so the background scan closure can format the
+    // overlap-offset note without touching main-actor state.
+    nonisolated private static func durationString(_ seconds: Double) -> String {
         let total = Int(seconds.rounded())
         let h = total / 3600
         let m = (total % 3600) / 60

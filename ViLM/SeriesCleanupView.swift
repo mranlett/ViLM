@@ -63,7 +63,9 @@ struct SeriesCleanupView: View {
                 }
                 .onAppear(perform: computeGroups)
         }
+        #if os(macOS)
         .frame(minWidth: 500, minHeight: 400)
+        #endif
     }
 
     @ViewBuilder

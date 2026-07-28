@@ -91,6 +91,8 @@ struct HelpView: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 420, minHeight: 480)
+        #endif
     }
 }

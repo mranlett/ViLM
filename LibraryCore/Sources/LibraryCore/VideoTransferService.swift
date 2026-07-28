@@ -1,9 +1,13 @@
 // VideoTransferService.swift
-// Moves videos (file + full metadata + scene markers + regenerated
-// thumbnails) between two libraries, and finds byte-identical duplicates
-// across them. Every destructive step is ordered copy -> verify-by-hash ->
-// write metadata -> only then delete the source, so an interrupted or failed
-// transfer never loses the original.
+// Moves videos between two libraries and finds byte-identical duplicates
+// across them. A move carries the video's whole package: file + full metadata
+// + scene markers + cached visuals (poster/contact sheet/marker previews are
+// copied, preserving a custom-chosen poster) + its duplicate-scan
+// fingerprint. Actors are the deliberate exception: their profiles/photos are
+// COPIED (both libraries keep them — an actor only leaves a library when the
+// user explicitly deletes it). Every destructive step is ordered copy ->
+// verify-by-hash -> write metadata -> only then delete the source, so an
+// interrupted or failed transfer never loses the original.
 
 import Foundation
 import AVFoundation
@@ -188,6 +192,12 @@ public final class VideoTransferService {
             throw VideoTransferError.sourceFileMissing
         }
 
+        // Captured up front so the duplicate-scan fingerprint can be carried
+        // to the destination after the move (its cache is keyed by size+mtime).
+        let sourceAttrs = try? fm.attributesOfItem(atPath: sourceVideoURL.path)
+        let sourceSize = sourceAttrs?[.size] as? Int64
+        let sourceMtime = (sourceAttrs?[.modificationDate] as? Date)?.timeIntervalSince1970
+
         let sourceHash = try contentHash(of: sourceVideoURL)
 
         // A non-colliding relative path in the destination (don't overwrite an
@@ -246,9 +256,27 @@ public final class VideoTransferService {
             let destinationStore = try LibraryStore(at: destinationLibrary)
             try destinationStore.insertAsset(newAsset)
 
-            // Scene markers -> new ids referencing the new asset, with
-            // regenerated preview thumbnails.
+            // Cached visuals travel WITH the video (they're part of its
+            // package): copy the existing poster, contact sheet, and marker
+            // previews rather than regenerating — which also preserves a
+            // user-chosen "Set as Main Thumbnail" poster. Generation is only
+            // the fallback for a visual the source never had.
             let destinationSheets = ContactSheetService(store: destinationStore)
+            for subdir in ["thumbnails", "contactSheets", "markers"] {
+                try? fm.createDirectory(
+                    at: destinationLibrary.appendingPathComponent(".catalog/\(subdir)"),
+                    withIntermediateDirectories: true)
+            }
+            func carryVisual(_ subdir: String, from oldName: String, to newName: String) -> Bool {
+                let src = sourceLibrary.appendingPathComponent(".catalog/\(subdir)/\(oldName)")
+                let dst = destinationLibrary.appendingPathComponent(".catalog/\(subdir)/\(newName)")
+                guard fm.fileExists(atPath: src.path) else { return false }
+                try? fm.removeItem(at: dst)
+                return (try? fm.copyItem(at: src, to: dst)) != nil
+            }
+
+            // Scene markers -> new ids referencing the new asset; each
+            // preview image is copied across under its new marker id.
             let sourceStore = try LibraryStore(at: sourceLibrary)
             let markers = (try? sourceStore.fetchSceneMarkers(for: asset.id)) ?? []
             for marker in markers {
@@ -260,17 +288,41 @@ public final class VideoTransferService {
                     createdAt: marker.createdAt
                 )
                 try destinationStore.saveSceneMarker(newMarker)
-                try? await destinationSheets.generateMarkerThumbnail(
-                    for: newAsset,
-                    markerId: newMarker.id,
-                    timestampSeconds: newMarker.timestampSeconds,
-                    libraryURL: destinationLibrary
-                )
+                if !carryVisual("markers", from: "\(marker.id.uuidString).jpg", to: "\(newMarker.id.uuidString).jpg") {
+                    try? await destinationSheets.generateMarkerThumbnail(
+                        for: newAsset,
+                        markerId: newMarker.id,
+                        timestampSeconds: newMarker.timestampSeconds,
+                        libraryURL: destinationLibrary
+                    )
+                }
             }
 
-            // Poster thumbnail + contact sheet in the destination.
-            try? await destinationSheets.generateSingleThumbnail(for: newAsset, libraryURL: destinationLibrary)
-            try? await destinationSheets.generateContactSheet(for: newAsset, libraryURL: destinationLibrary)
+            // Poster thumbnail + contact sheet: copy, generate only if absent.
+            if !carryVisual("thumbnails", from: "\(asset.id.uuidString).jpg", to: "\(newAssetId.uuidString).jpg") {
+                try? await destinationSheets.generateSingleThumbnail(for: newAsset, libraryURL: destinationLibrary)
+            }
+            if !carryVisual("contactSheets", from: "\(asset.id.uuidString).jpg", to: "\(newAssetId.uuidString).jpg") {
+                try? await destinationSheets.generateContactSheet(for: newAsset, libraryURL: destinationLibrary)
+            }
+
+            // The duplicate-scan fingerprint travels too (re-keyed to the
+            // destination path and the copied file's own size/mtime), so the
+            // destination's next Find Duplicates scan doesn't re-decode this
+            // video. Best-effort — the cache is regenerable.
+            if let sourceSize, let sourceMtime {
+                let srcPrints = FrameFingerprintStore(libraryURL: sourceLibrary)
+                if let hashes = srcPrints.validHashes(
+                        relativePath: asset.relativePath, sizeBytes: sourceSize, modified: sourceMtime),
+                   let destAttrs = try? fm.attributesOfItem(atPath: destinationVideoURL.path),
+                   let destSize = destAttrs[.size] as? Int64 {
+                    let destMtime = (destAttrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                    var destPrints = FrameFingerprintStore(libraryURL: destinationLibrary)
+                    destPrints.setHashes(hashes, relativePath: destinationRelativePath,
+                                         sizeBytes: destSize, modified: destMtime)
+                    destPrints.save()
+                }
+            }
 
             // Bring this video's actors' profile data and photos across too, so
             // the destination's actor info is never stale relative to a moved
@@ -359,6 +411,11 @@ public final class VideoTransferService {
         let sheetURL = libraryURL.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg")
         try? fm.removeItem(at: thumbURL)
         try? fm.removeItem(at: sheetURL)
+        // The video's duplicate-scan fingerprint leaves with it (best-effort;
+        // a missed removal is only a dead cache entry, pruned on next scan).
+        var prints = FrameFingerprintStore(libraryURL: libraryURL)
+        prints.removeEntry(relativePath: asset.relativePath)
+        prints.save()
 
         // 3. The DB row last. If this throws after the file is gone, the row
         //    points at a missing file — Check for Changes flags it normally,

@@ -186,6 +186,76 @@ final class VideoTransferServiceTests: XCTestCase {
         XCTAssertTrue(try destStore.fetchAllAssets().isEmpty, "a failed move must leave no orphan row in the destination")
     }
 
+    // MARK: - The full package moves: cached visuals + fingerprint travel
+
+    func testMoveCarriesVisualsAndFingerprintAndClearsSource() async throws {
+        let sourceLib = tempDir.appendingPathComponent("pkgsrc", isDirectory: true)
+        let destLib = tempDir.appendingPathComponent("pkgdst", isDirectory: true)
+        for lib in [sourceLib, destLib] {
+            try FileManager.default.createDirectory(at: lib, withIntermediateDirectories: true)
+        }
+        let payload = Data((0..<60_000).map { UInt8($0 % 251) })
+        try payload.write(to: sourceLib.appendingPathComponent("clip.mp4"))
+
+        let sourceStore = try LibraryStore(at: sourceLib)
+        let asset = Asset(relativePath: "clip.mp4", fileName: "clip.mp4")
+        try sourceStore.insertAsset(asset)
+        let marker = SceneMarker(assetId: asset.id, timestampSeconds: 12, label: "scene")
+        try sourceStore.saveSceneMarker(marker)
+
+        // Source has cached visuals (incl. a custom poster) + a marker preview.
+        for subdir in ["thumbnails", "contactSheets", "markers"] {
+            try FileManager.default.createDirectory(
+                at: sourceLib.appendingPathComponent(".catalog/\(subdir)"), withIntermediateDirectories: true)
+        }
+        try Data([1, 1]).write(to: sourceLib.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg"))
+        try Data([2, 2]).write(to: sourceLib.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg"))
+        try Data([3, 3]).write(to: sourceLib.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg"))
+
+        // And a duplicate-scan fingerprint keyed to the real file attrs.
+        let attrs = try FileManager.default.attributesOfItem(atPath: sourceLib.appendingPathComponent("clip.mp4").path)
+        let srcSize = attrs[.size] as! Int64
+        let srcMtime = (attrs[.modificationDate] as! Date).timeIntervalSince1970
+        var srcPrints = FrameFingerprintStore(libraryURL: sourceLib)
+        srcPrints.setHashes([11, 22, 33], relativePath: "clip.mp4", sizeBytes: srcSize, modified: srcMtime)
+        srcPrints.save()
+
+        let outcome = try await VideoTransferService().moveVideo(asset, from: sourceLib, to: destLib)
+
+        // Destination: visuals arrived byte-identical under the NEW ids
+        // (copied, not regenerated — a dummy payload can't be re-generated from).
+        XCTAssertEqual(
+            try Data(contentsOf: destLib.appendingPathComponent(".catalog/thumbnails/\(outcome.newAssetId.uuidString).jpg")),
+            Data([1, 1]), "the poster is copied (preserving a custom thumbnail), not regenerated")
+        XCTAssertEqual(
+            try Data(contentsOf: destLib.appendingPathComponent(".catalog/contactSheets/\(outcome.newAssetId.uuidString).jpg")),
+            Data([2, 2]))
+        let destStore = try LibraryStore(at: destLib)
+        let destMarker = try XCTUnwrap(destStore.fetchSceneMarkers(for: outcome.newAssetId).first)
+        XCTAssertEqual(
+            try Data(contentsOf: destLib.appendingPathComponent(".catalog/markers/\(destMarker.id.uuidString).jpg")),
+            Data([3, 3]), "the marker preview travels under its new marker id")
+
+        // Destination: fingerprint carried, re-keyed to the new path + file attrs.
+        let destAttrs = try FileManager.default.attributesOfItem(
+            atPath: destLib.appendingPathComponent(outcome.destinationRelativePath).path)
+        let destPrints = FrameFingerprintStore(libraryURL: destLib)
+        XCTAssertEqual(
+            destPrints.validHashes(
+                relativePath: outcome.destinationRelativePath,
+                sizeBytes: destAttrs[.size] as! Int64,
+                modified: (destAttrs[.modificationDate] as! Date).timeIntervalSince1970),
+            [11, 22, 33], "the fingerprint travels with the video")
+
+        // Source: file, row, visuals, and fingerprint entry are all gone.
+        XCTAssertTrue(outcome.sourceRemoved)
+        XCTAssertTrue(try sourceStore.fetchAllAssets().isEmpty)
+        XCTAssertNil(FrameFingerprintStore(libraryURL: sourceLib).entries["clip.mp4"],
+                     "the source's fingerprint entry leaves with the video")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: sourceLib.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg").path))
+    }
+
     // MARK: - Delete ordering: file removal failure must never cost metadata
 
     func testFailedFileRemovalPreservesRowAndMarkers() throws {

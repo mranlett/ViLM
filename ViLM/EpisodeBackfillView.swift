@@ -62,7 +62,9 @@ struct EpisodeBackfillView: View {
                 } message: { Text(errorMessage ?? "") }
                 .onAppear(perform: computeRows)
         }
+        #if os(macOS)
         .frame(minWidth: 520, minHeight: 420)
+        #endif
     }
 
     @ViewBuilder

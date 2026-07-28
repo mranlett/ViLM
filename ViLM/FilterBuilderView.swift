@@ -222,7 +222,9 @@ struct FilterBuilderView: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 400, minHeight: 600)
+        #endif
     }
     
     private func filteredItems(_ items: [String], by filter: Character?) -> [String] {

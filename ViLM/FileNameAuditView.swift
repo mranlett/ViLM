@@ -103,7 +103,9 @@ struct FileNameAuditView: View {
                 Text(errorMessage ?? "")
             }
         }
+        #if os(macOS)
         .frame(minWidth: 500, minHeight: 400)
+        #endif
     }
     
     private func toggleSelection(_ id: Asset.ID) {
