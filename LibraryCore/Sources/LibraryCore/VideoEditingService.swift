@@ -65,18 +65,38 @@ public struct VideoEditingService {
         let working = try await export(avAsset, in: libraryURL, sourceExt: sourceURL.pathExtension,
                                        timeRange: range, videoComposition: nil)
         try await finalize(working: working, replacing: sourceURL, asset: asset, in: libraryURL) { store in
-            let markers = (try? store.fetchSceneMarkers(for: asset.id)) ?? []
-            let adjustment = Self.adjustMarkersForTrim(markers, keepStart: keepStart, keepEnd: keepEnd)
-            let sheets = ContactSheetService(store: store)
+            try Self.rebaseMarkers(for: asset, keepStart: keepStart, keepEnd: keepEnd,
+                                   store: store, libraryURL: libraryURL)
+        }
+    }
+
+    /// Rebases an asset's scene markers after a trim: kept markers shift to
+    /// the new timeline, cut-away markers are deleted (rows in ONE
+    /// transaction — a mid-rebase failure can't leave half the markers
+    /// pointing at the wrong moments, DEFECT_INVENTORY H1), and dropped
+    /// markers' preview thumbnails are removed from disk. Errors propagate:
+    /// the trimmed file is already in place by the time this runs, so the
+    /// user must be told the markers may be stale rather than failing silently.
+    static func rebaseMarkers(
+        for asset: Asset, keepStart: Double, keepEnd: Double,
+        store: LibraryStore, libraryURL: URL
+    ) throws {
+        let markers = try store.fetchSceneMarkers(for: asset.id)
+        let adjustment = Self.adjustMarkersForTrim(markers, keepStart: keepStart, keepEnd: keepEnd)
+        try store.performInTransaction { db in
             for marker in adjustment.dropped {
-                try? store.deleteSceneMarker(id: marker.id)
-                // The dropped marker's preview file must go too, or it lingers
-                // as an orphan on disk (rows are gone; files aren't cascaded).
-                sheets.deleteMarkerThumbnail(markerId: marker.id, libraryURL: libraryURL)
+                try store.deleteSceneMarker(id: marker.id, in: db)
             }
             for marker in adjustment.shifted {
-                try? store.saveSceneMarker(marker) // save == upsert (same id)
+                try store.saveSceneMarker(marker, in: db) // save == upsert (same id)
             }
+        }
+        // The dropped markers' preview files must go too, or they linger as
+        // orphans on disk (rows are gone; files aren't cascaded). File
+        // cleanup stays outside the transaction — it's best-effort by design.
+        let sheets = ContactSheetService(store: store)
+        for marker in adjustment.dropped {
+            sheets.deleteMarkerThumbnail(markerId: marker.id, libraryURL: libraryURL)
         }
     }
 
@@ -158,7 +178,7 @@ public struct VideoEditingService {
 
     private func finalize(
         working: URL, replacing sourceURL: URL, asset: Asset, in libraryURL: URL,
-        markerWork: ((LibraryStore) -> Void)?
+        markerWork: ((LibraryStore) throws -> Void)?
     ) async throws {
         // Verify the export is a playable, non-empty video before touching the
         // original — a bad export must never destroy the source.
@@ -174,8 +194,13 @@ public struct VideoEditingService {
         _ = try FileManager.default.replaceItemAt(sourceURL, withItemAt: working)
 
         // Apply marker changes, then rebuild the video's cached visuals.
+        // A marker failure propagates (the UI must report it — the file swap
+        // has already happened and can't be undone), but the visual rebuild
+        // and cleanup below still matter either way, hence no early exit
+        // structure: the throw happens after nothing else remains.
         let store = try LibraryStore(at: libraryURL)
-        markerWork?(store)
+        var markerError: Error?
+        do { try markerWork?(store) } catch { markerError = error }
         await ContactSheetService(store: store).regenerateAllVisuals(for: asset, libraryURL: libraryURL)
 
         // The file's bytes changed, so its duplicate-scan fingerprint is
@@ -186,6 +211,8 @@ public struct VideoEditingService {
         // Clean up the working directory so no in-progress copies linger.
         try? FileManager.default.removeItem(
             at: libraryURL.appendingPathComponent(".catalog/editing", isDirectory: true))
+
+        if let markerError { throw markerError }
     }
 
     /// Re-fingerprints a video whose bytes just changed, replacing (or, when

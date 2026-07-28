@@ -48,14 +48,36 @@ public struct LibraryBackupService {
             throw LibraryBackupError.catalogMissing
         }
 
-        // Merge the WAL into the main DB so the archived catalog.sqlite is
-        // complete and consistent on its own.
-        try? LibraryStore(at: libraryURL).checkpointWAL()
+        // Stage the catalog for archiving. The DATABASE goes through SQLite's
+        // online backup API (a consistent committed state even while
+        // background writes — thumbnail generation, imports — are in flight);
+        // it used to be file-copied raw alongside its WAL, a torn-copy risk,
+        // "mitigated" by a checkpoint whose failure was swallowed
+        // (DEFECT_INVENTORY H2). Errors here now propagate — no silent
+        // fallback to an unsafe copy. Image files are copied as files:
+        // they're written whole then never mutated, so a plain copy is safe.
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vilmbackup-staging-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        try LibraryStore(at: libraryURL)
+            .snapshotDatabase(to: staging.appendingPathComponent("catalog.sqlite"))
+
+        // Live DB sidecars are superseded by the snapshot; `editing/` holds
+        // transient in-progress edit copies that don't belong in a backup.
+        let excluded: Set<String> = ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm", "editing"]
+        for name in try FileManager.default.contentsOfDirectory(atPath: catalogURL.path)
+        where !excluded.contains(name) {
+            try FileManager.default.copyItem(
+                at: catalogURL.appendingPathComponent(name),
+                to: staging.appendingPathComponent(name))
+        }
 
         let archiveURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("vilmbackup-\(UUID().uuidString).vilmbackup")
         try? FileManager.default.removeItem(at: archiveURL)
-        try Self.compress(directoryContentsOf: catalogURL, to: archiveURL)
+        try Self.compress(directoryContentsOf: staging, to: archiveURL)
 
         // Post-write verification: a silently-corrupt backup would defeat the
         // whole purpose, so extract to scratch and re-open the database.
@@ -86,11 +108,22 @@ public struct LibraryBackupService {
         try Self.extract(archiveURL: archiveURL, into: scratchCatalog)
 
         // It must open (and migrate) cleanly — validated on the scratch copy,
-        // before anything touches the target. Evict afterwards so no cached
-        // connection points at the directory we're about to move.
-        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-        _ = try LibraryStore(at: scratch).fetchAllAssets()
-        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        // before anything touches the target. Checkpoint the WAL the
+        // validation opened (merging any migration writes into the main
+        // file), evict the scratch connection, and drop the now-redundant
+        // sidecars so they don't travel with the move — SQLite's close
+        // doesn't reliably unlink them. Targeted evictions only: sweeping
+        // the whole cache would disconnect the active library out from
+        // under in-flight work (H6). The target path is evicted too, in
+        // case an earlier library lived at the same folder.
+        let validationStore = try LibraryStore(at: scratch)
+        _ = try validationStore.fetchAllAssets()
+        try validationStore.checkpointWAL()
+        LibraryStore.evictCachedConnection(forLibraryAt: scratch)
+        LibraryStore.evictCachedConnection(forLibraryAt: targetLibraryURL)
+        for sidecar in ["catalog.sqlite-wal", "catalog.sqlite-shm"] {
+            try? FileManager.default.removeItem(at: scratchCatalog.appendingPathComponent(sidecar))
+        }
 
         do {
             try FileManager.default.moveItem(at: scratchCatalog, to: targetCatalog)
@@ -126,7 +159,6 @@ public struct LibraryBackupService {
     /// decision.
     public func planRestore(archiveURL: URL, destinationLibraryURL: URL) throws -> LibraryRestorePlan {
         try withExtractedArchive(archiveURL) { archiveStore in
-            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
             let destStore = try LibraryStore(at: destinationLibraryURL)
             let archiveAssets = try archiveStore.fetchAllAssets()
             let destAssets = try destStore.fetchAllAssets()
@@ -157,7 +189,6 @@ public struct LibraryBackupService {
         archiveURL: URL, destinationLibraryURL: URL, discardAssetIDs: Set<UUID> = []
     ) throws -> LibraryRestoreResult {
         try withExtractedArchive(archiveURL) { archiveStore in
-            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
             let destStore = try LibraryStore(at: destinationLibraryURL)
 
             // Gather everything from the archive up front (reads on a separate
@@ -267,10 +298,13 @@ public struct LibraryBackupService {
         let scratchCatalog = scratch.appendingPathComponent(Self.catalogDirName, isDirectory: true)
         try FileManager.default.createDirectory(at: scratchCatalog, withIntermediateDirectories: true)
         try Self.extract(archiveURL: archiveURL, into: scratchCatalog)
-        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-        let result = try body(try LibraryStore(at: scratch))
-        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-        return result
+        // Evict only the scratch connection when done — declared after the
+        // removeItem defer above so it runs first (defers unwind LIFO), i.e.
+        // WAL handles close before the directory is deleted. Never sweep the
+        // whole cache here: the destination library keeps using its shared
+        // connection (DEFECT_INVENTORY H6).
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: scratch) }
+        return try body(try LibraryStore(at: scratch))
     }
 
     private static func copyMissingFiles(from sourceDir: URL, to destDir: URL) {
@@ -294,10 +328,12 @@ public struct LibraryBackupService {
         do {
             try FileManager.default.createDirectory(at: scratchCatalog, withIntermediateDirectories: true)
             try extract(archiveURL: archiveURL, into: scratchCatalog)
-            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-            let count = try LibraryStore(at: scratch).fetchAllAssets().count
-            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
-            return count
+            defer { LibraryStore.evictCachedConnection(forLibraryAt: scratch) }
+            let store = try LibraryStore(at: scratch)
+            // Structural corruption check, not just "the rows parse" — a
+            // backup must never verify green while carrying a damaged B-tree.
+            try store.runIntegrityCheck()
+            return try store.fetchAllAssets().count
         } catch {
             throw LibraryBackupError.verificationFailed
         }

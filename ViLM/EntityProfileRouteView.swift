@@ -33,7 +33,12 @@ struct EntityProfileRouteView: View {
 
         let item: SidebarItem
         switch category {
-        case "actor": item = .actor(name)
+        // An actor pill may carry an AKA ("Dahlia" for Bailey). Resolve to the
+        // canonical name HERE: the grid's AKA resolution lives in
+        // .onChange(of: sidebarSelection), which never fires for this pinned
+        // initial value — so an unresolved AKA would render a blank profile
+        // with no videos.
+        case "actor": item = .actor(akaMap[name] ?? name)
         case "studio": item = .studio(name)
         case "series": item = .series(name)
         default: item = .tag(name)

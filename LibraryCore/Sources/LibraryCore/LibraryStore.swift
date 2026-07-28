@@ -28,6 +28,13 @@ public class LibraryStore {
     /// `LibraryStore` instances keep their own reference to an evicted
     /// queue, so in-flight work is unaffected — the connection closes once
     /// the last such instance goes away.
+    ///
+    /// For anything narrower than a library *switch* (or test teardown), use
+    /// `evictCachedConnection(forLibraryAt:)` instead — sweeping the whole
+    /// cache mid-session lets the next store open a *second* connection to a
+    /// file that in-flight background work still writes through, restoring
+    /// the multi-connection "database is locked" contention the cache exists
+    /// to prevent (DEFECT_INVENTORY H6).
     public static func evictCachedConnections(keepingLibraryAt activeURL: URL?) {
         let keepPath = activeURL?
             .appendingPathComponent(".catalog")
@@ -35,6 +42,18 @@ public class LibraryStore {
         cacheLock.lock()
         defer { cacheLock.unlock() }
         queueCache = queueCache.filter { $0.key == keepPath }
+    }
+
+    /// Drops the cached connection for exactly one library. This is the
+    /// eviction backup/restore code should use: it targets the scratch
+    /// library it created (so WAL file handles close before the scratch
+    /// directory is deleted) without touching the active library's shared
+    /// connection.
+    public static func evictCachedConnection(forLibraryAt url: URL) {
+        let path = url.appendingPathComponent(".catalog").appendingPathComponent("catalog.sqlite").path
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        queueCache.removeValue(forKey: path)
     }
 
     public init(at url: URL) throws {
@@ -54,6 +73,11 @@ public class LibraryStore {
 
         let config: Configuration = {
             var c = Configuration()
+            // If a second connection to the same file does appear (an evicted
+            // queue still held by in-flight work while a new one opens),
+            // briefly wait out the other writer's lock instead of surfacing
+            // an immediate "database is locked" error (DEFECT_INVENTORY H6).
+            c.busyMode = .timeout(5)
             c.prepareDatabase { db in
                 // WAL improves write throughput (fewer fsyncs) and allows a
                 // read to proceed during a write. SQLite silently keeps the
@@ -224,6 +248,46 @@ public class LibraryStore {
         }
     }
 
+    /// Writes a consistent, self-contained snapshot of this library's database
+    /// to `destinationURL` using SQLite's online backup API — safe even while
+    /// concurrent writes are in flight (the engine copies a single committed
+    /// state), unlike file-copying a live `catalog.sqlite` + WAL, which can
+    /// tear (DEFECT_INVENTORY H2). The snapshot is integrity-checked before
+    /// returning, so a backup built from it can't silently archive corruption.
+    public func snapshotDatabase(to destinationURL: URL) throws {
+        try? FileManager.default.removeItem(at: destinationURL)
+        var destQueue: DatabaseQueue? = try DatabaseQueue(path: destinationURL.path)
+        try dbQueue.backup(to: destQueue!)
+        // The page-level copy carries the source's persistent WAL journal
+        // mode, which would leave live -wal/-shm sidecars next to the
+        // snapshot. Convert to DELETE mode (checkpoints the WAL into the main
+        // file), close the connection, then drop any sidecar files SQLite's
+        // close left behind — they're redundant after the conversion. Result:
+        // one truly self-contained file.
+        try destQueue!.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA journal_mode = DELETE")
+        }
+        try Self.runIntegrityCheck(on: destQueue!)
+        destQueue = nil
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: destinationURL.path + "-wal"))
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: destinationURL.path + "-shm"))
+    }
+
+    /// Runs `PRAGMA integrity_check` and throws unless SQLite reports "ok".
+    public func runIntegrityCheck() throws {
+        try Self.runIntegrityCheck(on: dbQueue)
+    }
+
+    private static func runIntegrityCheck(on queue: DatabaseQueue) throws {
+        let result = try queue.read { db in
+            try String.fetchOne(db, sql: "PRAGMA integrity_check")
+        }
+        guard result == "ok" else {
+            throw DatabaseError(resultCode: .SQLITE_CORRUPT,
+                                message: "integrity_check failed: \(result ?? "no result")")
+        }
+    }
+
     // MARK: - Transactions
 
     /// Runs `body` inside a single database transaction: every write in it
@@ -292,8 +356,12 @@ public class LibraryStore {
 
     public func deleteSceneMarker(id: SceneMarker.ID) throws {
         try dbQueue.write { db in
-            _ = try SceneMarker.deleteOne(db, key: id.uuidString)
+            try deleteSceneMarker(id: id, in: db)
         }
+    }
+
+    func deleteSceneMarker(id: SceneMarker.ID, in db: Database) throws {
+        _ = try SceneMarker.deleteOne(db, key: id.uuidString)
     }
     
     public func updateAsset(_ asset: Asset) throws {

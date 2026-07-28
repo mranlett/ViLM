@@ -181,6 +181,33 @@ final class LibraryBackupServiceTests: XCTestCase {
         XCTAssertEqual(Set(try LibraryStore(at: dst).fetchAllAssets().map(\.relativePath)), ["a.mp4"])
     }
 
+    func testBackupExcludesTransientEditingFilesButKeepsImages() throws {
+        // `.catalog/editing` holds in-progress edit copies (potentially GB of
+        // video) — transient by definition, so it must not be archived; the
+        // cached images must survive the round trip as before.
+        let src = try makeLibrary("src")
+        let store = try LibraryStore(at: src)
+        try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
+        let editing = src.appendingPathComponent(".catalog/editing")
+        try FileManager.default.createDirectory(at: editing, withIntermediateDirectories: true)
+        try Data([9, 9, 9]).write(to: editing.appendingPathComponent("edit-in-progress.mp4"))
+        let thumbs = src.appendingPathComponent(".catalog/thumbnails")
+        try FileManager.default.createDirectory(at: thumbs, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: thumbs.appendingPathComponent("poster.jpg"))
+
+        let result = try service.exportBackup(of: src)
+        let dst = try makeLibrary("dst")
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        try service.restoreIntoEmpty(archiveURL: result.archiveURL, targetLibraryURL: dst)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dst.appendingPathComponent(".catalog/editing").path),
+                       "transient editing files don't belong in a backup")
+        XCTAssertEqual(try Data(contentsOf: dst.appendingPathComponent(".catalog/thumbnails/poster.jpg")),
+                       Data([1, 2, 3]))
+        // And no live-DB sidecars were archived: the snapshot is standalone.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dst.appendingPathComponent(".catalog/catalog.sqlite-wal").path))
+    }
+
     func testMidMergeFailureRollsBackTheEntireMerge() throws {
         // Library at backup time: three assets, a marker on A, a collection,
         // and an actor — enough that a partial merge would be visible in every

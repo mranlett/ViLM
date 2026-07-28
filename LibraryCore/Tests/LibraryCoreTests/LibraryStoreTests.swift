@@ -141,6 +141,45 @@ final class LibraryStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: otherURL)
     }
 
+    func testTargetedEvictionOnlyDropsThatLibrary() throws {
+        let otherURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibraryStoreTests-other-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: otherURL) }
+        let otherStore = try LibraryStore(at: otherURL)
+        try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
+        try otherStore.saveAsset(Asset(relativePath: "b.mp4", fileName: "b.mp4"))
+
+        // Targeted eviction is non-destructive and scoped: the evicted
+        // library reopens fresh from disk; the other keeps working.
+        LibraryStore.evictCachedConnection(forLibraryAt: otherURL)
+        XCTAssertEqual(try LibraryStore(at: otherURL).fetchAllAssets().map(\.relativePath), ["b.mp4"])
+        XCTAssertEqual(try LibraryStore(at: libraryURL).fetchAllAssets().map(\.relativePath), ["a.mp4"])
+    }
+
+    func testSnapshotDatabaseIsConsistentAndIndependent() throws {
+        try store.saveAsset(Asset(relativePath: "a.mp4", fileName: "a.mp4"))
+        try store.saveEntityProfile(EntityProfile(id: "actor:Jane Doe", bio: "kept"))
+
+        // Snapshot into a second library-shaped folder, then open it as a
+        // normal library: content matches the source at snapshot time.
+        let snapLib = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibraryStoreTests-snap-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: snapLib) }
+        let snapCatalog = snapLib.appendingPathComponent(".catalog", isDirectory: true)
+        try FileManager.default.createDirectory(at: snapCatalog, withIntermediateDirectories: true)
+        try store.snapshotDatabase(to: snapCatalog.appendingPathComponent("catalog.sqlite"))
+
+        // A write to the source AFTER the snapshot must not appear in it.
+        try store.saveAsset(Asset(relativePath: "later.mp4", fileName: "later.mp4"))
+
+        let snapStore = try LibraryStore(at: snapLib)
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: snapLib) }
+        XCTAssertEqual(try snapStore.fetchAllAssets().map(\.relativePath), ["a.mp4"])
+        XCTAssertEqual(try snapStore.fetchEntityProfile(for: "actor:Jane Doe")?.bio, "kept")
+        try snapStore.runIntegrityCheck()
+    }
+
     // MARK: - Entity Profiles
 
     func testEntityProfileRoundTrip() throws {

@@ -51,4 +51,38 @@ final class VideoEditingServiceTests: XCTestCase {
         XCTAssertTrue(result.shifted.isEmpty)
         XCTAssertTrue(result.dropped.isEmpty)
     }
+
+    func testRebaseMarkersWritesRowsAndDeletesThumbnails() throws {
+        // The DB half of a trim, against a real store: kept markers' rows are
+        // shifted, cut-away markers' rows AND preview thumbnails are gone.
+        let lib = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VideoEditingTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: lib, withIntermediateDirectories: true)
+        defer {
+            LibraryStore.evictCachedConnection(forLibraryAt: lib)
+            try? FileManager.default.removeItem(at: lib)
+        }
+        let store = try LibraryStore(at: lib)
+        let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4")
+        try store.insertAsset(asset)
+        let dropped = SceneMarker(assetId: asset.id, timestampSeconds: 1, label: "cut away")
+        let kept = SceneMarker(assetId: asset.id, timestampSeconds: 8, label: "kept")
+        try store.saveSceneMarker(dropped)
+        try store.saveSceneMarker(kept)
+        // A preview thumbnail for the marker that will be dropped.
+        let sheets = ContactSheetService(store: store)
+        let droppedThumb = sheets.markerThumbnailURL(markerId: dropped.id, libraryURL: lib)
+        try FileManager.default.createDirectory(at: droppedThumb.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data([7]).write(to: droppedThumb)
+
+        try VideoEditingService.rebaseMarkers(
+            for: asset, keepStart: 5, keepEnd: 20, store: store, libraryURL: lib)
+
+        let after = try store.fetchSceneMarkers(for: asset.id)
+        XCTAssertEqual(after.map(\.id), [kept.id], "the cut-away marker's row is gone")
+        XCTAssertEqual(after.first?.timestampSeconds, 3, "the kept marker is rebased to the new timeline")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: droppedThumb.path),
+                       "the dropped marker's preview file is cleaned up")
+    }
 }
