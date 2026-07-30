@@ -494,6 +494,11 @@ struct AssetsGridView: View {
         .navigationTitle(sidebarSelectionTitle)
         .navigationSubtitle(isFiltered && resultViewMode == .actors ? "\(matchingActors.count) actors" : "\(displayedAssets.count) items")
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
+#if os(iOS)
+        // Scrolling the results collapses the keyboard (search text stays),
+        // so the toolbar and bottom bar are reachable mid-search.
+        .scrollDismissesKeyboard(.immediately)
+#endif
         .onAppear {
             debouncedSearchText = searchText
         }
@@ -565,11 +570,34 @@ struct AssetsGridView: View {
                     }
                 }
             }
-            if isEditMode && !selectedAssetIDs.isEmpty {
+            // The bar shows whenever selection mode is on (not only once
+            // something is selected): "Select All" is the search-to-batch-edit
+            // workflow — search for a name, select every result, add the
+            // actor to all of them in one batch edit. It must carry its OWN
+            // exit — the nav-bar Select/Done toggle is hidden while the
+            // search field is active, so without "Done" here, selection mode
+            // entered from a search was a trap with no way out.
+            if isEditMode {
                 ToolbarItem(placement: .bottomBar) {
-                    NavigationLink(value: AppRoute.assets(selectedAssetIDs)) {
-                        Text("Edit \(selectedAssetIDs.count) Selected")
-                            .font(.headline)
+                    HStack(spacing: 16) {
+                        Button("Done") {
+                            isEditMode = false
+                            selectedAssetIDs.removeAll()
+                        }
+                        .fontWeight(.semibold)
+                        let allSelected = !displayedAssets.isEmpty
+                            && selectedAssetIDs.count == displayedAssets.count
+                        Button(allSelected ? "Deselect All" : "Select All (\(displayedAssets.count))") {
+                            selectedAssetIDs = allSelected ? [] : Set(displayedAssets.map(\.id))
+                        }
+                        .disabled(displayedAssets.isEmpty)
+                        Spacer()
+                        if !selectedAssetIDs.isEmpty {
+                            NavigationLink(value: AppRoute.assets(selectedAssetIDs)) {
+                                Text("Edit \(selectedAssetIDs.count) Selected")
+                                    .font(.headline)
+                            }
+                        }
                     }
                 }
             }
@@ -817,6 +845,29 @@ struct AssetsGridView: View {
         ContentUnavailableView(title, systemImage: symbol)
     }
     
+#if os(iOS)
+    /// Long-press menu: the in-grid path into selection mode. This must exist
+    /// because the nav-bar "Select" button is HIDDEN while the search field is
+    /// active on iPhone — without it, "search, then batch-edit the results"
+    /// was impossible (cancelling search to reach the button clears the
+    /// results).
+    @ViewBuilder
+    private func selectionContextMenu(for asset: Asset) -> some View {
+        Button {
+            isEditMode = true
+            selectedAssetIDs.insert(asset.id)
+        } label: {
+            Label("Select", systemImage: "checkmark.circle")
+        }
+        Button {
+            isEditMode = true
+            selectedAssetIDs = Set(displayedAssets.map(\.id))
+        } label: {
+            Label("Select All \(displayedAssets.count) Shown", systemImage: "checklist.checked")
+        }
+    }
+#endif
+
     @ViewBuilder
     private func interactiveGridItem(for asset: Asset) -> some View {
 #if os(iOS)
@@ -836,6 +887,7 @@ struct AssetsGridView: View {
                 gridItem(for: asset)
             }
             .buttonStyle(.plain)
+            .contextMenu { selectionContextMenu(for: asset) }
         } else {
             NavigationLink(value: AppRoute.asset(asset.id, context: filteredAssetContext)) {
                 gridItem(for: asset)
@@ -844,6 +896,7 @@ struct AssetsGridView: View {
             .simultaneousGesture(TapGesture().onEnded {
                 selectedAssetIDs = [asset.id]
             })
+            .contextMenu { selectionContextMenu(for: asset) }
         }
 #else
         Button(action: {

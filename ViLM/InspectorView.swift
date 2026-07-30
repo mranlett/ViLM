@@ -357,7 +357,7 @@ struct SingleInspectorView: View {
                                 set: { newValue in
                                     var updatedAsset = asset
                                     updatedAsset.seasonNumber = Int(newValue.trimmingCharacters(in: .whitespaces))
-                                    if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                                    if let url = LibrarySession.shared.url(for: asset.id) { updateAsset(updatedAsset, at: url) }
                                 }
                             ))
                             .textFieldStyle(.roundedBorder)
@@ -373,7 +373,7 @@ struct SingleInspectorView: View {
                                 set: { newValue in
                                     var updatedAsset = asset
                                     updatedAsset.episodeNumber = Int(newValue.trimmingCharacters(in: .whitespaces))
-                                    if let url = libraryURL { updateAsset(updatedAsset, at: url) }
+                                    if let url = LibrarySession.shared.url(for: asset.id) { updateAsset(updatedAsset, at: url) }
                                 }
                             ))
                             .textFieldStyle(.roundedBorder)
@@ -406,7 +406,7 @@ struct SingleInspectorView: View {
                                 set: { newValue in
                                     var updatedAsset = asset
                                     updatedAsset.externalLink = newValue.isEmpty ? nil : newValue
-                                    if let url = libraryURL {
+                                    if let url = LibrarySession.shared.url(for: asset.id) {
                                         updateAsset(updatedAsset, at: url)
                                     }
                                 }
@@ -1160,7 +1160,7 @@ struct SingleInspectorView: View {
                             } else {
                                 updated.rating = star
                             }
-                            if let url = libraryURL { updateAsset(updated, at: url) }
+                            if let url = LibrarySession.shared.url(for: asset.id) { updateAsset(updated, at: url) }
                         }
                 }
             }
@@ -1197,7 +1197,7 @@ struct SingleInspectorView: View {
     }
 
     private func saveTag() {
-        guard !newTagValue.isEmpty, let url = libraryURL else { return }
+        guard !newTagValue.isEmpty, let url = LibrarySession.shared.url(for: asset.id) else { return }
         var updated = asset
         let normalizedValue = TagNormalizer.normalize(tagValue: newTagValue)
         let tagToSave = "\(activeCategory):\(normalizedValue)"
