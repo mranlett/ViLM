@@ -29,9 +29,10 @@ struct ActorInspectorView: View {
                             // The editor doesn't persist — that's the
                             // caller's job. Skipping this silently discards
                             // the user's edits.
-                            if let url = libraryURL {
+                            if libraryURL != nil {
                                 do {
-                                    let store = try LibraryStore(at: url)
+                                    // Writes land in the profile's OWNING library.
+                                    let store = try LibrarySession.shared.store(forProfile: profile.id)
                                     try store.saveEntityProfile(profile)
                                 } catch {
                                     print("Failed to save profile: \(error)")
@@ -86,8 +87,12 @@ struct ActorInspectorView: View {
         isLoading = true
         Task {
             do {
-                let store = try LibraryStore(at: url)
-                let profile = try store.fetchEntityProfile(for: "actor:\(selectedActors[0])")
+                // This pane IS the edit surface — load the owning library's
+                // raw copy, not the merged view (see ProfileGraphHeaderView).
+                _ = url
+                let entityId = "actor:\(selectedActors[0])"
+                let store = try LibrarySession.shared.store(forProfile: entityId)
+                let profile = try store.fetchEntityProfile(for: entityId)
                 await MainActor.run {
                     self.singleProfile = profile ?? EntityProfile(id: "actor:\(selectedActors[0])")
                     self.isLoading = false

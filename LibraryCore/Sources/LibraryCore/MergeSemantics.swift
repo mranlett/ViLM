@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum MergeSemantics {
+public enum MergeSemantics {
     /// Source wins when it has a real (non-whitespace) value; otherwise the
     /// destination's value is kept.
     static func coalesce(_ source: String?, _ destination: String?) -> String? {
@@ -23,6 +23,49 @@ enum MergeSemantics {
         var result = primary
         for item in secondary where !result.contains(item) { result.append(item) }
         return result
+    }
+
+    /// The multi-library session's read-only actor VIEW: an ordered fold over
+    /// each open library's profiles, primary first, then attachments in
+    /// precedence (attach) order. Field semantics match the real merge tools —
+    /// a higher-precedence real value wins a conflict, nil/empty never wipes,
+    /// tags/AKAs/galleries are unioned — but the result is DISPLAY ONLY and
+    /// must never be written back to any store: persisting the merged form
+    /// would copy one library's data into another, which is exactly what the
+    /// session promises not to do.
+    public static func mergedProfileView(ordered layers: [[String: EntityProfile]]) -> [String: EntityProfile] {
+        var merged: [String: EntityProfile] = [:]
+        for layer in layers {
+            for (id, profile) in layer {
+                if let higher = merged[id] {
+                    merged[id] = mergedProfileView(higher: higher, lower: profile)
+                } else {
+                    merged[id] = profile
+                }
+            }
+        }
+        return merged
+    }
+
+    /// One fold step: `higher` (higher precedence) wins real conflicts,
+    /// `lower` fills gaps, list fields union. `createdAt` takes the earliest
+    /// so "recently added actors" reflects first appearance anywhere.
+    static func mergedProfileView(higher: EntityProfile, lower: EntityProfile) -> EntityProfile {
+        EntityProfile(
+            id: higher.id,
+            bio: coalesce(higher.bio, lower.bio),
+            photoUrl: higher.photoUrl ?? lower.photoUrl,
+            homePage: coalesce(higher.homePage, lower.homePage),
+            gender: coalesce(higher.gender, lower.gender),
+            hairColor: coalesce(higher.hairColor, lower.hairColor),
+            birthYear: higher.birthYear ?? lower.birthYear,
+            countryOfOrigin: coalesce(higher.countryOfOrigin, lower.countryOfOrigin),
+            rating: higher.rating ?? lower.rating,
+            tags: union(higher.tags, lower.tags),
+            galleryUrls: union(higher.galleryUrls, lower.galleryUrls),
+            akas: union(higher.akas, lower.akas),
+            createdAt: [higher.createdAt, lower.createdAt].compactMap { $0 }.min()
+        )
     }
 
     /// Merges a video record from a backup archive (`source`) into the current

@@ -78,7 +78,7 @@ struct DetailGridView: View {
 
     var body: some View {
         Group {
-            if let url = libraryURL?.appendingPathComponent(asset.relativePath) {
+            if let url = LibrarySession.shared.videoURL(for: asset) {
                 let videoAsset = videoAsset(for: url)
 
                 VStack(spacing: 2) {
@@ -272,10 +272,11 @@ struct VideoThumbnailView: View {
 
     var body: some View {
         Group {
-            if let libraryURL {
-                // POINT TO THE SINGLE THUMBNAIL FOLDER
+            // Resolved per asset: in a federated session the thumbnail lives
+            // in whichever library owns the video.
+            if let imageURL = LibrarySession.shared.thumbnailURL(for: asset.id) {
                 AsyncThumbnailImage(
-                    imageURL: libraryURL.appendingPathComponent(".catalog/thumbnails/\(asset.id.uuidString).jpg"),
+                    imageURL: imageURL,
                     maxPixelSize: 700,
                     refreshToken: refreshToken
                 )
@@ -291,10 +292,9 @@ struct ContactSheetThumbnailView: View {
     var refreshToken: UUID? = nil
 
     var body: some View {
-        if let libraryURL {
-            // IMPORTANT: aligns with ContactSheetService output folder
+        if let imageURL = LibrarySession.shared.contactSheetURL(for: asset.id) {
             AsyncThumbnailImage(
-                imageURL: libraryURL.appendingPathComponent(".catalog/contactSheets/\(asset.id.uuidString).jpg"),
+                imageURL: imageURL,
                 maxPixelSize: 1100,
                 refreshToken: refreshToken
             )

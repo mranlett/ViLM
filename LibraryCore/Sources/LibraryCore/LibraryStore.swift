@@ -36,12 +36,19 @@ public class LibraryStore {
     /// the multi-connection "database is locked" contention the cache exists
     /// to prevent (DEFECT_INVENTORY H6).
     public static func evictCachedConnections(keepingLibraryAt activeURL: URL?) {
-        let keepPath = activeURL?
-            .appendingPathComponent(".catalog")
-            .appendingPathComponent("catalog.sqlite").path
+        evictCachedConnections(keeping: activeURL.map { [$0] } ?? [])
+    }
+
+    /// Set-based variant for the multi-library session: on a primary switch,
+    /// every library that remains OPEN (primary + attachments) keeps its
+    /// shared connection; everything else is dropped.
+    public static func evictCachedConnections(keeping activeURLs: Set<URL>) {
+        let keepPaths = Set(activeURLs.map {
+            $0.appendingPathComponent(".catalog").appendingPathComponent("catalog.sqlite").path
+        })
         cacheLock.lock()
         defer { cacheLock.unlock() }
-        queueCache = queueCache.filter { $0.key == keepPath }
+        queueCache = queueCache.filter { keepPaths.contains($0.key) }
     }
 
     /// Drops the cached connection for exactly one library. This is the

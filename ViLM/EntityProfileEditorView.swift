@@ -107,9 +107,12 @@ struct EntityProfileEditorView: View {
         var initialGallery = profile?.galleryUrls ?? []
         if let photo = profile?.photoUrl, !photo.isEmpty, !initialGallery.contains(photo) {
             initialGallery.insert(photo, at: 0)
-        } else if let libraryURL = libraryURL, (profile?.photoUrl ?? "").isEmpty {
+        } else if libraryURL != nil, (profile?.photoUrl ?? "").isEmpty {
             let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-            let fileURL = libraryURL.appendingPathComponent(".catalog/profiles").appendingPathComponent("\(safeId).jpg")
+            // The local-primary placeholder refers to the OWNING library's file.
+            let dir = LibrarySession.shared.profilesDir(forProfile: entityId)
+                ?? libraryURL!.appendingPathComponent(".catalog/profiles")
+            let fileURL = dir.appendingPathComponent("\(safeId).jpg")
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 if !initialGallery.contains("local://primary") {
                     initialGallery.insert("local://primary", at: 0)
@@ -134,6 +137,20 @@ struct EntityProfileEditorView: View {
 
     private var editorForm: some View {
             Form {
+                // Federated session: this form edits the OWNING library's
+                // copy only — say so when the actor also exists elsewhere,
+                // or edits look like they "didn't take" in the other library.
+                if let owner = LibrarySession.shared.url(forProfile: entityId),
+                   !LibrarySession.shared.otherLibraries(containingProfile: entityId).isEmpty {
+                    let others = LibrarySession.shared.otherLibraries(containingProfile: entityId)
+                    Section {
+                        Label(
+                            "This actor also exists in \(others.count) other open librar\(others.count == 1 ? "y" : "ies"). Edits here apply to “\(LibrarySession.shared.fullLabel(for: owner))” only.",
+                            systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
+                }
                 Section(header: Text("Photo Gallery").font(.headline)) {
                     HStack {
                         TextField("https://...", text: $newGalleryUrl)
@@ -450,13 +467,16 @@ struct EntityProfileEditorView: View {
             akaEntryPopover
         }
         .onAppear {
-            guard let url = libraryURL else { return }
+            guard libraryURL != nil else { return }
             do {
-                let store = try LibraryStore(at: url)
-                let profiles = try store.fetchAllEntityProfiles()
+                // Suggestion vocabularies span every open library.
+                var profiles: [EntityProfile] = []
+                for libURL in LibrarySession.shared.allURLs {
+                    profiles.append(contentsOf: try LibraryStore(at: libURL).fetchAllEntityProfiles())
+                }
                 let allTagsSet = Set(profiles.flatMap { $0.tags })
                 allUniqueTags = Array(allTagsSet).sorted()
-                
+
                 let gendersSet = Set(profiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
                 allUniqueGenders = Array(gendersSet).sorted()
             } catch {
@@ -569,7 +589,9 @@ struct EntityProfileEditorView: View {
               let idx = galleryUrls.firstIndex(of: ProfileImageNaming.localPrimaryToken),
               let libraryURL else { return }
 
-        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        // Photo files belong to the profile's OWNING library.
+        let profilesDir = LibrarySession.shared.profilesDir(forProfile: entityId)
+            ?? libraryURL.appendingPathComponent(".catalog/profiles")
         let primaryFile = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: entityId))
         guard let data = try? Data(contentsOf: primaryFile) else {
             // No file to preserve — just drop the now-meaningless placeholder.
@@ -611,7 +633,9 @@ struct EntityProfileEditorView: View {
         guard let url = URL(string: urlString), let libraryURL = libraryURL,
               url.scheme == "http" || url.scheme == "https" else { return }
         let safeId = entityId.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        // Downloads land in the profile's OWNING library.
+        let profilesDir = LibrarySession.shared.profilesDir(forProfile: entityId)
+            ?? libraryURL.appendingPathComponent(".catalog/profiles")
 
         let fileName: String
         if isGallery {

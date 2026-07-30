@@ -71,3 +71,46 @@ final class MergeSemanticsTests: XCTestCase {
         XCTAssertEqual(MergeSemantics.mergeAsset(source: src, into: dst).relativePath, "renamed.mp4")
     }
 }
+
+// MARK: - Merged profile VIEW (multi-library session, display-only fold)
+
+extension MergeSemanticsTests {
+    private func profile(_ id: String, bio: String? = nil, rating: Int? = nil,
+                         tags: [String] = [], akas: [String] = [], created: Date? = nil) -> EntityProfile {
+        EntityProfile(id: id, bio: bio, rating: rating, tags: tags, akas: akas, createdAt: created)
+    }
+
+    func testMergedViewHigherPrecedenceWinsConflictsAndFillsGaps() {
+        let primary = ["actor:jane": profile("actor:jane", bio: "main bio", tags: ["tag:a"], akas: ["dahlia"])]
+        let attached = ["actor:jane": profile("actor:jane", bio: "portable bio", rating: 4, tags: ["tag:b"], akas: ["dee"]),
+                        "actor:only-portable": profile("actor:only-portable", bio: "kept")]
+        let merged = MergeSemantics.mergedProfileView(ordered: [primary, attached])
+
+        let jane = merged["actor:jane"]
+        XCTAssertEqual(jane?.bio, "main bio", "higher precedence wins the conflict")
+        XCTAssertEqual(jane?.rating, 4, "lower precedence fills the gap")
+        XCTAssertEqual(Set(jane?.tags ?? []), ["tag:a", "tag:b"], "tags union")
+        XCTAssertEqual(Set(jane?.akas ?? []), ["dahlia", "dee"], "AKAs union")
+        XCTAssertEqual(merged["actor:only-portable"]?.bio, "kept", "attachment-only actors appear")
+    }
+
+    func testMergedViewFoldsThreeLibrariesInPrecedenceOrder() {
+        let a = ["actor:x": profile("actor:x", bio: nil)]
+        let b = ["actor:x": profile("actor:x", bio: "from b")]
+        let c = ["actor:x": profile("actor:x", bio: "from c", rating: 2)]
+        let merged = MergeSemantics.mergedProfileView(ordered: [a, b, c])
+        XCTAssertEqual(merged["actor:x"]?.bio, "from b", "first library with a real value wins")
+        XCTAssertEqual(merged["actor:x"]?.rating, 2)
+    }
+
+    func testMergedViewTakesEarliestCreatedAt() {
+        let older = Date(timeIntervalSince1970: 1000)
+        let newer = Date(timeIntervalSince1970: 2000)
+        let merged = MergeSemantics.mergedProfileView(ordered: [
+            ["actor:x": profile("actor:x", created: newer)],
+            ["actor:x": profile("actor:x", created: older)],
+        ])
+        XCTAssertEqual(merged["actor:x"]?.createdAt, older,
+                       "recently-added reflects first appearance anywhere")
+    }
+}

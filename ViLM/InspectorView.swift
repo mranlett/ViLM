@@ -182,6 +182,19 @@ struct SingleInspectorView: View {
                     .font(.headline)
                     .lineLimit(nil)
 
+                // Federated session: say which open library this video lives
+                // in — edits and deletes land there.
+                if LibrarySession.shared.isFederated,
+                   let owner = LibrarySession.shared.url(for: asset.id) {
+                    Text(LibrarySession.shared.shortLabel(for: owner))
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.teal.opacity(0.15)))
+                        .foregroundColor(.teal)
+                        .help(LibrarySession.shared.fullLabel(for: owner))
+                        .accessibilityLabel("In library \(LibrarySession.shared.fullLabel(for: owner))")
+                }
+
                 HStack {
                     Text("Metadata")
                         .font(.headline)
@@ -664,7 +677,7 @@ struct SingleInspectorView: View {
     }
 
     private func loadSceneMarkers() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         do {
             let store = try LibraryStore(at: url)
             sceneMarkers = try store.fetchSceneMarkers(for: asset.id)
@@ -674,7 +687,7 @@ struct SingleInspectorView: View {
     }
 
     private func addMarker(label: String, at timestampSeconds: Double) {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let marker = SceneMarker(assetId: asset.id, timestampSeconds: timestampSeconds, label: trimmed.isEmpty ? nil : trimmed)
         do {
@@ -699,7 +712,7 @@ struct SingleInspectorView: View {
     }
 
     private func renameMarker(_ marker: SceneMarker, to label: String) {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         var updated = marker
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.label = trimmed.isEmpty ? nil : trimmed
@@ -716,7 +729,7 @@ struct SingleInspectorView: View {
     }
 
     private func deleteMarker(_ marker: SceneMarker) {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         do {
             let store = try LibraryStore(at: url)
             try store.deleteSceneMarker(id: marker.id)
@@ -840,7 +853,7 @@ struct SingleInspectorView: View {
 
     #if os(macOS)
     private func loadDuration() {
-        guard let url = libraryURL?.appendingPathComponent(asset.relativePath) else { return }
+        guard let url = LibrarySession.shared.videoURL(for: asset) else { return }
         Task {
             let avAsset = AVURLAsset(url: url)
             if let dur = try? await avAsset.load(.duration) {
@@ -856,7 +869,7 @@ struct SingleInspectorView: View {
     }
 
     private func generatePreview() {
-        guard let url = libraryURL?.appendingPathComponent(asset.relativePath) else { return }
+        guard let url = LibrarySession.shared.videoURL(for: asset) else { return }
         Task {
             let avAsset = AVURLAsset(url: url)
             let generator = AVAssetImageGenerator(asset: avAsset)
@@ -874,7 +887,7 @@ struct SingleInspectorView: View {
     }
 
     private func saveNewThumbnailFromScrubTime() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         isSavingThumb = true
         Task {
             do {
@@ -903,7 +916,7 @@ struct SingleInspectorView: View {
     // MARK: - iOS/multi-platform generation actions
 
     private func regenerateDefaultThumbnail() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         isSavingThumb = true
         Task {
             do {
@@ -923,7 +936,7 @@ struct SingleInspectorView: View {
     }
 
     private func generateContactSheet() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         isGeneratingSheet = true
         Task {
             do {
@@ -1177,7 +1190,7 @@ struct SingleInspectorView: View {
     }
 
     private func toggleStatus() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         var updated = asset
         updated.status = (asset.status == .reviewed) ? .unreviewed : .reviewed
         updateAsset(updated, at: url)
@@ -1205,7 +1218,7 @@ struct SingleInspectorView: View {
     }
 
     private func deleteTag(category: String, value: String) {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         var updated = asset
         updated.tags.removeAll { $0 == "\(category):\(value)" }
         updateAsset(updated, at: url)
@@ -1218,7 +1231,7 @@ struct SingleInspectorView: View {
     }
 
     private func recordPlayIfNeeded() {
-        guard !hasRecordedPlayThisSession, let url = libraryURL else { return }
+        guard !hasRecordedPlayThisSession, let url = LibrarySession.shared.url(for: asset.id) else { return }
         hasRecordedPlayThisSession = true
         var updated = asset
         updated.playCount += 1
@@ -1227,7 +1240,7 @@ struct SingleInspectorView: View {
     }
 
     private func commitNotesDraft() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         let newNotes = notesDraft.isEmpty ? nil : notesDraft
         guard newNotes != asset.notes else { return }
         var updated = asset
@@ -1236,7 +1249,7 @@ struct SingleInspectorView: View {
     }
 
     private func commitSeriesNameDraft() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         let titleCased = TagNormalizer.titleCased(seriesNameDraft)
         // Reflect the normalized form back into the field so the user sees it.
         if seriesNameDraft != titleCased { seriesNameDraft = titleCased }
@@ -1248,7 +1261,7 @@ struct SingleInspectorView: View {
     }
 
     private func commitEpisodeTitleDraft() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         let titleCased = TagNormalizer.titleCased(episodeTitleDraft)
         // Reflect the normalized form back into the field so the user sees it.
         if episodeTitleDraft != titleCased { episodeTitleDraft = titleCased }
@@ -1273,7 +1286,7 @@ struct SingleInspectorView: View {
     }
     
     private func removeMissingAsset() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
         do {
             let store = try LibraryStore(at: url)
             try store.deleteAsset(asset)
@@ -1287,7 +1300,8 @@ struct SingleInspectorView: View {
     }
 
     private func performRename() {
-        guard let url = libraryURL, let store = try? LibraryStore(at: url) else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id),
+              let store = try? LibraryStore(at: url) else { return }
         let renamer = FileRenamerService(store: store)
         var updated = asset
         do {
@@ -1301,7 +1315,7 @@ struct SingleInspectorView: View {
     }
 
     private func deleteVideo() {
-        guard let url = libraryURL else { return }
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
 
         // One shared implementation of "delete a video" (DEFECT_INVENTORY M5):
         // this used to be a hand-rolled copy of VideoTransferService's logic
@@ -1328,14 +1342,13 @@ struct SingleInspectorView: View {
     // MARK: - Helpers
 
     private func videoURL() -> URL? {
-        guard let libraryURL else { return nil }
-        return libraryURL.appendingPathComponent(asset.relativePath)
+        LibrarySession.shared.videoURL(for: asset)
     }
 
     // macOS-only “open file”
     #if os(macOS)
     private func openFile() {
-        if let url = libraryURL?.appendingPathComponent(asset.relativePath) {
+        if let url = LibrarySession.shared.videoURL(for: asset) {
             NSWorkspace.shared.open(url)
         }
     }

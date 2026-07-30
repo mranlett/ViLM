@@ -36,8 +36,33 @@ enum HelpContent {
         seriesGallery,
         videoDetails,
         actorProfile,
+        openLibraries,
         settings,
     ]
+
+    static let openLibraries = HelpTopic(
+        id: "openLibraries",
+        title: "Open Libraries (Attach a Second Library)",
+        summary: "Attach one or more additional libraries — say, a portable drive — and browse everything as if it were a single library. Nothing is merged on disk: every video and actor keeps living in its own library, edits and deletes always land in the library that owns the record, and attachments close automatically when you quit the app.",
+        items: [
+            .init(label: "Attach Library…",
+                  description: "In the sidebar's Open Libraries section: pick another ViLM library folder to open alongside your main one. Its videos and actors immediately appear everywhere — All Assets, Actors, Series, Tags, the Dashboard, search, and filters."),
+            .init(label: "Library names",
+                  description: "Libraries are always shown by PATH, not just folder name — two libraries can both be called “Videos”, so the volume or route (~/Downloads/Videos vs PortableSSD/Downloads/Videos) is what tells them apart. Compact badges use the shortest unique part."),
+            .init(label: "Precedence (attach order)",
+                  description: "The main library comes first, then attachments in the order you attached them — the sidebar list IS the order. When the same actor exists in several libraries, the earlier library's value wins any conflict in the combined view; nothing is changed on disk."),
+            .init(label: "Actors in several libraries",
+                  description: "Actor pages show a combined view (bio, rating, tags, AKAs, and photos from every open library together). Editing writes only to the library that owns the actor — the editor says which one — so no data ever silently copies between libraries. Use the Actor Merge tools if you actually want to merge."),
+            .init(label: "Detach (eject button)",
+                  description: "Closes that library: its videos and actors leave the view, and its files and catalog are untouched. Quitting the app detaches everything automatically — attachments are never remembered across launches."),
+            .init(label: "Identical entries shown once",
+                  description: "If an attached library was created from a backup of an open one, some videos exist in both with the same internal identity. Those are shown once (the earlier library's copy); a notice tells you how many were hidden."),
+            .init(label: "Find Duplicates across libraries",
+                  description: "The duplicate finder scans every open library together, so copies living in different libraries are found — exact copies, re-encodes, and trimmed versions alike. Each copy's row shows which library it lives in before you delete."),
+            .init(label: "Tools that need one library",
+                  description: "Back Up, Move Videos, File Name Audit, Migrate Episode Info, Tag & Actor Cleanup, Series Standardize, and the Actor Merge tools work on a single library — detach first to use them. Check for Changes works while attached and refreshes every open library."),
+        ]
+    )
 
     static let dashboard = HelpTopic(
         id: "dashboard",

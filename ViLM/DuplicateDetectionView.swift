@@ -189,11 +189,19 @@ struct DuplicateDetectionView: View {
                 Text(metaLine(m))
                     .font(.caption.monospacedDigit())
                     .foregroundColor(.secondary)
-                Text(asset.relativePath)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    // Federated session: cross-library groups need "which
+                    // copy am I deleting" answered right on the row.
+                    if LibrarySession.shared.isFederated,
+                       let owner = LibrarySession.shared.url(for: asset.id) {
+                        qualityBadge(LibrarySession.shared.shortLabel(for: owner), color: .teal)
+                    }
+                    Text(asset.relativePath)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
         }
         .contentShape(Rectangle())
@@ -230,6 +238,12 @@ struct DuplicateDetectionView: View {
         await MainActor.run { isScanning = true; scanProgress = "Reading video info…" }
         let lib = libraryURL
         let assetList = assets
+        // Federated session: the scan spans every open library, so
+        // cross-library duplicates surface. Resolve each video's owning
+        // library ONCE on the main actor; the detached work uses the map.
+        let ownerByID: [Asset.ID: URL] = Dictionary(uniqueKeysWithValues: assetList.map {
+            ($0.id, LibrarySession.shared.url(for: $0.id) ?? lib)
+        })
 
         let (resultGroups, resultMeta) = await Task.detached(priority: .userInitiated) { () -> ([DuplicateGroup], [Asset.ID: FileMeta]) in
             // Phase 1: metadata for every video (size from the filesystem;
@@ -242,7 +256,7 @@ struct DuplicateDetectionView: View {
                     let progress = "Reading video info (\(index + 1) of \(assetList.count))…"
                     await MainActor.run { scanProgress = progress }
                 }
-                let url = lib.appendingPathComponent(asset.relativePath)
+                let url = (ownerByID[asset.id] ?? lib).appendingPathComponent(asset.relativePath)
                 guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
                       let size = attrs[.size] as? Int64, size > 0 else { continue }
                 var m = FileMeta(sizeBytes: size)
@@ -299,7 +313,12 @@ struct DuplicateDetectionView: View {
             let windows = VideoDuplicateAnalyzer.durationWindows(
                 windowInput, tolerance: VideoDuplicateAnalyzer.maxTrimSeconds)
 
-            var cache = FrameFingerprintStore(libraryURL: lib)
+            // ONE fingerprint store per open library: each video's print is
+            // read from, written to, and saved into ITS OWNING library's
+            // `.catalog/framePrints` cache — prints travel with their library
+            // on detach, and the move/rename/edit lifecycle rules keep
+            // working unchanged.
+            var caches: [URL: FrameFingerprintStore] = [:]
             var fingerprints: [Asset.ID: [UInt64]] = [:]
             let totalCandidates = windows.reduce(0) { $0 + $1.count }
             var processed = 0
@@ -307,7 +326,9 @@ struct DuplicateDetectionView: View {
                 for id in window {
                     processed += 1
                     guard let asset = byID[id], let m = meta[id] else { continue }
-                    if let cached = cache.validHashes(
+                    let owner = ownerByID[id] ?? lib
+                    if caches[owner] == nil { caches[owner] = FrameFingerprintStore(libraryURL: owner) }
+                    if let cached = caches[owner]!.validHashes(
                         relativePath: asset.relativePath, sizeBytes: m.sizeBytes, modified: m.modified) {
                         fingerprints[id] = cached
                         // Light progress so a resumed scan visibly races
@@ -321,19 +342,23 @@ struct DuplicateDetectionView: View {
                     let progress = "Fingerprinting videos (\(processed) of \(totalCandidates))…"
                     await MainActor.run { scanProgress = progress }
                     let hashes = await VideoDuplicateAnalyzer.intervalFingerprint(
-                        videoURL: lib.appendingPathComponent(asset.relativePath))
+                        videoURL: owner.appendingPathComponent(asset.relativePath))
                     fingerprints[id] = hashes
-                    cache.setHashes(hashes, relativePath: asset.relativePath,
-                                    sizeBytes: m.sizeBytes, modified: m.modified)
+                    caches[owner]!.setHashes(hashes, relativePath: asset.relativePath,
+                                             sizeBytes: m.sizeBytes, modified: m.modified)
                     // Persist after EVERY new fingerprint: each one costs
                     // seconds of frame decoding, the save costs milliseconds —
                     // so a scan interrupted at video 600 of 1300 resumes from
                     // 600 instead of starting over.
-                    cache.save()
+                    caches[owner]!.save()
                 }
             }
-            // Final save prunes entries for deleted/renamed videos.
-            cache.save(keepingPaths: Set(assetList.map(\.relativePath)))
+            // Final save prunes each library's entries against ITS OWN paths
+            // only — one library's scan must never evict another's prints.
+            for owner in caches.keys {
+                let keep = Set(assetList.filter { (ownerByID[$0.id] ?? lib) == owner }.map(\.relativePath))
+                caches[owner]?.save(keepingPaths: keep)
+            }
 
             await MainActor.run { scanProgress = "Comparing fingerprints…" }
             var matchedPairs: [(UUID, UUID)] = []
@@ -392,6 +417,10 @@ struct DuplicateDetectionView: View {
         let toDelete = selectedForRemoval
         let lib = libraryURL
         let assetList = assets
+        // Owners resolved on the main actor; the detached work uses the map.
+        let ownerByID: [Asset.ID: URL] = Dictionary(uniqueKeysWithValues: assetList.map {
+            ($0.id, LibrarySession.shared.url(for: $0.id) ?? lib)
+        })
 
         // Route through the shared delete (file-first ordering: a failed file
         // removal aborts that video with its metadata intact; artifacts and
@@ -403,7 +432,9 @@ struct DuplicateDetectionView: View {
             for id in toDelete {
                 guard let asset = assetList.first(where: { $0.id == id }) else { continue }
                 do {
-                    try service.deleteVideoAndArtifacts(asset, in: lib, toTrash: true)
+                    // Deletion lands in the asset's OWNING library.
+                    try service.deleteVideoAndArtifacts(
+                        asset, in: ownerByID[id] ?? lib, toTrash: true)
                     deleted.insert(id)
                 } catch {
                     failures.append("\(asset.fileName): \(error.localizedDescription)")

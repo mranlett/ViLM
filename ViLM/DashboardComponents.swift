@@ -198,7 +198,11 @@ enum ProfileAvatarLoader {
         }
         guard let target = targetFile else { return nil }
 
-        let fileURL = url.appendingPathComponent(".catalog/profiles").appendingPathComponent(target)
+        // `fileNames` is the union across every open library — resolve which
+        // library actually holds the file (precedence order), falling back to
+        // the primary's path.
+        let fileURL = LibrarySession.shared.existingProfilePhotoURL(fileName: target)
+            ?? url.appendingPathComponent(".catalog/profiles").appendingPathComponent(target)
         return await Task.detached(priority: .userInitiated) {
             let key = "\(fileURL.path)|\(maxPixelSize)" as NSString
             if let cached = cache.object(forKey: key) { return cached }

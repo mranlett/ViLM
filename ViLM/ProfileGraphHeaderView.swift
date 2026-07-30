@@ -276,7 +276,7 @@ struct ProfileGraphHeaderView: View {
         .onChange(of: currentSelection) { old, new in fetchProfile() }
         .sheet(isPresented: $isShowingEditor) {
             if let id = currentEntityId {
-                EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: entityProfile, onSave: saveProfile)
+                EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: ownerRawProfile(for: id), onSave: saveProfile)
             }
         }
         .alert("Rename Globally", isPresented: $isShowingRenameDialog) {
@@ -561,19 +561,35 @@ struct ProfileGraphHeaderView: View {
     }
     
     private func fetchProfile() {
-        guard let url = libraryURL, let id = currentEntityId else { return }
+        guard libraryURL != nil, let id = currentEntityId else { return }
         do {
-            let store = try LibraryStore(at: url)
-            entityProfile = try store.fetchEntityProfile(for: id)
+            // DISPLAY is the merged view across every open library that has
+            // this profile (higher precedence wins, lists union) — an actor
+            // whose rating lives only in an attachment must still show it.
+            var layers: [[String: EntityProfile]] = []
+            for libURL in LibrarySession.shared.allURLs {
+                if let profile = try LibraryStore(at: libURL).fetchEntityProfile(for: id) {
+                    layers.append([id: profile])
+                }
+            }
+            entityProfile = MergeSemantics.mergedProfileView(ordered: layers)[id]
         } catch {
             print("Failed to fetch profile: \(error)")
         }
     }
 
+    /// The OWNING library's raw copy, for the edit sheet. Never hand the
+    /// merged view to an editor: saving merged form state wholesale would
+    /// copy other libraries' fields into the owner — an accidental merge.
+    private func ownerRawProfile(for id: String) -> EntityProfile? {
+        (try? LibrarySession.shared.store(forProfile: id).fetchEntityProfile(for: id)) ?? nil
+    }
+
     private func saveProfile(_ profile: EntityProfile) {
-        guard let url = libraryURL else { return }
+        guard libraryURL != nil else { return }
         do {
-            let store = try LibraryStore(at: url)
+            // Writes land in the profile's owning library only.
+            let store = try LibrarySession.shared.store(forProfile: profile.id)
             try store.saveEntityProfile(profile)
             self.entityProfile = profile
             // "ReloadAssets" is this app's general "library data changed"
@@ -587,9 +603,9 @@ struct ProfileGraphHeaderView: View {
     }
 
     private func deleteProfile() {
-        guard let url = libraryURL, let id = currentEntityId else { return }
+        guard libraryURL != nil, let id = currentEntityId else { return }
         do {
-            let store = try LibraryStore(at: url)
+            let store = try LibrarySession.shared.store(forProfile: id)
             try store.deleteEntityProfile(for: id)
             self.entityProfile = nil
             NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
@@ -621,9 +637,16 @@ struct ProfileGraphHeaderView: View {
         let normalizedNewName = TagNormalizer.normalize(tagValue: newGlobalName)
         
         do {
-            let store = try LibraryStore(at: url)
-            try store.renameTagGlobally(oldTag: id, newTag: newTag)
-            
+            // A global rename applies to EVERY open library: the user sees
+            // one tag space, and renaming in only one would leave the union
+            // showing old and new names side by side. Each library runs its
+            // own hardened files-first rename; nothing crosses libraries.
+            _ = url
+            for libURL in LibrarySession.shared.allURLs {
+                let store = try LibraryStore(at: libURL)
+                try store.renameTagGlobally(oldTag: id, newTag: newTag)
+            }
+
             var pivotItem: SidebarItem
             switch category {
             case "actor": pivotItem = .actor(normalizedNewName)

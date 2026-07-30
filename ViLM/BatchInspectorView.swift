@@ -140,12 +140,12 @@ struct BatchInspectorView: View {
     }
 
     private func applyToAll(_ mutate: (inout Asset) -> Void) {
-        guard let url = libraryURL else { return }
         do {
-            let store = try LibraryStore(at: url)
+            // A batch can span libraries in a federated session — resolve the
+            // store per asset, not once for the whole batch.
             for var asset in selectedAssets {
                 mutate(&asset)
-                try store.updateAsset(asset)
+                try LibrarySession.shared.store(for: asset.id).updateAsset(asset)
                 if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                     assets[index] = asset
                 }
@@ -244,15 +244,13 @@ struct BatchInspectorView: View {
     }
     
     private func toggleStatus() {
-        guard let url = libraryURL else { return }
         do {
-            let store = try LibraryStore(at: url)
             let allReviewed = selectedAssets.allSatisfy { $0.status == .reviewed }
             let newStatus: Asset.ReviewStatus = allReviewed ? .unreviewed : .reviewed
-            
+
             for var asset in selectedAssets {
                 asset.status = newStatus
-                try store.updateAsset(asset)
+                try LibrarySession.shared.store(for: asset.id).updateAsset(asset)
                 if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                     assets[index] = asset
                 }
@@ -264,16 +262,15 @@ struct BatchInspectorView: View {
     }
     
     private func saveTag() {
-        guard !newTagValue.isEmpty, let url = libraryURL else { return }
+        guard !newTagValue.isEmpty else { return }
         do {
-            let store = try LibraryStore(at: url)
             let normalizedValue = TagNormalizer.normalize(tagValue: newTagValue)
             let tagToSave = "\(activeCategory):\(normalizedValue)"
-            
+
             for var asset in selectedAssets {
                 if !asset.tags.contains(tagToSave) {
                     asset.tags.append(tagToSave)
-                    try store.updateAsset(asset)
+                    try LibrarySession.shared.store(for: asset.id).updateAsset(asset)
                     if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                         assets[index] = asset
                     }
@@ -288,15 +285,13 @@ struct BatchInspectorView: View {
     }
     
     private func deleteTag(category: String, value: String) {
-        guard let url = libraryURL else { return }
         do {
-            let store = try LibraryStore(at: url)
             let tagToDelete = "\(category):\(value)"
-            
+
             for var asset in selectedAssets {
                 if asset.tags.contains(tagToDelete) {
                     asset.tags.removeAll { $0 == tagToDelete }
-                    try store.updateAsset(asset)
+                    try LibrarySession.shared.store(for: asset.id).updateAsset(asset)
                     if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                         assets[index] = asset
                     }

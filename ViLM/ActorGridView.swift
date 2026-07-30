@@ -635,6 +635,11 @@ struct ActorGridView: View {
     
     private func importCSV(from url: URL) {
         guard let libraryURL = libraryURL else { return }
+        // Federated session: v1 imports into the MAIN library only (the
+        // export side already reflects the merged view).
+        if LibrarySession.shared.isFederated {
+            AppErrorReporter.report("CSV import applies to the main library only while other libraries are attached.")
+        }
 
         // File read, CSV parse, and the row-by-row DB writes all run off the
         // main thread — a large CSV used to freeze the UI for its duration.

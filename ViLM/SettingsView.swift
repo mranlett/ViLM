@@ -28,6 +28,11 @@ struct SettingsView: View {
     var onOpenTagGallery: (() -> Void)?
 
     @State private var isShowingHelp = false
+    // Single-library maintenance tools are disabled while other libraries
+    // are attached (the federated view spans several catalogs; each of these
+    // tools is deeply single-library). Find Duplicates joins the federation
+    // in a later step and loses its gate then.
+    @ObservedObject private var session = LibrarySession.shared
 
     var body: some View {
         NavigationStack {
@@ -65,30 +70,46 @@ struct SettingsView: View {
                 
                 Section(
                     header: Text("Library"),
-                    footer: Text("Choose which folder ViLM manages and keep it in sync with what's on disk.")
+                    footer: Text(session.isFederated
+                        ? "Move Videos and Back Up work on one library at a time — detach the attached librar\(session.attachedURLs.count == 1 ? "y" : "ies") in the sidebar to use them."
+                        : "Choose which folder ViLM manages and keep it in sync with what's on disk.")
                 ) {
                     toolButton("Open Library", icon: "folder.badge.plus", action: onOpenLibrary)
                     toolButton("Check for Changes", icon: "arrow.triangle.2.circlepath", action: onCheckForChanges)
                     toolButton("Move Videos Between Libraries", icon: "arrow.left.arrow.right", action: onMoveVideos)
+                        .disabled(session.isFederated)
                     toolButton("Back Up & Restore", icon: "externaldrive.badge.timemachine", action: onBackupRestore)
+                        .disabled(session.isFederated)
                 }
 
                 Section(
                     header: Text("Cleanup Tools"),
-                    footer: Text("Find and fix inconsistent or duplicated data across the whole library.")
+                    footer: Text(session.isFederated
+                        ? "Find Duplicates scans every open library — duplicates across libraries surface too. The other tools work on one library at a time; detach to use them."
+                        : "Find and fix inconsistent or duplicated data across the whole library.")
                 ) {
                     toolButton("File Name Audit", icon: "text.magnifyingglass", action: onAuditFileName)
+                        .disabled(session.isFederated)
+                    // Find Duplicates is federation-aware: it scans every open
+                    // library (cross-library duplicates surface) with each
+                    // video's fingerprint cached in its OWNING library.
                     toolButton("Find Duplicates", icon: "square.on.square.dashed", action: onFindDuplicates)
                     toolButton("Migrate Episode Info", icon: "arrow.triangle.branch", action: onMigrateEpisodes)
+                        .disabled(session.isFederated)
                     toolButton("Tag & Actor Cleanup", icon: "paintbrush", action: onTagCleanup)
+                        .disabled(session.isFederated)
                 }
 
                 Section(
                     header: Text("Actors"),
-                    footer: Text("Export and Import move enriched actor bios and photos between library copies (e.g. a portable copy) without losing existing work.")
+                    footer: Text(session.isFederated
+                        ? "The merge tools work on one library at a time — detach to use them. (While attached, the session already shows actors merged, live.)"
+                        : "Export and Import move enriched actor bios and photos between library copies (e.g. a portable copy) without losing existing work.")
                 ) {
                     toolButton("Export Actor Library For Merge", icon: "square.and.arrow.up", action: onExportActorLibrary)
+                        .disabled(session.isFederated)
                     toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down", action: onImportActorLibrary)
+                        .disabled(session.isFederated)
                 }
             }
             .navigationTitle("Settings")

@@ -71,8 +71,9 @@ struct SceneMarkerCard: View {
             }
         }
         .task(id: "\(marker.id)|\(refreshToken)") {
-            guard let libraryURL else { return }
-            let url = libraryURL.appendingPathComponent(".catalog/markers/\(marker.id.uuidString).jpg")
+            // A marker's preview lives in the library that owns its asset.
+            guard let url = LibrarySession.shared.markerThumbnailURL(
+                markerId: marker.id, ownerAssetID: marker.assetId) else { return }
             cgImage = await ThumbnailLoader.image(from: url, maxPixelSize: 400)
         }
     }

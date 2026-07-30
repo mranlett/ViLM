@@ -595,9 +595,9 @@ struct AssetsGridView: View {
         // network/USB volumes), so only load when size sort is active and do
         // the I/O off the main thread.
         .task(id: FileSizeTrigger(assetCount: assets.count, sortBySize: sortOption == .size)) {
-            guard sortOption == .size, !assets.isEmpty, let url = libraryURL else { return }
-            let paths: [(Asset.ID, String)] = assets.map {
-                ($0.id, url.appendingPathComponent($0.relativePath).path)
+            guard sortOption == .size, !assets.isEmpty else { return }
+            let paths: [(Asset.ID, String)] = assets.compactMap { asset in
+                LibrarySession.shared.videoURL(for: asset).map { (asset.id, $0.path) }
             }
             let newSizes = await Task.detached(priority: .utility) {
                 var sizes: [Asset.ID: Int64] = [:]

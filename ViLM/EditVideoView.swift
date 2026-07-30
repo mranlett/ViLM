@@ -40,7 +40,10 @@ struct EditVideoView: View {
     @State private var errorMessage: String?
     @State private var showTrimConfirm = false
 
-    private var videoURL: URL { libraryURL.appendingPathComponent(asset.relativePath) }
+    /// The library that owns this asset (falls back to the passed-in URL —
+    /// identical in a single-library session).
+    private var owningLibraryURL: URL { LibrarySession.shared.url(for: asset.id) ?? libraryURL }
+    private var videoURL: URL { owningLibraryURL.appendingPathComponent(asset.relativePath) }
 
     private var droppedMarkerCount: Int {
         VideoEditingService.adjustMarkersForTrim(sceneMarkers, keepStart: keepStart, keepEnd: keepEnd).dropped.count
@@ -216,7 +219,7 @@ struct EditVideoView: View {
         player?.pause()
         isWorking = true; workingLabel = "Trimming…"
         do {
-            try await VideoEditingService().trim(asset, in: libraryURL, keepStart: keepStart, keepEnd: keepEnd)
+            try await VideoEditingService().trim(asset, in: owningLibraryURL, keepStart: keepStart, keepEnd: keepEnd)
             await MainActor.run { isWorking = false; didComplete = true; onCompleted() }
         } catch {
             await MainActor.run { isWorking = false; errorMessage = "Trim failed: \(error.localizedDescription)" }
@@ -240,7 +243,7 @@ struct EditVideoView: View {
         player?.pause()
         isWorking = true; workingLabel = "Flipping…"
         do {
-            try await VideoEditingService().flip(asset, in: libraryURL)
+            try await VideoEditingService().flip(asset, in: owningLibraryURL)
             await MainActor.run { isWorking = false; didComplete = true; onCompleted() }
         } catch {
             await MainActor.run { isWorking = false; errorMessage = "Flip failed: \(error.localizedDescription)" }

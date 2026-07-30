@@ -4,6 +4,7 @@
 // library (cached, recomputed on data changes).
 
 import SwiftUI
+import UniformTypeIdentifiers
 import LibraryCore
 
 struct SidebarView: View {
@@ -14,6 +15,12 @@ struct SidebarView: View {
     // that needs entity profiles, instead of re-fetching independently here.
     let entityProfiles: [String: EntityProfile]
     let onApplyFilters: () -> Void
+    /// Multi-library session: attach a picked library / detach an open one.
+    var onAttachLibrary: (URL) -> Void = { _ in }
+    var onDetachLibrary: (URL) -> Void = { _ in }
+
+    @ObservedObject private var session = LibrarySession.shared
+    @State private var isShowingAttachPicker = false
 
     private var profiles: [EntityProfile] { Array(entityProfiles.values) }
 
@@ -149,7 +156,31 @@ struct SidebarView: View {
                     onApplyFilters()
                 }
             }
-            
+
+            // The federated session: primary + attachments in precedence
+            // order (attach order — which is also who wins merged-view
+            // conflicts). Paths, not folder names: two libraries can both be
+            // called "Videos"; the volume/route is what tells them apart.
+            if libraryURL != nil {
+                Section("Open Libraries") {
+                    if let primary = session.primaryURL {
+                        openLibraryRow(path: displayPath(primary), caption: "Main")
+                    }
+                    ForEach(session.attachedURLs, id: \.self) { url in
+                        openLibraryRow(path: displayPath(url), caption: "Attached — closes with the app") {
+                            onDetachLibrary(url)
+                        }
+                    }
+                    Button {
+                        isShowingAttachPicker = true
+                    } label: {
+                        Label("Attach Library…", systemImage: "plus.rectangle.on.folder")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.accentColor)
+                }
+            }
+
             DisclosureGroup(isExpanded: $isActorsExpanded) {
                 AlphaPickerView(filter: $actorAlphaFilter)
                 ForEach(filteredItems(allUniqueActors, by: actorAlphaFilter), id: \.self) { actor in
@@ -197,6 +228,9 @@ struct SidebarView: View {
             .background(.ultraThinMaterial)
         }
         .navigationTitle("ViLM")
+        .fileImporter(isPresented: $isShowingAttachPicker, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { onAttachLibrary(url) }
+        }
         .onAppear {
             recomputeDerivedData()
         }
@@ -227,6 +261,38 @@ struct SidebarView: View {
         }
     }
     
+    /// An "Open Libraries" row: the library's PATH (never just its folder
+    /// name — two libraries can share one), a role caption, and for
+    /// attachments an eject button.
+    private func openLibraryRow(path: String, caption: String, onDetach: (() -> Void)? = nil) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(path)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            if let onDetach {
+                Button(action: onDetach) {
+                    Image(systemName: "eject.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .accessibilityLabel("Detach library")
+            }
+        }
+    }
+
+    /// Prettified full path (~ for home, volume name for external drives) —
+    /// libraries are identified by PATH, never just folder name.
+    private func displayPath(_ url: URL) -> String {
+        session.fullLabel(for: url)
+    }
+
     private func sidebarRow(title: String, icon: String, isSelected: Bool, count: Int? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {

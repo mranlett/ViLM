@@ -78,6 +78,9 @@ struct SeriesGalleryView: View {
                     } label: {
                         Label("Standardize Names", systemImage: "wand.and.stars")
                     }
+                    // Single-library tool: renames primary rows only, which
+                    // would half-rename a series spanning attached libraries.
+                    .disabled(LibrarySession.shared.isFederated)
                 }
             }
             ToolbarItem(placement: .cancellationAction) {

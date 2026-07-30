@@ -139,13 +139,16 @@ struct BatchEntityProfileEditorView: View {
             tagEntryPopover
         }
         .onAppear {
-            guard let url = libraryURL else { return }
+            guard libraryURL != nil else { return }
             do {
-                let store = try LibraryStore(at: url)
-                let profiles = try store.fetchAllEntityProfiles()
+                // Suggestion vocabularies span every open library.
+                var profiles: [EntityProfile] = []
+                for libURL in LibrarySession.shared.allURLs {
+                    profiles.append(contentsOf: try LibraryStore(at: libURL).fetchAllEntityProfiles())
+                }
                 let allTagsSet = Set(profiles.flatMap { $0.tags })
                 allUniqueTags = Array(allTagsSet).sorted()
-                
+
                 let gendersSet = Set(profiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
                 allUniqueGenders = Array(gendersSet).sorted()
             } catch {
@@ -224,10 +227,14 @@ struct BatchEntityProfileEditorView: View {
         
         Task {
             do {
-                let store = try LibraryStore(at: url)
+                _ = url
                 var updatedProfiles: [EntityProfile] = []
-                
+
                 for id in entityIds {
+                    // Per-profile OWNER store: a batch can span libraries in
+                    // a federated session, and each actor's edit must land in
+                    // the library that owns that actor.
+                    let store = try LibrarySession.shared.store(forProfile: id)
                     // "No profile row yet" and "the fetch failed" must be
                     // treated differently: creating a fresh profile is right
                     // for the former, but doing it after a failed fetch

@@ -187,18 +187,7 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadAssets"))) { _ in
                 if let url = selectedLibraryURL {
                     loadEntityProfiles(from: url)
-                    Task {
-                        do {
-                            let store = try LibraryStore(at: url)
-                            let updatedAssets = try store.fetchAllAssets()
-                            await MainActor.run {
-                                self.assets = updatedAssets
-                                self.gridRefreshID = UUID()
-                            }
-                        } catch {
-                            print("Failed to reload assets: \(error)")
-                        }
-                    }
+                    reloadUnionAssets()
                 }
             }
             .sheet(isPresented: $isShowingSettings, onDismiss: {
@@ -228,15 +217,7 @@ struct ContentView: View {
                     FileNameAuditView(
                         libraryURL: url,
                         assets: assets,
-                        onRefresh: {
-                            do {
-                                let store = try LibraryStore(at: url)
-                                self.assets = try store.fetchAllAssets()
-                                self.gridRefreshID = UUID()
-                            } catch {
-                                print("Refresh failed: \(error)")
-                            }
-                        }
+                        onRefresh: { reloadUnionAssets() }
                     )
                 }
             }
@@ -245,15 +226,7 @@ struct ContentView: View {
                     DuplicateDetectionView(
                         libraryURL: url,
                         assets: assets,
-                        onRefresh: {
-                            do {
-                                let store = try LibraryStore(at: url)
-                                self.assets = try store.fetchAllAssets()
-                                self.gridRefreshID = UUID()
-                            } catch {
-                                print("Refresh failed: \(error)")
-                            }
-                        }
+                        onRefresh: { reloadUnionAssets() }
                     )
                 }
             }
@@ -296,14 +269,8 @@ struct ContentView: View {
                         libraryURL: url,
                         assets: assets,
                         onRefresh: {
-                            do {
-                                let store = try LibraryStore(at: url)
-                                self.assets = try store.fetchAllAssets()
-                                self.gridRefreshID = UUID()
-                                loadEntityProfiles(from: url)
-                            } catch {
-                                print("Refresh failed: \(error)")
-                            }
+                            reloadUnionAssets()
+                            loadEntityProfiles(from: url)
                         }
                     )
                 }
@@ -348,7 +315,9 @@ struct ContentView: View {
                     if navigationPath.isEmpty {
                         navigationPath.append(.browse)
                     }
-                }
+                },
+                onAttachLibrary: { attachLibrary(at: $0) },
+                onDetachLibrary: { detachLibrary(at: $0) }
             )
             .navigationDestination(for: AppRoute.self) { route in
                 destinationView(for: route)
@@ -382,7 +351,9 @@ struct ContentView: View {
                 assets: assets,
                 libraryURL: selectedLibraryURL,
                 entityProfiles: entityProfiles,
-                onApplyFilters: {}
+                onApplyFilters: {},
+                onAttachLibrary: { attachLibrary(at: $0) },
+                onDetachLibrary: { detachLibrary(at: $0) }
             )
         } content: {
 #if os(iOS)
@@ -754,44 +725,44 @@ struct ContentView: View {
     // awaitable so pull-to-refresh on the grids can hold their spinner until
     // it actually finishes, instead of firing and forgetting.
     private func refreshLibrary() async {
-        guard let url = selectedLibraryURL else { return }
-        do {
-            let store = try LibraryStore(at: url)
-            let scanner = LibraryScanner(store: store)
-            let service = ContactSheetService(store: store)
+        guard let primary = selectedLibraryURL else { return }
+        // Check for Changes covers EVERY open library — each scanned within
+        // its own scope claim so a mid-refresh detach can't cut off file
+        // access. Missing-file validation accumulates across all of them.
+        let openURLs = LibrarySession.shared.allURLs
+        var missing: Set<Asset.ID> = []
+        for url in openURLs {
+            do {
+                try await ScopedOperation.run(holding: [url]) {
+                    let store = try LibraryStore(at: url)
 
-            // 1. Check for new files
-            try await scanner.scan(at: url)
+                    // 1. Check for new files
+                    try await LibraryScanner(store: store).scan(at: url)
 
-            // 2. Refresh assets and entity profiles in memory
-            let updatedAssets = try store.fetchAllAssets()
-            await MainActor.run {
-                self.assets = updatedAssets
-                loadEntityProfiles(from: url)
-            }
-
-            // 3. Generate thumbnails for any missing ones
-            for asset in updatedAssets {
-                try? await service.generateContactSheet(for: asset, libraryURL: url)
-                try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
-            }
-
-            // 4. Validate missing files
-            var missing: Set<Asset.ID> = []
-            for asset in updatedAssets {
-                let fileURL = url.appendingPathComponent(asset.relativePath)
-                if !FileManager.default.fileExists(atPath: fileURL.path) {
-                    missing.insert(asset.id)
+                    // 2. Generate thumbnails for any missing ones + validate files
+                    let rows = try store.fetchAllAssets()
+                    let service = ContactSheetService(store: store)
+                    for asset in rows {
+                        try? await service.generateContactSheet(for: asset, libraryURL: url)
+                        try? await service.generateSingleThumbnail(for: asset, libraryURL: url)
+                        if !FileManager.default.fileExists(atPath: url.appendingPathComponent(asset.relativePath).path) {
+                            missing.insert(asset.id)
+                        }
+                    }
                 }
+            } catch {
+                print("Check for Changes failed for \(url.lastPathComponent): \(error)")
+                AppErrorReporter.report("Check for Changes problem in “\((url.path as NSString).abbreviatingWithTildeInPath)”: \(error.localizedDescription)")
             }
+        }
 
-            // 5. Update UI
-            await MainActor.run {
-                self.missingAssetIDs = missing
-                self.gridRefreshID = UUID()
-            }
-        } catch {
-            print("Check for Changes failed: \(error)")
+        // 3. Refresh the union + profiles and update UI.
+        let finalMissing = missing
+        await MainActor.run {
+            reloadUnionAssets(refreshGrid: false)
+            loadEntityProfiles(from: primary)
+            self.missingAssetIDs = finalMissing
+            self.gridRefreshID = UUID()
         }
     }
 
@@ -860,6 +831,9 @@ struct ContentView: View {
 
     // Keeps security-scoped access open as long as this library is selected.
     private func beginSecurityScope(for url: URL) {
+        // Every library-open path funnels through here, making it the one
+        // reliable point to keep the session resolver's primary in sync.
+        LibrarySession.shared.setPrimary(url)
         // Stop previous if different
         if let current = activeSecurityScopedURL, current != url, hasActiveSecurityScope {
             current.stopAccessingSecurityScopedResource()
@@ -954,6 +928,89 @@ struct ContentView: View {
         } catch {
             print("Bookmark resolution failed: \(error)")
         }
+    }
+
+    // MARK: - Multi-library session (federated view)
+
+    /// Refreshes `assets` from EVERY open library via the session — the one
+    /// way reload paths fetch, so none can accidentally drop an attachment's
+    /// rows. With no attachments this is exactly the old single-library fetch.
+    private func reloadUnionAssets(announceClones: Bool = false, refreshGrid: Bool = true) {
+        do {
+            let load = try LibrarySession.shared.fetchUnionAssets()
+            self.assets = load.assets
+            if refreshGrid { self.gridRefreshID = UUID() }
+            if announceClones, !load.excludedCloneCounts.isEmpty {
+                let total = load.excludedCloneCounts.values.reduce(0, +)
+                AppErrorReporter.report(
+                    "\(total) video\(total == 1 ? " is an identical catalog entry" : "s are identical catalog entries") to an open library and shown once.")
+            }
+        } catch {
+            print("Failed to reload assets: \(error)")
+            AppErrorReporter.report("Couldn't reload the library list: \(error.localizedDescription)")
+        }
+    }
+
+    /// Attaches a second (third, …) library to the session: validates it,
+    /// claims its security scope for the session's lifetime, scans it for new
+    /// files, splices its rows into the union, and backfills any missing
+    /// cached visuals. Never persisted — a relaunch reopens the primary alone.
+    func attachLibrary(at pickedURL: URL) {
+        guard selectedLibraryURL != nil else { return }
+        let standardized = pickedURL.standardizedFileURL
+        guard !LibrarySession.shared.allURLs.contains(where: { $0.standardizedFileURL == standardized }) else {
+            AppErrorReporter.report("That library is already open.")
+            return
+        }
+        // Attach first so the session's scope claim covers the validation
+        // read (picker URLs need scoped access before any file I/O).
+        LibrarySession.shared.attach(pickedURL)
+        guard FileManager.default.fileExists(atPath: pickedURL.appendingPathComponent(".catalog").path) else {
+            LibrarySession.shared.detach(pickedURL)
+            AppErrorReporter.report("That folder isn't a ViLM library — open it once as a main library to create its catalog first.")
+            return
+        }
+        wipeTransientEditingFiles(in: pickedURL)
+        Task {
+            do {
+                try await ScopedOperation.run(holding: [pickedURL]) {
+                    let store = try LibraryStore(at: pickedURL)
+                    try await LibraryScanner(store: store).scan(at: pickedURL)
+                }
+            } catch {
+                AppErrorReporter.report("Attached-library scan problem: \(error.localizedDescription)")
+            }
+            reloadUnionAssets(announceClones: true)
+            if let primary = selectedLibraryURL { loadEntityProfiles(from: primary) }
+
+            // Backfill missing visuals for the attachment (generators skip
+            // existing files, so an already-thumbnailed library races through).
+            Task {
+                await ScopedOperation.run(holding: [pickedURL]) {
+                    guard let store = try? LibraryStore(at: pickedURL),
+                          let rows = try? store.fetchAllAssets() else { return }
+                    let service = ContactSheetService(store: store)
+                    var lastRefresh = Date.distantPast
+                    for asset in rows {
+                        try? await service.generateContactSheet(for: asset, libraryURL: pickedURL)
+                        try? await service.generateSingleThumbnail(for: asset, libraryURL: pickedURL)
+                        if Date().timeIntervalSince(lastRefresh) >= 1.5 {
+                            lastRefresh = Date()
+                            await MainActor.run { self.gridRefreshID = UUID() }
+                        }
+                    }
+                    await MainActor.run { self.gridRefreshID = UUID() }
+                }
+            }
+        }
+    }
+
+    /// Detaches one library from the session (its scope, connection, and
+    /// rows go with it — nothing on disk changes).
+    func detachLibrary(at url: URL) {
+        LibrarySession.shared.detach(url)
+        reloadUnionAssets()
+        if let primary = selectedLibraryURL { loadEntityProfiles(from: primary) }
     }
 
     /// `.catalog/editing` holds in-progress edit copies that only a
@@ -1084,34 +1141,53 @@ struct ContentView: View {
     // directory listing run off the main thread — this fires on every
     // "ReloadAssets", and a large library shouldn't hitch the UI for it.
     private func loadEntityProfiles(from url: URL) {
+        // Every open library contributes: profiles fold into a display-only
+        // merged view (higher precedence wins conflicts, lists union — never
+        // written back), photo-file listings union (an actor whose photos
+        // live only in an attachment must not read as photo-less), and the
+        // session learns which libraries contain each profile so edits and
+        // downloads target the owning one.
+        let openURLs = LibrarySession.shared.allURLs
         Task.detached(priority: .userInitiated) {
             do {
-                let store = try LibraryStore(at: url)
-                let profiles = try store.fetchAllEntityProfiles()
-
-                var dict: [String: EntityProfile] = [:]
-                var newAkaMap: [String: String] = [:]
-                for profile in profiles {
-                    dict[profile.id] = profile
-                    if profile.id.hasPrefix("actor:") {
-                        let mainName = String(profile.id.dropFirst(6))
-                        for aka in profile.akas {
-                            newAkaMap[aka] = mainName
-                        }
+                var layers: [[String: EntityProfile]] = []
+                var fileNamesUnion = Set<String>()
+                for libURL in openURLs {
+                    let store = try LibraryStore(at: libURL)
+                    let profiles = try store.fetchAllEntityProfiles()
+                    layers.append(Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) }))
+                    let dir = libURL.appendingPathComponent(".catalog/profiles")
+                    if let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
+                        fileNamesUnion.formUnion(names)
                     }
                 }
 
-                let profilesDir = url.appendingPathComponent(".catalog/profiles")
-                let fileNames = (try? FileManager.default.contentsOfDirectory(atPath: profilesDir.path)).map(Set.init)
+                let merged = MergeSemantics.mergedProfileView(ordered: layers)
 
-                let finalProfiles = dict
+                var newAkaMap: [String: String] = [:]
+                for profile in merged.values where profile.id.hasPrefix("actor:") {
+                    let mainName = String(profile.id.dropFirst(6))
+                    for aka in profile.akas {
+                        newAkaMap[aka] = mainName
+                    }
+                }
+
+                var presence: [String: [URL]] = [:]
+                for (libURL, layer) in zip(openURLs, layers) {
+                    for id in layer.keys {
+                        presence[id, default: []].append(libURL)
+                    }
+                }
+
+                let finalProfiles = merged
                 let finalAkaMap = newAkaMap
+                let finalFileNames = fileNamesUnion
+                let finalPresence = presence
                 await MainActor.run {
                     self.entityProfiles = finalProfiles
                     self.akaMap = finalAkaMap
-                    if let fileNames {
-                        self.profileImageFileNames = fileNames
-                    }
+                    self.profileImageFileNames = finalFileNames
+                    LibrarySession.shared.setProfilePresence(finalPresence)
                 }
             } catch {
                 print("Failed to load entity profiles: \(error)")

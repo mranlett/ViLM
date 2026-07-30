@@ -135,22 +135,25 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     }
 
     private func resolveLocalImage() async {
-        guard let libraryURL = libraryURL else { return }
-
-        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        guard libraryURL != nil else { return }
 
         let fileName = ProfileImageNaming.fileName(for: entityId, token: photoUrl, isGallery: isGallery)
 
+        // A download (below) lands in the profile's OWNING library; display
+        // lookup checks every open library in precedence order first.
+        let profilesDir = LibrarySession.shared.profilesDir(forProfile: entityId)
+            ?? libraryURL!.appendingPathComponent(".catalog/profiles")
         let fileURL = profilesDir.appendingPathComponent(fileName)
-        
-        // 1. Check if the primary image file exists
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            if let image = await loadImageAsync(from: fileURL) {
+
+        // 1. Look for the cached file in ANY open library (the merged actor
+        // view can reference photos that live only in an attachment).
+        if let existing = LibrarySession.shared.existingProfilePhotoURL(fileName: fileName) {
+            if let image = await loadImageAsync(from: existing) {
                 setLocalImage(image)
                 return
             } else {
                 // File exists but failed to decode (e.g. corrupted/0 bytes). Delete it to allow redownload.
-                try? FileManager.default.removeItem(at: fileURL)
+                try? FileManager.default.removeItem(at: existing)
             }
         }
         

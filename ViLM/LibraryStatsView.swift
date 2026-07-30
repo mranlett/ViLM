@@ -350,11 +350,15 @@ struct LibraryStatsView: View {
             isLoading = false
             return
         }
-        
+
+        // Videos come from the session union (all open libraries); actor
+        // profiles remain primary-only until the merged actor view lands.
+        let unionAssets = (try? LibrarySession.shared.fetchUnionAssets().assets) ?? []
+
         await Task.detached(priority: .userInitiated) {
             do {
                 let store = try LibraryStore(at: url)
-                let assets = try store.fetchAllAssets()
+                let assets = unionAssets
                 // fetchAllEntityProfiles() returns actors, studios, tags, and
                 // series alike — this page's "Actors" stats only make sense
                 // for actor profiles.
