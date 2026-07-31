@@ -51,6 +51,7 @@ struct ContentView: View {
     // Smart Collections. Items are the ordered assetId strings per playlist.
     @State private var playlists: [Playlist] = []
     @State private var playlistItemsByID: [String: [String]] = [:]
+    @State private var isShowingActorSync = false
 
     @State private var pendingAssetFilter: AssetFilterCriteria?
     @State private var pendingAssetSort: AssetsGridView.SortOption?
@@ -198,6 +199,9 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadPlaylists"))) { _ in
                 loadPlaylists()
             }
+            .sheet(isPresented: $isShowingActorSync) {
+                ActorSyncView()
+            }
             .onChange(of: selectedLibraryURL) { _, _ in
                 loadPlaylists()
             }
@@ -328,7 +332,8 @@ struct ContentView: View {
                     }
                 },
                 onAttachLibrary: { attachLibrary(at: $0) },
-                onDetachLibrary: { detachLibrary(at: $0) }
+                onDetachLibrary: { detachLibrary(at: $0) },
+                onSyncActors: { isShowingActorSync = true }
             )
             .navigationDestination(for: AppRoute.self) { route in
                 destinationView(for: route)
@@ -364,7 +369,8 @@ struct ContentView: View {
                 entityProfiles: entityProfiles,
                 onApplyFilters: {},
                 onAttachLibrary: { attachLibrary(at: $0) },
-                onDetachLibrary: { detachLibrary(at: $0) }
+                onDetachLibrary: { detachLibrary(at: $0) },
+                onSyncActors: { isShowingActorSync = true }
             )
         } content: {
 #if os(iOS)

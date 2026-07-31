@@ -103,7 +103,7 @@ struct SettingsView: View {
                 Section(
                     header: Text("Actors"),
                     footer: Text(session.isFederated
-                        ? "The merge tools work on one library at a time — detach to use them. (While attached, the session already shows actors merged, live.)"
+                        ? "While libraries are attached, use Sync Actors in the sidebar's Open Libraries section instead — it converges the open libraries' actor databases directly, no export file needed. These file-based tools are for libraries that aren't open together; detach to use them."
                         : "Export and Import move enriched actor bios and photos between library copies (e.g. a portable copy) without losing existing work.")
                 ) {
                     toolButton("Export Actor Library For Merge", icon: "square.and.arrow.up", action: onExportActorLibrary)

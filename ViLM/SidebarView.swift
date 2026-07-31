@@ -18,6 +18,8 @@ struct SidebarView: View {
     /// Multi-library session: attach a picked library / detach an open one.
     var onAttachLibrary: (URL) -> Void = { _ in }
     var onDetachLibrary: (URL) -> Void = { _ in }
+    /// Opens the Sync Actors page (converge actor databases across open libraries).
+    var onSyncActors: () -> Void = {}
 
     @ObservedObject private var session = LibrarySession.shared
     @State private var isShowingAttachPicker = false
@@ -178,6 +180,16 @@ struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundColor(.accentColor)
+
+                    if session.isFederated {
+                        Button {
+                            onSyncActors()
+                        } label: {
+                            Label("Sync Actors…", systemImage: "person.2.badge.gearshape")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    }
                 }
             }
 

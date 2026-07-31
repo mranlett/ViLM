@@ -177,6 +177,13 @@ struct DuplicateDetectionView: View {
             Image(systemName: selectedForRemoval.contains(asset.id) ? "checkmark.circle.fill" : "circle")
                 .foregroundColor(selectedForRemoval.contains(asset.id) ? .red : .secondary)
 
+            // Visual confirmation before deleting: each copy's own poster
+            // (resolved from its owning library's cache).
+            VideoThumbnailView(asset: asset, libraryURL: LibrarySession.shared.url(for: asset.id))
+                .frame(width: 96, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2), lineWidth: 0.5))
+
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(asset.fileName)
