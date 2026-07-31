@@ -21,6 +21,8 @@ struct AssetsGridView: View {
     let missingAssetIDs: Set<Asset.ID>
     @AppStorage("assetGridStyle") private var gridStyle: GridStyle = .singleFrame
     @State private var isEditMode: Bool = false
+    /// Non-nil = the "New Playlist" prompt is up for these videos.
+    @State private var newPlaylistPendingIDs: [Asset.ID]? = nil
     @State private var isShowingHelp = false
     let libraryURL: URL?
     let refreshID: UUID
@@ -593,6 +595,14 @@ struct AssetsGridView: View {
                         .disabled(displayedAssets.isEmpty)
                         Spacer()
                         if !selectedAssetIDs.isEmpty {
+                            // The search → select → add-to-playlist flow.
+                            Menu {
+                                AddToPlaylistMenuItems(assetIDs: Array(selectedAssetIDs)) {
+                                    newPlaylistPendingIDs = Array(selectedAssetIDs)
+                                }
+                            } label: {
+                                Label("Playlist", systemImage: "list.and.film")
+                            }
                             NavigationLink(value: AppRoute.assets(selectedAssetIDs)) {
                                 Text("Edit \(selectedAssetIDs.count) Selected")
                                     .font(.headline)
@@ -606,6 +616,7 @@ struct AssetsGridView: View {
         .sheet(isPresented: $isShowingFilterBuilder) {
             FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: entityProfiles)
         }
+        .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
         .sheet(isPresented: $isShowingHelp) {
             HelpView(initialTopicID: currentHelpTopicID)
         }
@@ -865,6 +876,13 @@ struct AssetsGridView: View {
         } label: {
             Label("Select All \(displayedAssets.count) Shown", systemImage: "checklist.checked")
         }
+        Menu {
+            AddToPlaylistMenuItems(assetIDs: [asset.id]) {
+                newPlaylistPendingIDs = [asset.id]
+            }
+        } label: {
+            Label("Add to Playlist", systemImage: "list.and.film")
+        }
     }
 #endif
 
@@ -913,6 +931,20 @@ struct AssetsGridView: View {
             gridItem(for: asset)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            // Right-click acts on the ⌘-click multi-selection when it
+            // includes this card; otherwise just this card.
+            let targets = (selectedAssetIDs.contains(asset.id) && selectedAssetIDs.count > 1)
+                ? Array(selectedAssetIDs) : [asset.id]
+            Menu {
+                AddToPlaylistMenuItems(assetIDs: targets) {
+                    newPlaylistPendingIDs = targets
+                }
+            } label: {
+                Label(targets.count > 1 ? "Add \(targets.count) to Playlist" : "Add to Playlist",
+                      systemImage: "list.and.film")
+            }
+        }
 #endif
     }
     

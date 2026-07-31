@@ -73,6 +73,12 @@ struct SingleInspectorView: View {
     @State private var suggestedRenameValue = ""
     @State private var showDeleteConfirmation = false
     @State private var isShowingHelp = false
+    /// Non-nil = the "New Playlist" prompt is up for these videos.
+    @State private var newPlaylistPendingIDs: [Asset.ID]? = nil
+    // Watch-first layout: browsing is the default; all metadata editing lives
+    // behind the ✎ sheet, maintenance behind the ⋯ menu.
+    @State private var isShowingEditSheet = false
+    @State private var isShowingFrames = false
     
     private var currentIndex: Int? {
         contextAssetIDs.firstIndex(of: asset.id)
@@ -149,97 +155,10 @@ struct SingleInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
-                // High-res frame grid — doubles as the seek control on iOS,
-                // where there is no persistent scrubber.
-                DetailGridView(asset: asset, libraryURL: libraryURL, isInteractive: true) { t in
-                    scrubTime = t
-
-                    #if os(macOS)
-                    // If the popout is open, keep inline hidden.
-                    if popout.isOpen {
-                        isShowingPlayer = false
-                        popout.bringToFront()
-                    } else {
-                        isShowingPlayer = true
-                    }
-                    #else
-                    isShowingPlayer = true
-                    #endif
-
-                    if let url = videoURL() {
-                        if !missingAssetIDs.contains(asset.id) {
-                            recordPlayIfNeeded()
-                            playback.load(url: url, startSeconds: t, autoplay: true)
-                        }
-                    }
-                }
-                .id(asset.id)
-                .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .shadow(radius: 2)
-
-                Text(asset.fileName)
-                    .font(.headline)
-                    .lineLimit(nil)
-
-                // Federated session: say which open library this video lives
-                // in — edits and deletes land there.
-                if LibrarySession.shared.isFederated,
-                   let owner = LibrarySession.shared.url(for: asset.id) {
-                    Text(LibrarySession.shared.shortLabel(for: owner))
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Capsule().fill(Color.teal.opacity(0.15)))
-                        .foregroundColor(.teal)
-                        .help(LibrarySession.shared.fullLabel(for: owner))
-                        .accessibilityLabel("In library \(LibrarySession.shared.fullLabel(for: owner))")
-                }
-
-                HStack {
-                    Text("Metadata")
-                        .font(.headline)
-                        .padding(.vertical, 8)
-                    
-                    Spacer()
-                    
-                    if hasPrevious || hasNext {
-                        HStack(spacing: 12) {
-                            Button(action: goToPrevious) {
-                                Image(systemName: "chevron.left")
-                            }
-                            .disabled(!hasPrevious)
-                            .keyboardShortcut(.leftArrow, modifiers: [])
-                            .help("Previous Video")
-                            .accessibilityLabel("Previous Video")
-                            
-                            Button(action: goToNext) {
-                                Image(systemName: "chevron.right")
-                            }
-                            .disabled(!hasNext)
-                            .keyboardShortcut(.rightArrow, modifiers: [])
-                            .help("Next Video")
-                            .accessibilityLabel("Next Video")
-                        }
-                        .padding(.trailing, 8)
-                    }
-
-                    if missingAssetIDs.contains(asset.id) {
-                        Button("Remove Missing File") {
-                            removeMissingAsset()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                    } else if asset.suggestedFileNameFromTags != nil {
-                        Button("Rename File") {
-                            suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
-                            isShowingRenameDialog = true
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                .padding(.top, 4)
-
-                Divider()
+                // Frame grid ABOVE the player (user decision) but folded into
+                // an accordion, collapsed by default — it duplicates the
+                // player's seek job and was the biggest space consumer.
+                framesAccordion
 
                 // Playback controls (platform-specific)
                 #if os(macOS)
@@ -307,41 +226,491 @@ struct SingleInspectorView: View {
                 }
                 #endif
 
-                Divider()
-
+                // Markers ride with the player: jump points are a WATCHING
+                // feature (capture at the playhead lives here too).
                 sceneMarkersSection
 
                 Divider()
 
-                // Thumbnail + Contact Sheet actions
-                thumbnailAndContactSheetSection
+                titleBlock
 
-                Divider()
+                browsePillsSection
 
-                // Metadata & Status Toggle
-                VStack(alignment: .leading, spacing: 12) {
-                    Button(action: { toggleStatus() }) {
-                        Label {
-                            Text("Status: \(asset.status.rawValue.capitalized)")
-                        } icon: {
-                            Image(systemName: asset.status == .reviewed ? "checkmark.seal.fill" : "circle")
-                                .foregroundColor(asset.status == .reviewed ? .green : .secondary)
+                browseNotesSection
+
+                Color.clear.frame(height: 40)
+            }
+            .padding()
+        }
+        .frame(minWidth: 300)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 2) {
+                    Button {
+                        isShowingEditSheet = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .help("Edit metadata")
+                    .accessibilityLabel("Edit metadata")
+
+                    Menu {
+                        Menu {
+                            AddToPlaylistMenuItems(assetIDs: [asset.id]) {
+                                newPlaylistPendingIDs = [asset.id]
+                            }
+                        } label: {
+                            Label("Add to Playlist", systemImage: "list.and.film")
+                        }
+                        Button {
+                            isShowingEditVideo = true
+                        } label: {
+                            Label("Edit Video (Trim / Flip)", systemImage: "slider.horizontal.below.rectangle")
+                        }
+                        .disabled(missingAssetIDs.contains(asset.id))
+                        Button {
+                            suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
+                            isShowingRenameDialog = true
+                        } label: {
+                            Label("Rename File…", systemImage: "pencil.line")
+                        }
+                        Button {
+                            regenerateDefaultThumbnail()
+                        } label: {
+                            Label("Regenerate Thumbnail", systemImage: "photo")
+                        }
+                        .disabled(isSavingThumb)
+                        Button {
+                            generateContactSheet()
+                        } label: {
+                            Label("Regenerate Contact Sheet", systemImage: "square.grid.3x3")
+                        }
+                        .disabled(isGeneratingSheet)
+                        Divider()
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Video…", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More actions")
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingEditSheet) {
+            editSheet
+        }
+#if os(macOS)
+        // ⌘⌫ opens the same delete confirmation as the Danger Zone button
+        // (hidden so it works even while the DisclosureGroup is collapsed).
+        .background(
+            Button("") { showDeleteConfirmation = true }
+                .keyboardShortcut(.delete, modifiers: [.command])
+                .hidden()
+                .accessibilityHidden(true)
+        )
+#endif
+        .sheet(isPresented: $isShowingRenameDialog) {
+            RenameDialogView(
+                oldFileName: asset.fileName,
+                newFileName: $suggestedRenameValue,
+                onCancel: { isShowingRenameDialog = false },
+                onConfirm: {
+                    performRename()
+                }
+            )
+        }
+        .alert("Delete Video?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteVideo()
+            }
+        } message: {
+            Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
+        }
+        .sheet(isPresented: $isShowingEditVideo) {
+            if let url = libraryURL {
+                EditVideoView(asset: asset, libraryURL: url, sceneMarkers: sceneMarkers,
+                              onCompleted: { handleVideoEdited() })
+            }
+        }
+        .onAppear {
+            #if os(macOS)
+            loadDuration()
+            #endif
+            loadSceneMarkers()
+            notesDraft = asset.notes ?? ""
+            seriesNameDraft = asset.videoName ?? ""
+            episodeTitleDraft = asset.episode ?? ""
+            startAutoPlayIfRequested()
+        }
+        .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
+        .onDisappear {
+            // Commit any un-committed notes/series-name/episode-title edit
+            // before the view goes away, and stop audio — on iPhone, pushing
+            // deeper (e.g. tapping an actor tag) keeps this view alive in the
+            // navigation stack, so without this the video kept playing
+            // underneath the new screen.
+            notesSaveTask?.cancel()
+            commitNotesDraft()
+            commitSeriesNameDraft()
+            commitEpisodeTitleDraft()
+            playback.player.pause()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Leaving the foreground is the last reliable moment before a
+            // possible swipe-kill: flush the debounced notes/series/episode
+            // drafts now, or an edit typed in the final ~600ms dies with the
+            // process (DEFECT_INVENTORY L9).
+            if newPhase != .active {
+                notesSaveTask?.cancel()
+                commitNotesDraft()
+                commitSeriesNameDraft()
+                commitEpisodeTitleDraft()
+            }
+        }
+        .onChange(of: asset.id) { _, _ in
+            #if os(macOS)
+            loadDuration()
+            #endif
+            loadSceneMarkers()
+            notesDraft = asset.notes ?? ""
+            seriesNameDraft = asset.videoName ?? ""
+            episodeTitleDraft = asset.episode ?? ""
+        }
+        .onChange(of: scrubTime) { _, newValue in
+            #if os(macOS)
+            guard isShowingPlayer else { return }
+            Task { await playback.seek(to: newValue, autoplay: nil) }
+            #endif
+        }
+        .navigationTitle("Video Details")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("ToggleFullScreen"), object: nil)
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Toggle Full Screen")
+                .accessibilityLabel("Toggle Full Screen")
+            }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { isShowingHelp = true }) {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help")
+                .accessibilityLabel("Help")
+            }
+        }
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: HelpContent.videoDetails.id)
+        }
+    }
+
+    // MARK: - Scene Markers
+
+    // The real, live playback position — NOT `scrubTime`, which is just a
+    // one-shot "seek to here" request set when tapping a frame-grid thumbnail
+    // or dragging the macOS scrubber. It never tracks ongoing playback, so
+    // using it here would record the same stale timestamp for every marker
+    // regardless of where the video is actually paused.
+    private func currentPlaybackSeconds() -> Double {
+        let seconds = playback.player.currentTime().seconds
+        return seconds.isFinite ? max(0, seconds) : scrubTime
+    }
+
+    private func formattedTime(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    @ViewBuilder
+    // MARK: - Watch-first browse sections
+
+    /// Frame grid above the player (user decision), collapsed by default.
+    /// On macOS the thumbnail scrubber tools live here too — they're
+    /// frame-preview machinery.
+    private var framesAccordion: some View {
+        DisclosureGroup(isExpanded: $isShowingFrames) {
+            VStack(alignment: .leading, spacing: 10) {
+                DetailGridView(asset: asset, libraryURL: libraryURL, isInteractive: true) { t in
+                    scrubTime = t
+
+                    #if os(macOS)
+                    // If the popout is open, keep inline hidden.
+                    if popout.isOpen {
+                        isShowingPlayer = false
+                        popout.bringToFront()
+                    } else {
+                        isShowingPlayer = true
+                    }
+                    #else
+                    isShowingPlayer = true
+                    #endif
+
+                    if let url = videoURL() {
+                        if !missingAssetIDs.contains(asset.id) {
+                            recordPlayIfNeeded()
+                            playback.load(url: url, startSeconds: t, autoplay: true)
                         }
                     }
-                    .buttonStyle(.plain)
+                }
+                .id(asset.id)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(radius: 2)
 
-                    Label("Added: \(asset.createdAt.formatted(date: .abbreviated, time: .omitted))", systemImage: "calendar")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    if asset.playCount > 0 {
-                        Label(playCountSummary, systemImage: "play.circle")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                #if os(macOS)
+                ZStack {
+                    if let preview = previewFrame {
+                        Image(nsImage: preview)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Rectangle()
+                            .fill(Color.black)
+                            .aspectRatio(1.33, contentMode: .fit)
                     }
 
-                    Divider()
+                    if isSavingThumb {
+                        ProgressView()
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 4))
 
+                Slider(
+                    value: $scrubTime,
+                    in: 0...max(1, duration),
+                    onEditingChanged: { _ in
+                        generatePreview()
+                    }
+                )
+
+                HStack {
+                    Button("Set as Main Thumbnail") {
+                        saveNewThumbnailFromScrubTime()
+                    }
+                    .disabled(isSavingThumb)
+                    .controlSize(.small)
+
+                    Button {
+                        if let url = videoURL() {
+                            isShowingPlayer = true
+                            recordPlayIfNeeded()
+                            playback.load(url: url, startSeconds: scrubTime, autoplay: true)
+                        }
+                    } label: {
+                        Label("Play from Scrubber", systemImage: "play.circle.fill")
+                    }
+                    .controlSize(.small)
+                }
+                #endif
+            }
+            .padding(.top, 8)
+        } label: {
+            Label("Preview Frames", systemImage: "square.grid.3x3")
+                .font(.subheadline.bold())
+        }
+    }
+
+    /// Title, series line, and the glanceable meta row (rating, status,
+    /// library, play count) — plus prev/next and the missing-file rescue.
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(asset.videoName ?? asset.fileName)
+                        .font(.headline)
+                        .lineLimit(nil)
+                    if !asset.seriesTitleBlock.isEmpty {
+                        Text(asset.seriesTitleBlock)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                if hasPrevious || hasNext {
+                    HStack(spacing: 12) {
+                        Button(action: goToPrevious) {
+                            Image(systemName: "chevron.left")
+                        }
+                        .disabled(!hasPrevious)
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+                        .help("Previous Video")
+                        .accessibilityLabel("Previous Video")
+
+                        Button(action: goToNext) {
+                            Image(systemName: "chevron.right")
+                        }
+                        .disabled(!hasNext)
+                        .keyboardShortcut(.rightArrow, modifiers: [])
+                        .help("Next Video")
+                        .accessibilityLabel("Next Video")
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                HStack(spacing: 2) {
+                    ForEach(1...5, id: \.self) { star in
+                        Image(systemName: star <= (asset.rating ?? 0) ? "star.fill" : "star")
+                            .foregroundColor(.yellow)
+                            .onTapGesture {
+                                var updated = asset
+                                if updated.rating == star {
+                                    updated.rating = nil
+                                } else {
+                                    updated.rating = star
+                                }
+                                if let url = LibrarySession.shared.url(for: asset.id) { updateAsset(updated, at: url) }
+                            }
+                    }
+                }
+                .accessibilityLabel("Rating: \(asset.rating ?? 0) of 5")
+
+                Button(action: { toggleStatus() }) {
+                    Label(asset.status == .reviewed ? "Reviewed" : "Unreviewed",
+                          systemImage: asset.status == .reviewed ? "checkmark.seal.fill" : "circle")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Capsule().fill(asset.status == .reviewed
+                            ? Color.green.opacity(0.15) : Color.secondary.opacity(0.12)))
+                        .foregroundColor(asset.status == .reviewed ? .green : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Tap to toggle reviewed")
+
+                if LibrarySession.shared.isFederated,
+                   let owner = LibrarySession.shared.url(for: asset.id) {
+                    Text(LibrarySession.shared.shortLabel(for: owner))
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.teal.opacity(0.15)))
+                        .foregroundColor(.teal)
+                        .help(LibrarySession.shared.fullLabel(for: owner))
+                        .accessibilityLabel("In library \(LibrarySession.shared.fullLabel(for: owner))")
+                }
+            }
+
+            HStack(spacing: 12) {
+                Label(asset.createdAt.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                if asset.playCount > 0 {
+                    Label(playCountSummary, systemImage: "play.circle")
+                }
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
+
+            if missingAssetIDs.contains(asset.id) {
+                Button("Remove Missing File") {
+                    removeMissingAsset()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    /// Browse mode: pills NAVIGATE (tap opens that actor/tag/studio page).
+    /// All add/edit/delete chrome lives in the ✎ Edit sheet only.
+    @ViewBuilder
+    private var browsePillsSection: some View {
+        browsePillRow(title: "Actors", items: asset.actors, category: "actor", color: .blue)
+        browsePillRow(title: "Tags", items: asset.actions, category: "tag", color: .green)
+        browsePillRow(title: "Studios", items: asset.studios, category: "studio", color: .purple)
+    }
+
+    @ViewBuilder
+    private func browsePillRow(title: String, items: [String], category: String, color: Color) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.subheadline).fontWeight(.bold)
+                FlowLayout(spacing: 8) {
+                    ForEach(items, id: \.self) { item in
+                        browsePill(item, category: category, color: color)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func browsePill(_ item: String, category: String, color: Color) -> some View {
+        let label = HStack(spacing: 4) {
+            Text(item)
+            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).opacity(0.6)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(color.opacity(0.14)))
+        .foregroundColor(color)
+
+        #if os(iOS)
+        NavigationLink(value: AppRoute.entityProfile(category: category, name: item)) {
+            label
+        }
+        .buttonStyle(.plain)
+        #else
+        Button {
+            pivotToEntity(item, category: category)
+        } label: {
+            label
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    #if os(macOS)
+    private func pivotToEntity(_ item: String, category: String) {
+        var pivotItem: SidebarItem
+        switch category {
+        case "actor": pivotItem = .actor(item)
+        case "studio": pivotItem = .studio(item)
+        default: pivotItem = .tag(item)
+        }
+        sidebarSelection = [pivotItem]
+        selectedAssetBinding.removeAll()
+        dismiss()
+    }
+    #endif
+
+    /// Read-only notes; tapping opens the Edit sheet.
+    private var browseNotesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Notes").font(.subheadline).fontWeight(.bold)
+            if let notes = asset.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.callout)
+                    .foregroundColor(.primary)
+            } else {
+                Text("No notes yet — tap to add some.")
+                    .font(.caption)
+                    .italic()
+                    .foregroundColor(.secondary)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { isShowingEditSheet = true }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens the metadata editor")
+    }
+
+    // MARK: - Edit sheet (all metadata curation in one place)
+
+    private var editSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Series Name").font(.subheadline).foregroundColor(.secondary)
                         TextField("e.g. Movie Name or TV Show", text: $seriesNameDraft)
@@ -431,200 +800,60 @@ struct SingleInspectorView: View {
                     }
 
                     Divider()
-                }
 
-                annotationsSection
-                Divider()
-
-                tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
-                Divider()
-                tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
-                Divider()
-                tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
-
-                Color.clear.frame(height: 40)
-
-                // Keep this button for macOS (scrubber semantics). On iOS, grid tap already does the job.
-                #if os(macOS)
-                HStack {
-                    Button {
-                        if let url = videoURL() {
-                            isShowingPlayer = true
-                            recordPlayIfNeeded()
-                            playback.load(url: url, startSeconds: scrubTime, autoplay: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Notes").font(.subheadline).foregroundColor(.secondary)
+                        // Edits buffer into notesDraft and commit ~600ms after the
+                        // last keystroke (plus a flush on disappear/Done).
+                        TextEditor(text: $notesDraft)
+                        .frame(minHeight: 80)
+                        .padding(4)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                        .onChange(of: notesDraft) { _, newValue in
+                            guard newValue != (asset.notes ?? "") else { return }
+                            notesSaveTask?.cancel()
+                            notesSaveTask = Task {
+                                try? await Task.sleep(nanoseconds: 600_000_000)
+                                guard !Task.isCancelled else { return }
+                                commitNotesDraft()
+                            }
                         }
-                    } label: {
-                        Label("Play from Scrubber", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
-                #endif
-                
-                Divider()
-                // File-modifying edits, kept distinct from the non-destructive
-                // tagging/metadata actions above.
-                Button {
-                    isShowingEditVideo = true
-                } label: {
-                    Label("Edit Video (Trim / Flip)", systemImage: "slider.horizontal.below.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(missingAssetIDs.contains(asset.id))
-                .accessibilityLabel("Edit Video, trim or flip")
 
-                Divider()
-                DisclosureGroup("Danger Zone") {
-                    Button(role: .destructive, action: {
-                        showDeleteConfirmation = true
-                    }) {
-                        Label("Delete Video", systemImage: "trash")
-                            .frame(maxWidth: .infinity)
+                    Divider()
+
+                    tagSection(title: "Actors", items: asset.actors, category: "actor", color: .blue)
+                    Divider()
+                    tagSection(title: "Tags", items: asset.actions, category: "tag", color: .green)
+                    Divider()
+                    tagSection(title: "Studios", items: asset.studios, category: "studio", color: .purple)
+                }
+                .padding()
+            }
+            .navigationTitle("Edit")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        notesSaveTask?.cancel()
+                        commitNotesDraft()
+                        commitSeriesNameDraft()
+                        commitEpisodeTitleDraft()
+                        isShowingEditSheet = false
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .padding(.top, 4)
                 }
-                .tint(.red)
             }
-            .padding()
-        }
-        .frame(minWidth: 300)
-#if os(macOS)
-        // ⌘⌫ opens the same delete confirmation as the Danger Zone button
-        // (hidden so it works even while the DisclosureGroup is collapsed).
-        .background(
-            Button("") { showDeleteConfirmation = true }
-                .keyboardShortcut(.delete, modifiers: [.command])
-                .hidden()
-                .accessibilityHidden(true)
-        )
-#endif
-        .popover(isPresented: $isShowingTagEntry) {
-            tagEntryPopover
-        }
-        .sheet(isPresented: $isShowingRenameDialog) {
-            RenameDialogView(
-                oldFileName: asset.fileName,
-                newFileName: $suggestedRenameValue,
-                onCancel: { isShowingRenameDialog = false },
-                onConfirm: {
-                    performRename()
-                }
-            )
-        }
-        .alert("Delete Video?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                deleteVideo()
-            }
-        } message: {
-            Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
-        }
-        .sheet(isPresented: $isShowingEditVideo) {
-            if let url = libraryURL {
-                EditVideoView(asset: asset, libraryURL: url, sceneMarkers: sceneMarkers,
-                              onCompleted: { handleVideoEdited() })
+            .popover(isPresented: $isShowingTagEntry) {
+                tagEntryPopover
             }
         }
-        .onAppear {
-            #if os(macOS)
-            loadDuration()
-            #endif
-            loadSceneMarkers()
-            notesDraft = asset.notes ?? ""
-            seriesNameDraft = asset.videoName ?? ""
-            episodeTitleDraft = asset.episode ?? ""
-            startAutoPlayIfRequested()
-        }
-        .onDisappear {
-            // Commit any un-committed notes/series-name/episode-title edit
-            // before the view goes away, and stop audio — on iPhone, pushing
-            // deeper (e.g. tapping an actor tag) keeps this view alive in the
-            // navigation stack, so without this the video kept playing
-            // underneath the new screen.
-            notesSaveTask?.cancel()
-            commitNotesDraft()
-            commitSeriesNameDraft()
-            commitEpisodeTitleDraft()
-            playback.player.pause()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            // Leaving the foreground is the last reliable moment before a
-            // possible swipe-kill: flush the debounced notes/series/episode
-            // drafts now, or an edit typed in the final ~600ms dies with the
-            // process (DEFECT_INVENTORY L9).
-            if newPhase != .active {
-                notesSaveTask?.cancel()
-                commitNotesDraft()
-                commitSeriesNameDraft()
-                commitEpisodeTitleDraft()
-            }
-        }
-        .onChange(of: asset.id) { _, _ in
-            #if os(macOS)
-            loadDuration()
-            #endif
-            loadSceneMarkers()
-            notesDraft = asset.notes ?? ""
-            seriesNameDraft = asset.videoName ?? ""
-            episodeTitleDraft = asset.episode ?? ""
-        }
-        .onChange(of: scrubTime) { _, newValue in
-            #if os(macOS)
-            guard isShowingPlayer else { return }
-            Task { await playback.seek(to: newValue, autoplay: nil) }
-            #endif
-        }
-        .navigationTitle("Video Details")
-#if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-#endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    NotificationCenter.default.post(name: NSNotification.Name("ToggleFullScreen"), object: nil)
-                }) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-                .help("Toggle Full Screen")
-                .accessibilityLabel("Toggle Full Screen")
-            }
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: { isShowingHelp = true }) {
-                    Image(systemName: "questionmark.circle")
-                }
-                .help("Help")
-                .accessibilityLabel("Help")
-            }
-        }
-        .sheet(isPresented: $isShowingHelp) {
-            HelpView(initialTopicID: HelpContent.videoDetails.id)
-        }
+        #if os(macOS)
+        .frame(minWidth: 440, minHeight: 560)
+        #endif
     }
 
-    // MARK: - Scene Markers
-
-    // The real, live playback position — NOT `scrubTime`, which is just a
-    // one-shot "seek to here" request set when tapping a frame-grid thumbnail
-    // or dragging the macOS scrubber. It never tracks ongoing playback, so
-    // using it here would record the same stale timestamp for every marker
-    // regardless of where the video is actually paused.
-    private func currentPlaybackSeconds() -> Double {
-        let seconds = playback.player.currentTime().seconds
-        return seconds.isFinite ? max(0, seconds) : scrubTime
-    }
-
-    private func formattedTime(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%d:%02d", m, s)
-    }
-
-    @ViewBuilder
     private var sceneMarkersSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -770,83 +999,6 @@ struct SingleInspectorView: View {
         isShowingPlayer = true
         recordPlayIfNeeded()
         playback.load(url: url, startSeconds: 0, autoplay: true)
-    }
-
-    // MARK: - Thumbnail + Contact sheet section
-
-    @ViewBuilder
-    private var thumbnailAndContactSheetSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Media Outputs")
-                .font(.subheadline)
-                .fontWeight(.bold)
-
-            #if os(macOS)
-            // --- THUMBNAIL SCRUBBER (macOS only) ---
-            ZStack {
-                if let preview = previewFrame {
-                    Image(nsImage: preview)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                } else {
-                    Rectangle()
-                        .fill(Color.black)
-                        .aspectRatio(1.33, contentMode: .fit)
-                }
-
-                if isSavingThumb {
-                    ProgressView()
-                        .background(Circle().fill(.ultraThinMaterial))
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-
-            Slider(
-                value: $scrubTime,
-                in: 0...max(1, duration),
-                onEditingChanged: { _ in
-                    generatePreview()
-                }
-            )
-
-            Button("Set as Main Thumbnail") {
-                saveNewThumbnailFromScrubTime()
-            }
-            .disabled(isSavingThumb)
-            .controlSize(.small)
-
-            #else
-            // iOS MVP: no scrubber. Just regenerate using default heuristic time.
-            HStack {
-                Button {
-                    regenerateDefaultThumbnail()
-                } label: {
-                    Label(isSavingThumb ? "Generating…" : "Regenerate Thumbnail", systemImage: "photo")
-                }
-                .buttonStyle(.bordered)
-                .disabled(isSavingThumb)
-
-                Button {
-                    generateContactSheet()
-                } label: {
-                    Label(isGeneratingSheet ? "Generating…" : "Generate Contact Sheet", systemImage: "square.grid.3x3")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isGeneratingSheet)
-            }
-            #endif
-
-            // Contact sheet is useful on macOS too; keep button for both
-            #if os(macOS)
-            Button {
-                generateContactSheet()
-            } label: {
-                Label(isGeneratingSheet ? "Generating…" : "Generate Contact Sheet", systemImage: "square.grid.3x3")
-            }
-            .buttonStyle(.bordered)
-            .disabled(isGeneratingSheet)
-            #endif
-        }
     }
 
     // MARK: - macOS scrubber logic
@@ -1144,50 +1296,6 @@ struct SingleInspectorView: View {
         #endif
     }
     
-    private var annotationsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Annotations").font(.subheadline).fontWeight(.bold)
-            
-            HStack {
-                Text("Rating:").font(.subheadline).foregroundColor(.secondary)
-                ForEach(1...5, id: \.self) { star in
-                    Image(systemName: star <= (asset.rating ?? 0) ? "star.fill" : "star")
-                        .foregroundColor(.yellow)
-                        .onTapGesture {
-                            var updated = asset
-                            if updated.rating == star {
-                                updated.rating = nil
-                            } else {
-                                updated.rating = star
-                            }
-                            if let url = LibrarySession.shared.url(for: asset.id) { updateAsset(updated, at: url) }
-                        }
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Notes").font(.subheadline).foregroundColor(.secondary)
-                // Edits buffer into notesDraft and commit ~600ms after the
-                // last keystroke (plus a flush on disappear). Binding the
-                // editor straight to the asset meant one SQLite UPDATE *and*
-                // one mutation of the app-wide assets array per keystroke —
-                // every keystroke re-triggered grid refiltering everywhere.
-                TextEditor(text: $notesDraft)
-                .frame(minHeight: 80)
-                .padding(4)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
-                .onChange(of: notesDraft) { _, newValue in
-                    guard newValue != (asset.notes ?? "") else { return }
-                    notesSaveTask?.cancel()
-                    notesSaveTask = Task {
-                        try? await Task.sleep(nanoseconds: 600_000_000)
-                        guard !Task.isCancelled else { return }
-                        commitNotesDraft()
-                    }
-                }
-            }
-        }
-    }
 
     private func toggleStatus() {
         guard let url = LibrarySession.shared.url(for: asset.id) else { return }

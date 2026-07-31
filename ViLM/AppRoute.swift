@@ -16,4 +16,6 @@ enum AppRoute: Hashable {
     case batchActors(Set<String>)
     /// A Smart Shelf's full "See All" list, computed live from a `LibraryQuery`.
     case shelf(LibraryQuery)
+    /// A playlist's detail page (hand-picked ordered list), by playlist id.
+    case playlist(String)
 }

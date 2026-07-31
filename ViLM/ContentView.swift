@@ -47,6 +47,10 @@ struct ContentView: View {
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
     @State private var smartCollections: [SmartCollection] = []
+    // Playlists (hand-picked ordered lists) live in the PRIMARY library, like
+    // Smart Collections. Items are the ordered assetId strings per playlist.
+    @State private var playlists: [Playlist] = []
+    @State private var playlistItemsByID: [String: [String]] = [:]
 
     @State private var pendingAssetFilter: AssetFilterCriteria?
     @State private var pendingAssetSort: AssetsGridView.SortOption?
@@ -188,7 +192,14 @@ struct ContentView: View {
                 if let url = selectedLibraryURL {
                     loadEntityProfiles(from: url)
                     reloadUnionAssets()
+                    loadPlaylists()
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ReloadPlaylists"))) { _ in
+                loadPlaylists()
+            }
+            .onChange(of: selectedLibraryURL) { _, _ in
+                loadPlaylists()
             }
             .sheet(isPresented: $isShowingSettings, onDismiss: {
                 pendingSettingsDeepLink?()
@@ -393,7 +404,10 @@ struct ContentView: View {
                 pendingActorFilter: $pendingActorFilter,
                 onSeeAllShelf: showShelf,
                 onQuickAction: performQuickAction,
-                smartCollections: smartCollections
+                smartCollections: smartCollections,
+                playlists: playlists,
+                playlistItems: playlistItemsByID,
+                onOpenPlaylist: openPlaylist
             )
         } else if sidebarSelection.contains(.actorGallery) {
             ActorGridView(
@@ -615,6 +629,52 @@ struct ContentView: View {
         }
     }
 
+    /// Loads playlists (and their ordered members) from the primary library.
+    private func loadPlaylists() {
+        guard let url = selectedLibraryURL else {
+            playlists = []
+            playlistItemsByID = [:]
+            return
+        }
+        do {
+            let store = try LibraryStore(at: url)
+            let lists = try store.fetchAllPlaylists()
+            var itemsByID: [String: [String]] = [:]
+            for list in lists {
+                itemsByID[list.id] = try store.fetchPlaylistItems(playlistId: list.id).map(\.assetId)
+            }
+            playlists = lists
+            playlistItemsByID = itemsByID
+        } catch {
+            print("Failed to load playlists: \(error)")
+        }
+    }
+
+    /// Opens a playlist's detail page (Dashboard "See All", like shelves).
+    private func openPlaylist(_ id: String) {
+#if os(iOS)
+        if horizontalSizeClass == .compact {
+            navigationPath.append(.playlist(id))
+            return
+        }
+#endif
+        detailPath.append(.playlist(id))
+    }
+
+    /// Plays a video from a playlist (row Play / Shuffle): same auto-play
+    /// mechanism as the quick actions.
+    private func playFromPlaylist(_ assetID: Asset.ID) {
+        selectedAssetIDs = [assetID]
+        pendingAutoPlayAssetID = assetID
+#if os(iOS)
+        if horizontalSizeClass == .compact {
+            navigationPath.append(.asset(assetID, context: [assetID]))
+            return
+        }
+#endif
+        detailPath.append(.asset(assetID, context: [assetID]))
+    }
+
     // A Smart Shelf "See All" opens its full live list as a pushed route —
     // onto the compact stack on iPhone, or the detail stack on iPad/macOS.
     private func showShelf(_ query: LibraryQuery) {
@@ -779,6 +839,12 @@ struct ContentView: View {
                 assets: assets,
                 libraryURL: selectedLibraryURL,
                 selectedAssetIDs: $selectedAssetIDs
+            )
+        case .playlist(let id):
+            PlaylistDetailView(
+                playlistID: id,
+                assets: assets,
+                onPlay: playFromPlaylist
             )
         case .asset(let id, let context):
             InspectorView(

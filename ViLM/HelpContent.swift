@@ -36,9 +36,32 @@ enum HelpContent {
         seriesGallery,
         videoDetails,
         actorProfile,
+        playlists,
         openLibraries,
         settings,
     ]
+
+    static let playlists = HelpTopic(
+        id: "playlists",
+        title: "Playlists",
+        summary: "Hand-picked lists of videos, in exactly the order you arrange — unlike a Smart Collection, which is a saved filter that future videos join automatically, a playlist contains only what you put in it. Playlists live on the Dashboard and are stored in your main library.",
+        items: [
+            .init(label: "Creating a playlist",
+                  description: "Use New Playlist on the Dashboard's Playlists section, or pick “New Playlist…” from any Add to Playlist menu — it creates the playlist and adds your videos in one step."),
+            .init(label: "Adding videos",
+                  description: "Four ways: select videos in All Assets (great after a search — Select All Shown, then the Playlist button in the bottom bar); long-press any video card (right-click on Mac, where it acts on your whole selection); the playlist button on a video's details page; or Add Videos… inside the playlist itself. Adding a video that's already there is safely ignored."),
+            .init(label: "Ordering",
+                  description: "New videos append at the end. Drag rows to reorder (use Edit on iPhone); the order is yours and is saved immediately."),
+            .init(label: "Playing",
+                  description: "Tap a row's play button to play that video, or use Shuffle in the playlist's menu for a random pick from the list."),
+            .init(label: "Removing and deleting",
+                  description: "Swipe a row (or use Edit) to remove a video from the list — the video itself is untouched. Delete Playlist removes only the list, never your videos."),
+            .init(label: "Unavailable videos",
+                  description: "If a playlist references a video from a library that isn't open right now (see Open Libraries), the row shows as unavailable rather than disappearing — attach that library and it comes back. Remove Unavailable in the playlist menu cleans them out deliberately."),
+            .init(label: "Backups",
+                  description: "Playlists are part of your library's catalog, so they're included in backups and merge sensibly on restore."),
+        ]
+    )
 
     static let openLibraries = HelpTopic(
         id: "openLibraries",
@@ -77,6 +100,8 @@ enum HelpContent {
                   description: "Your newest videos. Tap one to open it, or tap See All to view every video sorted by date added."),
             .init(label: "Unreviewed",
                   description: "Videos you haven't marked as reviewed yet. Tap a thumbnail to open the video, or tap Mark Reviewed right on the card to check it off without opening it. Tap See All to view every unreviewed video."),
+            .init(label: "Playlists",
+                  description: "Your hand-picked lists of videos, in your order. Create one with the New Playlist button, expand it for a preview strip, or tap See All to open the playlist page. (See the Playlists help topic for the full story.)"),
             .init(label: "Recently Added Actors",
                   description: "Your newest actor profiles. Tap one to open their profile, or tap See All to view every actor sorted by date added."),
             .init(label: "Actors Needing Attention",
@@ -157,6 +182,8 @@ enum HelpContent {
         items: [
             .init(label: "Frame grid",
                   description: "Tap or drag across the thumbnail grid to seek the player to that point in the video."),
+            .init(label: "Add to Playlist",
+                  description: "The list button beside the Metadata header adds this video to any playlist, or creates a new one."),
             .init(label: "Player controls",
                   description: "Show or hide the inline player, pop it out into its own window (Mac), or play from the start."),
             .init(label: "Scene Markers",

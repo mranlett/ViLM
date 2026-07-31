@@ -10,6 +10,7 @@
 import Foundation
 import AppleArchive
 import System
+import GRDB
 
 public enum LibraryBackupError: Error, Equatable {
     case catalogMissing
@@ -200,6 +201,10 @@ public struct LibraryBackupService {
                 archiveMarkers[asset.id] = try archiveStore.fetchSceneMarkers(for: asset.id)
             }
             let archiveCollections = try archiveStore.fetchAllSmartCollections()
+            var archivePlaylists: [(playlist: Playlist, items: [PlaylistItem])] = []
+            for playlist in try archiveStore.fetchAllPlaylists() {
+                archivePlaylists.append((playlist, try archiveStore.fetchPlaylistItems(playlistId: playlist.id)))
+            }
             let actorExport = try archiveStore.exportActorLibrary()
 
             let destAssets = try destStore.fetchAllAssets()
@@ -257,6 +262,29 @@ public struct LibraryBackupService {
                 for collection in archiveCollections
                 where !existingCollectionIDs.contains(collection.id) {
                     try destStore.saveSmartCollection(collection, in: db)
+                }
+
+                // Playlists: union by id. An archive-only playlist is restored
+                // whole; a playlist in both keeps the destination's row and
+                // order, with archive-only members appended at the end.
+                let existingPlaylistIDs = Set(try destStore.fetchAllPlaylists(in: db).map(\.id))
+                for (playlist, items) in archivePlaylists {
+                    if existingPlaylistIDs.contains(playlist.id) {
+                        let destItems = try destStore.fetchPlaylistItems(playlistId: playlist.id, in: db)
+                        let destMembers = Set(destItems.map(\.assetId))
+                        var next = (destItems.map(\.position).max() ?? -1) + 1
+                        for item in items.sorted(by: { $0.position < $1.position })
+                        where !destMembers.contains(item.assetId) {
+                            try PlaylistItem(playlistId: playlist.id, assetId: item.assetId,
+                                             position: next, addedAt: item.addedAt).insert(db)
+                            next += 1
+                        }
+                    } else {
+                        try playlist.insert(db)
+                        for item in items {
+                            try item.insert(db)
+                        }
+                    }
                 }
 
                 // Actor profiles + photos: the full Actor Merge engine.

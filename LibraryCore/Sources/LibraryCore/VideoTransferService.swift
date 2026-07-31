@@ -427,10 +427,16 @@ public final class VideoTransferService {
         prints.removeEntry(relativePath: asset.relativePath)
         prints.save()
 
-        // 3. The DB row last. If this throws after the file is gone, the row
-        //    points at a missing file — Check for Changes flags it normally,
-        //    which is recoverable (unlike the reverse order's metadata loss).
-        try store.deleteAsset(asset)
+        // 3. The DB row last (one transaction with its playlist memberships
+        //    in THIS library — no dangling entries for same-library deletes;
+        //    cross-library playlist references are display-tolerated instead).
+        //    If this throws after the file is gone, the row points at a
+        //    missing file — Check for Changes flags it normally, which is
+        //    recoverable (unlike the reverse order's metadata loss).
+        try store.performInTransaction { db in
+            try store.removePlaylistEntries(assetId: asset.id, in: db)
+            try store.deleteAsset(asset, in: db)
+        }
     }
 
     private static func removeFile(_ url: URL, toTrash: Bool) throws {

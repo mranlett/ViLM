@@ -35,6 +35,12 @@ struct DashboardView: View {
     let onQuickAction: (QuickAction) -> Void
     /// Saved Smart Collections, surfaced as Dashboard accordions (v2).
     let smartCollections: [SmartCollection]
+    /// Playlists (hand-picked ordered lists) + their ordered member assetIds,
+    /// surfaced as Dashboard accordions like collections.
+    let playlists: [Playlist]
+    let playlistItems: [String: [String]]
+    /// Opens a playlist's detail page (pushed route, like shelf See All).
+    let onOpenPlaylist: (String) -> Void
 
     private var actorProfiles: [String: EntityProfile] {
         entityProfiles.filter { $0.key.hasPrefix("actor:") }
@@ -66,6 +72,13 @@ struct DashboardView: View {
     @State private var unreadableCollectionIDs: Set<String> = []
     @AppStorage("dashboardExpandedCollections") private var expandedCollectionsRaw: String = ""
 
+    // Playlists: same accordion treatment, keyed by playlist id.
+    @State private var playlistPreviews: [String: [Asset]] = [:]
+    @State private var playlistCounts: [String: Int] = [:]
+    @AppStorage("dashboardExpandedPlaylists") private var expandedPlaylistsRaw: String = ""
+    @State private var isShowingNewPlaylist = false
+    @State private var newPlaylistName = ""
+
     /// Everything the dashboard derives from the library, computed as one
     /// value so it can be produced off the main thread and applied at once.
     private struct DashboardStats: Sendable {
@@ -76,6 +89,8 @@ struct DashboardView: View {
         var collectionPreviews: [String: [Asset]] = [:]
         var collectionCounts: [String: Int] = [:]
         var unreadableCollectionIDs: Set<String> = []
+        var playlistPreviews: [String: [Asset]] = [:]
+        var playlistCounts: [String: Int] = [:]
         var recentlyAddedActors: [String] = []
         var actorsNeedingAttention: [String] = []
         var growthData: [(date: Date, count: Int)] = []
@@ -97,11 +112,14 @@ struct DashboardView: View {
         let profileImageFileNames = self.profileImageFileNames
         let akaMap = self.akaMap
         let smartCollections = self.smartCollections
+        let playlists = self.playlists
+        let playlistItems = self.playlistItems
         Task.detached(priority: .userInitiated) {
             let stats = Self.computeStats(
                 assets: assets, entityProfiles: entityProfiles,
                 profileImageFileNames: profileImageFileNames,
-                akaMap: akaMap, smartCollections: smartCollections)
+                akaMap: akaMap, smartCollections: smartCollections,
+                playlists: playlists, playlistItems: playlistItems)
             await MainActor.run {
                 guard generation == statsGeneration else { return }
                 totalActors = stats.totalActors
@@ -111,6 +129,8 @@ struct DashboardView: View {
                 collectionPreviews = stats.collectionPreviews
                 collectionCounts = stats.collectionCounts
                 unreadableCollectionIDs = stats.unreadableCollectionIDs
+                playlistPreviews = stats.playlistPreviews
+                playlistCounts = stats.playlistCounts
                 recentlyAddedActors = stats.recentlyAddedActors
                 actorsNeedingAttention = stats.actorsNeedingAttention
                 growthData = stats.growthData
@@ -123,7 +143,9 @@ struct DashboardView: View {
         entityProfiles: [String: EntityProfile],
         profileImageFileNames: Set<String>,
         akaMap: [String: String],
-        smartCollections: [SmartCollection]
+        smartCollections: [SmartCollection],
+        playlists: [Playlist],
+        playlistItems: [String: [String]]
     ) -> DashboardStats {
         var stats = DashboardStats()
         let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
@@ -187,6 +209,17 @@ struct DashboardView: View {
                 .prefix(Self.shelfPreviewCount))
         }
 
+        // Playlists: count = total members (including currently-unavailable
+        // ones — the list is the user's, not the view's); preview strip =
+        // the first resolvable videos in manual order.
+        let assetsByID = Dictionary(uniqueKeysWithValues: assets.map { ($0.id.uuidString, $0) })
+        for playlist in playlists {
+            let memberIds = playlistItems[playlist.id] ?? []
+            stats.playlistCounts[playlist.id] = memberIds.count
+            stats.playlistPreviews[playlist.id] = Array(
+                memberIds.compactMap { assetsByID[$0] }.prefix(Self.shelfPreviewCount))
+        }
+
         let sortedProfiles = actorProfiles.values.sorted {
             ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
         }
@@ -225,91 +258,23 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                // Header
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Library")
-                        .font(.largeTitle)
-                        .bold()
-                    Text("Here's what's new in your library")
-                        .font(.subheadline)
-                        .foregroundColor(.primary)
-                }
-                .padding(.horizontal)
-                .padding(.top, 10)
-                
-                // Hero stat cards
-                HStack(spacing: 12) {
-                    StatCardView(title: "Videos", value: "\(assets.count)")
-                    StatCardView(title: "Actors", value: "\(totalActors)")
-                    StatCardView(title: "Tags", value: "\(totalTags)")
-                }
-                .padding(.horizontal)
-                
-                // Library Growth Chart
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Library Growth")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Text("Last 30 days")
-                            .font(.caption)
-                            .foregroundColor(.primary)
-                    }
-                    
-                    let data = growthData
-                    Chart {
-                        ForEach(data, id: \.date) { item in
-                            LineMark(
-                                x: .value("Date", item.date),
-                                y: .value("Added", item.count)
-                            )
-                            .foregroundStyle(Color.accentColor)
-                            .interpolationMethod(.catmullRom)
-                            
-                            AreaMark(
-                                x: .value("Date", item.date),
-                                y: .value("Added", item.count)
-                            )
-                            .foregroundStyle(LinearGradient(
-                                colors: [Color.accentColor.opacity(0.3), Color.accentColor.opacity(0.0)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ))
-                            .interpolationMethod(.catmullRom)
-                        }
-                    }
-                    .frame(height: 120)
-                    .chartXAxis(.hidden)
-                    .chartYAxis(.hidden)
-                    
-                    HStack {
-                        Text("30d ago")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Text("+\(data.last?.count ?? 0) added")
-                            .font(.caption2)
-                            .bold()
-                            .foregroundColor(.accentColor)
-                        Spacer()
-                        Text("Today")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                    }
-                }
-                .padding()
-                .background(Color(PlatformSystemBackground))
-                .cornerRadius(18)
-                .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
-                .padding(.horizontal)
-                
+                headerSection
+
+                heroStatsSection
+
+                // Library Growth Chart (extracted — the inline Chart pushed
+                // the body past the type-checker's limit).
+                growthChartSection
+
                 // Smart Shelves — live, metadata-driven rows (accordion,
                 // collapsed by default).
                 smartShelvesSection
 
                 // Saved Smart Collections, below the auto-generated shelves.
                 smartCollectionsSection
+
+                // Playlists — hand-picked, manually ordered lists.
+                playlistsSection
 
                 recentlyAddedActorsSection
 
@@ -357,6 +322,12 @@ struct DashboardView: View {
             recomputeStats()
         }
         .onChange(of: smartCollections) { _, _ in
+            recomputeStats()
+        }
+        .onChange(of: playlists) { _, _ in
+            recomputeStats()
+        }
+        .onChange(of: playlistItems) { _, _ in
             recomputeStats()
         }
     }
@@ -494,6 +465,158 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Library")
+                .font(.largeTitle)
+                .bold()
+            Text("Here's what's new in your library")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+        }
+        .padding(.horizontal)
+        .padding(.top, 10)
+    }
+
+    private var heroStatsSection: some View {
+        HStack(spacing: 12) {
+            StatCardView(title: "Videos", value: "\(assets.count)")
+            StatCardView(title: "Actors", value: "\(totalActors)")
+            StatCardView(title: "Tags", value: "\(totalTags)")
+        }
+        .padding(.horizontal)
+    }
+
+    private var growthChartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Library Growth")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                Spacer()
+                Text("Last 30 days")
+                    .font(.caption)
+                    .foregroundColor(.primary)
+            }
+
+            let data = growthData
+            Chart {
+                ForEach(data, id: \.date) { item in
+                    LineMark(
+                        x: .value("Date", item.date),
+                        y: .value("Added", item.count)
+                    )
+                    .foregroundStyle(Color.accentColor)
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("Date", item.date),
+                        y: .value("Added", item.count)
+                    )
+                    .foregroundStyle(LinearGradient(
+                        colors: [Color.accentColor.opacity(0.3), Color.accentColor.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .interpolationMethod(.catmullRom)
+                }
+            }
+            .frame(height: 120)
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+
+            HStack {
+                Text("30d ago")
+                    .font(.caption2)
+                    .foregroundColor(.primary)
+                Spacer()
+                Text("+\(data.last?.count ?? 0) added")
+                    .font(.caption2)
+                    .bold()
+                    .foregroundColor(.accentColor)
+                Spacer()
+                Text("Today")
+                    .font(.caption2)
+                    .foregroundColor(.primary)
+            }
+        }
+        .padding()
+        .background(Color(PlatformSystemBackground))
+        .cornerRadius(18)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, y: 1)
+        .padding(.horizontal)
+    }
+
+    private var playlistsSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            playlistsHeader
+            playlistsRows
+        }
+        .alert("New Playlist", isPresented: $isShowingNewPlaylist) {
+            TextField("Name", text: $newPlaylistName)
+            Button("Create") { createPlaylist() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Playlists keep exactly the videos you add, in your order.")
+        }
+    }
+
+    private var playlistsHeader: some View {
+        HStack {
+            Text("Playlists")
+                .font(.headline).foregroundColor(.secondary)
+            Spacer()
+            Button {
+                newPlaylistName = ""
+                isShowingNewPlaylist = true
+            } label: {
+                Label("New Playlist", systemImage: "plus")
+                    .font(.subheadline)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private var playlistsRows: some View {
+        if playlists.isEmpty {
+            Text("Hand-picked lists of videos, in your order. Create one here, or select videos anywhere and choose “Add to Playlist”.")
+                .font(.caption).foregroundColor(.secondary)
+                .padding(.horizontal)
+        } else {
+            ForEach(playlists) { playlist in
+                accordionStrip(
+                    title: playlist.name,
+                    count: playlistCounts[playlist.id] ?? 0,
+                    previews: playlistPreviews[playlist.id] ?? [],
+                    expanded: isPlaylistExpanded(playlist.id),
+                    emptyText: "No videos yet — open the playlist to add some.",
+                    onToggle: { togglePlaylist(playlist.id) },
+                    onSeeAll: { onOpenPlaylist(playlist.id) })
+            }
+        }
+    }
+
+    private func createPlaylist() {
+        let name = newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let url = LibrarySession.shared.primaryURL else { return }
+        do {
+            _ = try LibraryStore(at: url).createPlaylist(named: name)
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadPlaylists"), object: nil)
+        } catch {
+            AppErrorReporter.report("Couldn't create the playlist: \(error.localizedDescription)")
+        }
+    }
+
+    private func isPlaylistExpanded(_ id: String) -> Bool {
+        expandedPlaylistsRaw.split(separator: ",").contains(Substring(id))
+    }
+
+    private func togglePlaylist(_ id: String) {
+        expandedPlaylistsRaw = toggled(id, in: expandedPlaylistsRaw)
     }
 
     // Shared accordion row used by both metadata shelves and saved collections:
