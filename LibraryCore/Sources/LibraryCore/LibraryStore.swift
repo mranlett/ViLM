@@ -434,7 +434,7 @@ public class LibraryStore {
     public func removeFromPlaylist(id: String, assetIds: [Asset.ID]) throws {
         let idStrings = assetIds.map(\.uuidString)
         try dbQueue.write { db in
-            try PlaylistItem
+            _ = try PlaylistItem
                 .filter(Column("playlistId") == id)
                 .filter(idStrings.contains(Column("assetId")))
                 .deleteAll(db)
@@ -474,7 +474,7 @@ public class LibraryStore {
     /// playlists (the delete path's cleanup; cross-library dangling entries
     /// are tolerated by display instead).
     func removePlaylistEntries(assetId: Asset.ID, in db: Database) throws {
-        try PlaylistItem
+        _ = try PlaylistItem
             .filter(Column("assetId") == assetId.uuidString)
             .deleteAll(db)
     }

@@ -29,7 +29,7 @@ struct ActorSyncView: View {
     /// the snapshot photo bytes already in memory.
     @State private var sourceThumbnails: [String: PlatformImage] = [:]
 
-    private static func thumbnailKey(_ actorId: String, _ url: URL) -> String {
+    private nonisolated static func thumbnailKey(_ actorId: String, _ url: URL) -> String {
         "\(actorId)|\(url.path)"
     }
 

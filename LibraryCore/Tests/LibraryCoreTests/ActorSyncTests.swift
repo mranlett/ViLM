@@ -164,6 +164,70 @@ final class ActorSyncTests: XCTestCase {
                        "same content in both libraries ships once")
     }
 
+    // MARK: - Regression: metadata synced before files (user report)
+
+    func testPhotosCopyEvenWhenTokenListsAlreadyMatch() throws {
+        // The user's exact scenario: both libraries already hold IDENTICAL
+        // actor records (photoUrl + galleryUrls token lists synced earlier),
+        // but the photo FILES each live in only one library. The merge used
+        // to gate file writes on token membership — "token present ⇒ file
+        // present" — silently skipping every copy. Writes must be gated on
+        // the FILE's existence.
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ActorSyncPhotoRegression-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+            try? FileManager.default.removeItem(at: tmp)
+        }
+        let libA = tmp.appendingPathComponent("A", isDirectory: true)
+        let libB = tmp.appendingPathComponent("B", isDirectory: true)
+        try FileManager.default.createDirectory(at: libA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: libB, withIntermediateDirectories: true)
+
+        let primaryToken = "https://x/primary.jpg"
+        let galleryToken = "https://x/gallery.jpg"
+        // Identical records in BOTH libraries — including the token lists.
+        let record = EntityProfile(id: "actor:jane", bio: "same everywhere",
+                                   photoUrl: primaryToken,
+                                   galleryUrls: [primaryToken, galleryToken])
+        try LibraryStore(at: libA).saveEntityProfile(record)
+        try LibraryStore(at: libB).saveEntityProfile(record)
+
+        // Files: A has the PRIMARY file only; B has the GALLERY file only.
+        let dirA = libA.appendingPathComponent(".catalog/profiles")
+        let dirB = libB.appendingPathComponent(".catalog/profiles")
+        try FileManager.default.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+        try Data([1, 1]).write(to: dirA.appendingPathComponent(
+            ProfileImageNaming.primaryFileName(for: "actor:jane")))
+        try Data([2, 2]).write(to: dirB.appendingPathComponent(
+            ProfileImageNaming.galleryFileName(for: "actor:jane", token: galleryToken)))
+
+        // The plan sees the photo gap even though the metadata is identical…
+        let snapshots = [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)]
+        let plans = ActorSync.plan(for: snapshots)
+        XCTAssertEqual(plans.map(\.actorId), ["actor:jane"])
+        XCTAssertTrue(plans[0].conflicts.isEmpty, "identical metadata ⇒ conflict-free")
+        XCTAssertEqual(plans[0].photoAdds[libA], 1)
+        XCTAssertEqual(plans[0].photoAdds[libB], 1)
+
+        // …and applying actually lands the FILES on both sides.
+        let export = ActorSync.convergedExport(
+            actorIds: ["actor:jane"], resolutions: [:], snapshots: snapshots)
+        try ActorSync.apply(export, to: libA)
+        try ActorSync.apply(export, to: libB)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dirA.appendingPathComponent(
+            ProfileImageNaming.galleryFileName(for: "actor:jane", token: galleryToken)).path),
+            "A received the gallery file it was missing")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dirB.appendingPathComponent(
+            ProfileImageNaming.primaryFileName(for: "actor:jane")).path),
+            "B received the primary file its record already referenced")
+
+        let after = ActorSync.plan(for: [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)])
+        XCTAssertTrue(after.isEmpty, "photo convergence complete: \(after.map(\.actorId))")
+    }
+
     // MARK: - End-to-end apply (real stores, real photo files)
 
     func testApplyConvergesTwoRealLibraries() throws {

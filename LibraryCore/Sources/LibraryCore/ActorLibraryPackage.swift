@@ -192,24 +192,41 @@ extension LibraryStore {
                     continue
                 }
 
+                let primaryToken = photo.sourceToken ?? ProfileImageNaming.localPrimaryToken
+
                 if photo.isPrimary, mergedPhotoUrl == nil {
                     // Destination has no primary yet — adopt this one.
                     let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id))
                     try photo.data.write(to: fileURL)
-                    let token = photo.sourceToken ?? ProfileImageNaming.localPrimaryToken
-                    mergedPhotoUrl = token
-                    if !mergedGalleryUrls.contains(token) { mergedGalleryUrls.append(token) }
+                    mergedPhotoUrl = primaryToken
+                    if !mergedGalleryUrls.contains(primaryToken) { mergedGalleryUrls.append(primaryToken) }
+                } else if photo.isPrimary, mergedPhotoUrl == primaryToken {
+                    // Destination already REFERENCES this photo as its
+                    // primary, but the file is missing on disk (token lists
+                    // can sync ahead of files — a metadata-only merge, or a
+                    // restore whose photos didn't survive). Restore the file.
+                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id))
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        try photo.data.write(to: fileURL)
+                    }
+                    if !mergedGalleryUrls.contains(primaryToken) { mergedGalleryUrls.append(primaryToken) }
                 } else {
                     // Fold in as an additional gallery photo. Photos with no
                     // portable URL (purely local) get a deterministic synthetic
                     // token derived from their content hash, so re-imports are
-                    // idempotent.
+                    // idempotent. The FILE write is gated on the file's
+                    // existence, NOT on token membership: a destination whose
+                    // galleryUrls already lists this token (metadata synced
+                    // before the files did) must still receive the missing
+                    // file — this exact gap silently skipped every photo copy
+                    // when actor records were already identical across
+                    // libraries.
                     let token = photo.sourceToken ?? "imported-photo://\(photo.contentHash)"
-                    if !mergedGalleryUrls.contains(token) {
-                        let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
                         try photo.data.write(to: fileURL)
-                        mergedGalleryUrls.append(token)
                     }
+                    if !mergedGalleryUrls.contains(token) { mergedGalleryUrls.append(token) }
                 }
                 newPhotoCount += 1
             }

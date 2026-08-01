@@ -19,7 +19,9 @@ struct DuplicateDetectionView: View {
     let assets: [Asset]
     let onRefresh: () -> Void
 
-    enum Confidence {
+    // nonisolated: compared inside the detached scan work; the synthesized
+    // Equatable must not be MainActor-bound (a Swift 6 error otherwise).
+    nonisolated enum Confidence {
         case exactCopy      // byte-identical size + duration
         case visualMatch    // different encode, same content, same length
         case overlapMatch   // same content, different length (trimmed copy)

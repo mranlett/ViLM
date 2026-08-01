@@ -64,7 +64,8 @@ struct DashboardView: View {
     // expanded persists across launches. Order per the Smart Shelves spec.
     @AppStorage("dashboardExpandedShelves") private var expandedShelvesRaw: String = ""
     private let shelfOrder: [LibraryQuery] = [.recentlyAdded, .neverWatched, .topRated, .rediscover, .mostWatched]
-    private static let shelfPreviewCount = 10
+    // nonisolated: read from the detached stats computation.
+    private nonisolated static let shelfPreviewCount = 10
 
     // Smart Collections (v2): same accordion treatment, keyed by collection id.
     @State private var collectionPreviews: [String: [Asset]] = [:]
@@ -81,7 +82,8 @@ struct DashboardView: View {
 
     /// Everything the dashboard derives from the library, computed as one
     /// value so it can be produced off the main thread and applied at once.
-    private struct DashboardStats: Sendable {
+    // nonisolated: constructed inside the detached stats computation.
+    private nonisolated struct DashboardStats: Sendable {
         var totalActors = 0
         var totalTags = 0
         var shelfPreviews: [LibraryQuery: [Asset]] = [:]

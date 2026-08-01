@@ -21,7 +21,11 @@ nonisolated struct CountryFlagHelper {
             "south korea": "🇰🇷",
             "north korea": "🇰🇵",
             "russia": "🇷🇺",
-            "czech republic": "🇨🇿"
+            "czech republic": "🇨🇿",
+            // Apple's English region names diverge from the everyday ones
+            // here ("China mainland", "Türkiye") — alias the natural names.
+            "china": "🇨🇳",
+            "turkey": "🇹🇷"
         ]
         
         let locale = Locale(identifier: "en_US")
