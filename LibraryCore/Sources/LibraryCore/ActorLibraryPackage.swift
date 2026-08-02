@@ -37,6 +37,14 @@ public struct ExportedPhoto: Codable, Sendable {
 /// photo data) rather than a zip — there is no interop requirement since only
 /// this app ever reads it, so a plain container keeps this dependency-free.
 public struct ActorLibraryExport: Codable, Sendable {
+    /// Bumped to 2 for schema v17 (career span + precise birth date).
+    ///
+    /// Informational only today: no reader validates it, and the importer is
+    /// tolerant of missing fields either way, so an older archive restores
+    /// unchanged and a newer one loses nothing on an older build. It is here so
+    /// that a future reader CAN tell the shapes apart.
+    public static let currentFormatVersion = 2
+
     public let formatVersion: Int
     public let exportedAt: Date
     public let profiles: [EntityProfile]
@@ -120,7 +128,7 @@ extension LibraryStore {
             }
         }
 
-        return ActorLibraryExport(formatVersion: 1, exportedAt: Date(), profiles: actorProfiles, photos: photos)
+        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion, exportedAt: Date(), profiles: actorProfiles, photos: photos)
     }
 
     /// Computes what an import would do without writing anything.
@@ -250,7 +258,16 @@ extension LibraryStore {
                 tags: MergeSemantics.union(imported.tags, existing?.tags ?? []),
                 galleryUrls: mergedGalleryUrls,
                 akas: MergeSemantics.union(imported.akas, existing?.akas ?? []),
-                createdAt: existing?.createdAt ?? imported.createdAt
+                createdAt: existing?.createdAt ?? imported.createdAt,
+                // Career span (v17), same non-destructive rule: an incoming
+                // value fills a blank but never clobbers a populated one.
+                // Omitting these would silently drop career data on every
+                // library merge.
+                birthDate: MergeSemantics.coalesce(imported.birthDate, existing?.birthDate),
+                careerSpanRaw: MergeSemantics.coalesce(imported.careerSpanRaw, existing?.careerSpanRaw),
+                careerStartYear: imported.careerStartYear ?? existing?.careerStartYear,
+                careerEndYear: imported.careerEndYear ?? existing?.careerEndYear,
+                ageAtCareerStart: imported.ageAtCareerStart ?? existing?.ageAtCareerStart
             )
             try saveEntityProfile(merged, in: db)
 

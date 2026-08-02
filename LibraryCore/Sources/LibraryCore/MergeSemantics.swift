@@ -64,7 +64,15 @@ public enum MergeSemantics {
             tags: union(higher.tags, lower.tags),
             galleryUrls: union(higher.galleryUrls, lower.galleryUrls),
             akas: union(higher.akas, lower.akas),
-            createdAt: [higher.createdAt, lower.createdAt].compactMap { $0 }.min()
+            createdAt: [higher.createdAt, lower.createdAt].compactMap { $0 }.min(),
+            // Career span (v17). Same precedence rule — omitting these would
+            // make career data disappear from the merged view whenever a second
+            // library is attached.
+            birthDate: coalesce(higher.birthDate, lower.birthDate),
+            careerSpanRaw: coalesce(higher.careerSpanRaw, lower.careerSpanRaw),
+            careerStartYear: higher.careerStartYear ?? lower.careerStartYear,
+            careerEndYear: higher.careerEndYear ?? lower.careerEndYear,
+            ageAtCareerStart: higher.ageAtCareerStart ?? lower.ageAtCareerStart
         )
     }
 

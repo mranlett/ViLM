@@ -288,6 +288,7 @@
 		};
 		E9D4695D2F3425C400D52C46 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -352,6 +353,7 @@
 		};
 		E9D4695E2F3425C400D52C46 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;

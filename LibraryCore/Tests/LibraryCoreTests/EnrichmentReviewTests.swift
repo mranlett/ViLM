@@ -248,15 +248,131 @@ final class EnrichmentReviewTests: XCTestCase {
                        "curated artwork is never silently replaced")
     }
 
-    // MARK: - Fields the schema cannot yet hold
+    // MARK: - Career span (schema v17)
 
-    func testProposedFieldsWithNoStorageAreIgnoredRatherThanInvented() {
+    func testCareerFieldsNowLandRatherThanBeingDiscarded() {
+        // Before v17 these were fetched over the network and dropped. This is
+        // the assertion that they have somewhere to go.
+        var p = ActorMetadataProposal()
+        p.careerStartYear = ProposedField(2010, sourceNote: "Src")
+        p.birthDate = ProposedField("1990-01-01", sourceNote: "Src")
+        let r = review(profile(), p)
+
+        XCTAssertEqual(change(r, ActorEnrichment.Field.careerStartYear)?.kind, .fill)
+        XCTAssertEqual(change(r, ActorEnrichment.Field.birthDate)?.kind, .fill)
+
+        let applied = ActorEnrichment.apply(p, to: profile(), entityId: "actor:A",
+                                            accepting: r.defaultAccepted)
+        XCTAssertEqual(applied.careerStartYear, 2010)
+        XCTAssertEqual(applied.birthDate, "1990-01-01")
+    }
+
+    func testAnAbsentCareerEndNeverClearsARecordedOne() {
+        // A missing end means the span is OPEN, not that the end should be
+        // wiped. 75% of matched actors are in exactly this state.
         var p = ActorMetadataProposal()
         p.careerStartYear = ProposedField(2010)
-        p.birthDate = ProposedField("1990-01-01")
+        let existing = EntityProfile(id: "actor:A", careerStartYear: 2010, careerEndYear: 2014)
+        let r = review(existing, p)
+        XCTAssertEqual(change(r, ActorEnrichment.Field.careerEndYear)?.kind, .unchanged)
+
+        let applied = ActorEnrichment.apply(p, to: existing, entityId: "actor:A",
+                                            accepting: r.defaultAccepted)
+        XCTAssertEqual(applied.careerEndYear, 2014)
+    }
+
+    func testADisagreeingBirthDateIsAConflictNotAFill() {
+        var p = ActorMetadataProposal()
+        p.birthDate = ProposedField("1992-04-18")
+        let existing = EntityProfile(id: "actor:A", birthDate: "1997-01-01")
+        XCTAssertEqual(change(review(existing, p), ActorEnrichment.Field.birthDate)?.kind,
+                       .conflict)
+    }
+
+    // MARK: - Fields the schema still cannot hold
+
+    func testExternalLinksStillHaveNowhereToLand() {
+        // Reference links have no column. Discarding beats inventing storage.
+        var p = ActorMetadataProposal()
         p.externalLinks = ProposedField([URL(string: "https://example.test")!])
-        let r = review(profile(), p)
-        XCTAssertFalse(r.hasAnythingToApply,
-                       "a proposal core cannot store yet must not appear as an applicable change")
+        XCTAssertFalse(review(profile(), p).hasAnythingToApply)
+    }
+}
+
+// MARK: - Gallery photos
+
+final class EnrichmentGalleryTests: XCTestCase {
+
+    private func proposal(_ urls: [String]) -> ActorMetadataProposal {
+        var p = ActorMetadataProposal()
+        p.galleryURLs = .init(urls.compactMap(URL.init(string:)), sourceNote: "Src")
+        return p
+    }
+
+    private func profile(gallery: [String]) -> EntityProfile {
+        EntityProfile(id: "actor:A", galleryUrls: gallery)
+    }
+
+    func testNoPhotosAcceptedAddsNothing() {
+        // The default. Photos cost bandwidth and storage per actor, so an empty
+        // selection must be a true no-op rather than "import everything".
+        let result = ActorEnrichment.apply(
+            proposal(["https://x/1.jpg", "https://x/2.jpg"]),
+            to: profile(gallery: ["https://x/keep.jpg"]),
+            entityId: "actor:A",
+            accepting: [])
+        XCTAssertEqual(result.galleryUrls, ["https://x/keep.jpg"])
+    }
+
+    func testOnlyTickedPhotosAreAdded() {
+        let result = ActorEnrichment.apply(
+            proposal(["https://x/1.jpg", "https://x/2.jpg", "https://x/3.jpg"]),
+            to: profile(gallery: []),
+            entityId: "actor:A",
+            accepting: [],
+            acceptingGalleryURLs: ["https://x/1.jpg", "https://x/3.jpg"])
+        XCTAssertEqual(result.galleryUrls, ["https://x/1.jpg", "https://x/3.jpg"])
+    }
+
+    func testCuratedPhotosAreNeverRemoved() {
+        // Union, like tags and AKAs. Enrichment can add but never take away.
+        let result = ActorEnrichment.apply(
+            proposal(["https://x/new.jpg"]),
+            to: profile(gallery: ["https://x/mine.jpg"]),
+            entityId: "actor:A",
+            accepting: [],
+            acceptingGalleryURLs: ["https://x/new.jpg"])
+        XCTAssertEqual(result.galleryUrls, ["https://x/mine.jpg", "https://x/new.jpg"])
+    }
+
+    func testExistingPhotoIsNotDuplicated() {
+        let result = ActorEnrichment.apply(
+            proposal(["https://x/same.jpg"]),
+            to: profile(gallery: ["https://x/same.jpg"]),
+            entityId: "actor:A",
+            accepting: [],
+            acceptingGalleryURLs: ["https://x/same.jpg"])
+        XCTAssertEqual(result.galleryUrls, ["https://x/same.jpg"])
+    }
+
+    func testExistingOrderIsPreserved() {
+        // A gallery that reshuffles on import looks like data loss.
+        let result = ActorEnrichment.apply(
+            proposal(["https://x/c.jpg"]),
+            to: profile(gallery: ["https://x/a.jpg", "https://x/b.jpg"]),
+            entityId: "actor:A",
+            accepting: [],
+            acceptingGalleryURLs: ["https://x/c.jpg"])
+        XCTAssertEqual(result.galleryUrls,
+                       ["https://x/a.jpg", "https://x/b.jpg", "https://x/c.jpg"])
+    }
+
+    func testGalleryIsUntouchedWhenTheSourceOffersNone() {
+        let result = ActorEnrichment.apply(
+            ActorMetadataProposal(),
+            to: profile(gallery: ["https://x/a.jpg"]),
+            entityId: "actor:A",
+            accepting: [])
+        XCTAssertEqual(result.galleryUrls, ["https://x/a.jpg"])
     }
 }

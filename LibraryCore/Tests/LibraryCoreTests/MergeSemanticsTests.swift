@@ -114,3 +114,32 @@ extension MergeSemanticsTests {
                        "recently-added reflects first appearance anywhere")
     }
 }
+
+// MARK: - Career span survives the federated merge (schema v17)
+
+final class MergeSemanticsCareerTests: XCTestCase {
+
+    func testCareerFieldsSurviveTheMergedView() {
+        // Without this, attaching a second library made career data vanish from
+        // the merged profile the UI renders.
+        let higher = EntityProfile(id: "actor:A")
+        let lower = EntityProfile(id: "actor:A", birthDate: "1988-04-12",
+                                  careerSpanRaw: "2010 to 2014",
+                                  careerStartYear: 2010, careerEndYear: 2014,
+                                  ageAtCareerStart: 22)
+        let merged = MergeSemantics.mergedProfileView(higher: higher, lower: lower)
+
+        XCTAssertEqual(merged.birthDate, "1988-04-12")
+        XCTAssertEqual(merged.careerSpanRaw, "2010 to 2014")
+        XCTAssertEqual(merged.careerStartYear, 2010)
+        XCTAssertEqual(merged.careerEndYear, 2014)
+        XCTAssertEqual(merged.ageAtCareerStart, 22)
+    }
+
+    func testHigherPrecedenceWinsCareerConflicts() {
+        let higher = EntityProfile(id: "actor:A", careerStartYear: 2010)
+        let lower = EntityProfile(id: "actor:A", careerStartYear: 1999)
+        XCTAssertEqual(MergeSemantics.mergedProfileView(higher: higher, lower: lower)
+                        .careerStartYear, 2010)
+    }
+}

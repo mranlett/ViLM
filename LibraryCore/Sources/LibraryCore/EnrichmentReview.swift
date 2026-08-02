@@ -88,17 +88,25 @@ public enum ActorEnrichment {
         public static let photoUrl = "photoUrl"
         public static let akas = "akas"
         public static let tags = "tags"
+        // Schema v17.
+        public static let birthDate = "birthDate"
+        public static let careerSpanRaw = "careerSpanRaw"
+        public static let careerStartYear = "careerStartYear"
+        public static let careerEndYear = "careerEndYear"
+        public static let ageAtCareerStart = "ageAtCareerStart"
 
         public static let all = [bio, gender, hairColor, countryOfOrigin,
-                                 birthYear, photoUrl, akas, tags]
+                                 birthYear, photoUrl, akas, tags,
+                                 birthDate, careerSpanRaw, careerStartYear,
+                                 careerEndYear, ageAtCareerStart]
     }
 
     /// Builds the diff. Pure: no store, no network, no view.
     ///
-    /// Only fields `EntityProfile` can currently hold are reviewed. A proposal
-    /// may carry career span, birth date or external links — those are accepted
-    /// by the protocol but have nowhere to land until the schema work adds them,
-    /// and silently discarding them here is preferable to inventing storage.
+    /// Career span and birth date land as of schema v17. `externalLinks` is
+    /// still accepted by the protocol and still has nowhere to go — reference
+    /// links have no column, and silently discarding them beats inventing
+    /// storage for them here.
     public static func review(
         profile: EntityProfile?,
         proposal: ActorMetadataProposal,
@@ -122,6 +130,18 @@ public enum ActorEnrichment {
         scalar(Field.birthYear, "Birth Year",
                current: profile?.birthYear.map(String.init), proposed: proposal.birthYear)
         scalar(Field.photoUrl, "Photo", current: profile?.photoUrl, proposed: proposal.photoURL)
+        scalar(Field.birthDate, "Birth Date", current: profile?.birthDate, proposed: proposal.birthDate)
+        scalar(Field.careerSpanRaw, "Career Span (source text)",
+               current: profile?.careerSpanRaw, proposed: proposal.careerSpanRaw)
+        scalar(Field.careerStartYear, "Career Start",
+               current: profile?.careerStartYear.map(String.init), proposed: proposal.careerStartYear)
+        // A missing end means an OPEN span, not an unknown one (D2), so an
+        // absent proposal here is genuinely "nothing to say" and never a clear.
+        scalar(Field.careerEndYear, "Career End",
+               current: profile?.careerEndYear.map(String.init), proposed: proposal.careerEndYear)
+        scalar(Field.ageAtCareerStart, "Age at Career Start",
+               current: profile?.ageAtCareerStart.map(String.init),
+               proposed: proposal.ageAtCareerStart)
 
         changes.append(collection(id: Field.akas, label: "AKAs",
                                   current: profile?.akas ?? [], proposed: proposal.akas))
@@ -133,11 +153,18 @@ public enum ActorEnrichment {
 
     /// Applies only the accepted fields. Anything not in `accepting` is left
     /// exactly as it was — including every conflict the user did not tick.
+    /// - Parameter acceptingGalleryURLs: the gallery images the user ticked,
+    ///   as absolute strings. Deliberately a separate parameter rather than
+    ///   another entry in `accepting`: gallery photos are chosen one by one, so
+    ///   they are not a field that is either on or off. An empty array adds no
+    ///   photos, which is the correct default — importing images nobody asked
+    ///   for costs bandwidth and storage per actor.
     public static func apply(
         _ proposal: ActorMetadataProposal,
         to profile: EntityProfile?,
         entityId: String,
         accepting: Set<String>,
+        acceptingGalleryURLs: [String] = [],
         now: Date = Date()
     ) -> EntityProfile {
 
@@ -171,10 +198,28 @@ public enum ActorEnrichment {
             countryOfOrigin: take(Field.countryOfOrigin, proposal.countryOfOrigin, profile?.countryOfOrigin),
             rating: profile?.rating,              // user-authored, never proposable
             tags: merged(Field.tags, proposal.tags, profile?.tags ?? []),
-            galleryUrls: profile?.galleryUrls ?? [],   // preserved, never proposable
+            // Union, like tags and AKAs: enrichment can add photos but never
+            // remove one the user curated.
+            galleryUrls: unionGallery(profile?.galleryUrls ?? [], adding: acceptingGalleryURLs),
             akas: merged(Field.akas, proposal.akas, profile?.akas ?? []),
-            createdAt: profile?.createdAt ?? now
+            createdAt: profile?.createdAt ?? now,
+            birthDate: take(Field.birthDate, proposal.birthDate, profile?.birthDate),
+            careerSpanRaw: take(Field.careerSpanRaw, proposal.careerSpanRaw, profile?.careerSpanRaw),
+            careerStartYear: take(Field.careerStartYear, proposal.careerStartYear, profile?.careerStartYear),
+            careerEndYear: take(Field.careerEndYear, proposal.careerEndYear, profile?.careerEndYear),
+            ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile?.ageAtCareerStart)
         )
+    }
+
+    /// Appends only the ticked photos the profile does not already have,
+    /// preserving existing order so the gallery does not reshuffle on import.
+    private static func unionGallery(_ existing: [String], adding: [String]) -> [String] {
+        var seen = Set(existing)
+        var out = existing
+        for url in adding where seen.insert(url).inserted {
+            out.append(url)
+        }
+        return out
     }
 
     // MARK: - Classification

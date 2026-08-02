@@ -136,7 +136,8 @@ final class ActorCSVTests: XCTestCase {
     func testHeaderCarriesAKAsAtNineAndTagsAtTen() {
         XCTAssertEqual(
             ActorCSV.header,
-            "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags"
+            "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,"
+            + "BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart"
         )
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs", "index 9 is a contract — the importer reads positionally")
@@ -233,12 +234,86 @@ final class ActorCSVTests: XCTestCase {
 
     func testGalleryUrlsAreStillCarriedOverAndNotRepresented() {
         let existing = profile(galleryUrls: ["g1", "g2"], akas: ["a"])
+        // Deliberately an OLD 11-wide row: a file exported before the career
+        // columns existed must still import, leaving the new fields alone.
         var cols = Array(repeating: "", count: 11)
         cols[0] = "Jane Doe"
         cols[9] = "b"
         let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
         XCTAssertEqual(merged?.galleryUrls, ["g1", "g2"], "not in the format, never cleared")
-        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 11, "and no column for it")
+        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 16, "and no column for it")
+    }
+
+    // MARK: - Career span columns (schema v17)
+
+    func testCareerColumnsAppendAfterTagsSoEarlierIndicesAreUnmoved() {
+        let names = ActorCSV.header.split(separator: ",").map(String.init)
+        XCTAssertEqual(names[9], "AKAs")
+        XCTAssertEqual(names[10], "Tags")
+        XCTAssertEqual(Array(names.suffix(5)),
+                       ["BirthDate", "CareerSpan", "CareerStart", "CareerEnd", "AgeAtCareerStart"])
+    }
+
+    func testCareerFieldsRoundTripThroughExportAndImport() {
+        let original = EntityProfile(
+            id: "actor:Jane Doe", birthDate: "1988-04-12", careerSpanRaw: "active 2010 to 2014",
+            careerStartYear: 2010, careerEndYear: 2014, ageAtCareerStart: 22)
+        let row = ActorCSV.row(name: "Jane Doe", profile: original, stripCountry: identity)
+        // parse() keeps the header row; the data row is what we want.
+        let merged = ActorCSV.merge(columns: ActorCSV.parse(row)[0],
+                                    existing: nil, decorateCountry: identity)
+
+        XCTAssertEqual(merged?.birthDate, "1988-04-12")
+        XCTAssertEqual(merged?.careerSpanRaw, "active 2010 to 2014")
+        XCTAssertEqual(merged?.careerStartYear, 2010)
+        XCTAssertEqual(merged?.careerEndYear, 2014)
+        XCTAssertEqual(merged?.ageAtCareerStart, 22)
+    }
+
+    func testAnOpenSpanRoundTripsWithNoEndYear() {
+        // 75% of matched actors have a start and no end. If a blank end came
+        // back as 0 or as a closed span, three-quarters of the library would
+        // render wrongly.
+        let original = EntityProfile(id: "actor:Jane Doe", careerStartYear: 2016)
+        let row = ActorCSV.row(name: "Jane Doe", profile: original, stripCountry: identity)
+        let merged = ActorCSV.merge(columns: ActorCSV.parse(row)[0],
+                                    existing: nil, decorateCountry: identity)
+        XCTAssertEqual(merged?.careerStartYear, 2016)
+        XCTAssertNil(merged?.careerEndYear)
+        XCTAssertEqual(merged?.isCareerOngoing, true)
+    }
+
+    func testBlankCareerCellsNeverClearExistingValues() {
+        // Same non-destructive rule as every other column.
+        let existing = EntityProfile(id: "actor:Jane Doe", birthDate: "1990-01-01",
+                                     careerStartYear: 2012, careerEndYear: 2018,
+                                     ageAtCareerStart: 22)
+        var cols = Array(repeating: "", count: 16)
+        cols[0] = "Jane Doe"
+        let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
+        XCTAssertEqual(merged?.birthDate, "1990-01-01")
+        XCTAssertEqual(merged?.careerStartYear, 2012)
+        XCTAssertEqual(merged?.careerEndYear, 2018)
+        XCTAssertEqual(merged?.ageAtCareerStart, 22)
+    }
+
+    func testAnOlderShortRowImportsWithoutTouchingCareerFields() {
+        // Files exported before v17 are 11 columns wide. They must still import.
+        let existing = EntityProfile(id: "actor:Jane Doe", careerStartYear: 2012)
+        var cols = Array(repeating: "", count: 11)
+        cols[0] = "Jane Doe"
+        let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
+        XCTAssertEqual(merged?.careerStartYear, 2012)
+    }
+
+    func testDerivedAgeIsNotExported() {
+        // careerStartAge derives 22 here, but the stored field is empty. Writing
+        // the derived number would turn it into a stored fact on re-import.
+        let profile = EntityProfile(id: "actor:Jane Doe", birthYear: 1988, careerStartYear: 2010)
+        XCTAssertEqual(profile.careerStartAge, 22)
+        let cells = ActorCSV.row(name: "Jane Doe", profile: profile, stripCountry: identity)
+            .split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(cells[15].trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
 
     func testFullRoundTripOfAKAsAndTagsIsStable() {

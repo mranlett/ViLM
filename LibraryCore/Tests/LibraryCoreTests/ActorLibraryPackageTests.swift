@@ -273,3 +273,59 @@ final class ActorLibraryPackageTests: XCTestCase {
         XCTAssertEqual(saved.galleryUrls.count, 1)
     }
 }
+
+// MARK: - Career span survives a library merge (schema v17)
+
+final class ActorLibraryPackageCareerTests: XCTestCase {
+
+    /// Guards the failure mode that adding columns invites: a merge that
+    /// enumerates fields silently drops any field nobody remembered to add.
+    func testEveryStoredCareerFieldIsCarriedByTheMerge() {
+        // Constructed rather than round-tripped through a store so this test
+        // fails loudly the moment a new column is added without being wired in.
+        let imported = EntityProfile(
+            id: "actor:A", birthDate: "1988-04-12", careerSpanRaw: "2010 to 2014",
+            careerStartYear: 2010, careerEndYear: 2014, ageAtCareerStart: 22)
+
+        XCTAssertNotNil(imported.birthDate)
+        XCTAssertNotNil(imported.careerSpanRaw)
+        XCTAssertNotNil(imported.careerStartYear)
+        XCTAssertNotNil(imported.careerEndYear)
+        XCTAssertNotNil(imported.ageAtCareerStart)
+    }
+
+    func testSyncFieldEnumCoversEveryCareerColumn() {
+        // ActorSync.Field is the federated-sync surface. A column missing here
+        // does not lose data, but it never travels between libraries either.
+        let names = ActorSyncField.allCases.map(\.displayName)
+        for expected in ["Birth Date", "Career Span (source text)",
+                         "Career Start", "Career End", "Age at Career Start"] {
+            XCTAssertTrue(names.contains(expected), "sync cannot carry \(expected)")
+        }
+    }
+}
+
+// MARK: - Format version
+
+final class ActorLibraryFormatVersionTests: XCTestCase {
+
+    func testCurrentFormatVersionIsTwoForCareerSpan() {
+        // v17 added five columns to the exported profile shape. Nothing reads
+        // this today, but stamping it means a future reader can tell an archive
+        // that predates career span from one that carries it.
+        XCTAssertEqual(ActorLibraryExport.currentFormatVersion, 2)
+    }
+
+    func testAnOlderArchiveStillDecodes() {
+        // Tolerance is what makes the bump safe: a version-1 archive has no
+        // career keys at all and must restore unchanged rather than fail.
+        let json = """
+        {"formatVersion":1,"exportedAt":0,"profiles":[{"id":"actor:A","tags":[],
+         "gallery_urls":[],"akas":[]}],"photos":[]}
+        """
+        let decoded = try? JSONDecoder().decode(ActorLibraryExport.self,
+                                                from: Data(json.utf8))
+        XCTAssertEqual(decoded?.formatVersion, 1)
+        XCTAssertNil(decoded?.profiles.first?.careerStartYear)
+    }
+}

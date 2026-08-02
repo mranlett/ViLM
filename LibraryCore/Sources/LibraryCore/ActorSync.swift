@@ -23,6 +23,9 @@ import Foundation
 /// union and never conflict).
 public enum ActorSyncField: String, CaseIterable, Sendable {
     case bio, homePage, gender, hairColor, birthYear, countryOfOrigin, rating
+    // Career span (v17). Without these, syncing two libraries would leave
+    // career data behind in whichever one happened to have it.
+    case birthDate, careerSpanRaw, careerStartYear, careerEndYear, ageAtCareerStart
 
     /// Comma-separated multi-value fields: the data model (and the filter
     /// engine, which splits on commas) already treats these as sets, so a
@@ -40,6 +43,11 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .birthYear: return "Birth Year"
         case .countryOfOrigin: return "Country"
         case .rating: return "Rating"
+        case .birthDate: return "Birth Date"
+        case .careerSpanRaw: return "Career Span (source text)"
+        case .careerStartYear: return "Career Start"
+        case .careerEndYear: return "Career End"
+        case .ageAtCareerStart: return "Age at Career Start"
         }
     }
 
@@ -53,6 +61,11 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .birthYear: raw = profile.birthYear.map(String.init)
         case .countryOfOrigin: raw = profile.countryOfOrigin
         case .rating: raw = profile.rating.map(String.init)
+        case .birthDate: raw = profile.birthDate
+        case .careerSpanRaw: raw = profile.careerSpanRaw
+        case .careerStartYear: raw = profile.careerStartYear.map(String.init)
+        case .careerEndYear: raw = profile.careerEndYear.map(String.init)
+        case .ageAtCareerStart: raw = profile.ageAtCareerStart.map(String.init)
         }
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
@@ -68,6 +81,11 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .birthYear: profile.birthYear = value.flatMap(Int.init)
         case .countryOfOrigin: profile.countryOfOrigin = value
         case .rating: profile.rating = value.flatMap(Int.init)
+        case .birthDate: profile.birthDate = value
+        case .careerSpanRaw: profile.careerSpanRaw = value
+        case .careerStartYear: profile.careerStartYear = value.flatMap(Int.init)
+        case .careerEndYear: profile.careerEndYear = value.flatMap(Int.init)
+        case .ageAtCareerStart: profile.ageAtCareerStart = value.flatMap(Int.init)
         }
     }
 }
@@ -332,7 +350,7 @@ public enum ActorSync {
             }
         }
 
-        return ActorLibraryExport(formatVersion: 1, exportedAt: Date(), profiles: profiles, photos: photos)
+        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion, exportedAt: Date(), profiles: profiles, photos: photos)
     }
 
     /// Applies the converged export to one library — the existing merge

@@ -112,9 +112,20 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     public var birthDate: ProposedField<String> = .absent
     public var careerStartYear: ProposedField<Int> = .absent
     public var careerEndYear: ProposedField<Int> = .absent
+    /// Only when a source STATES it. Core derives one otherwise, so a plugin
+    /// that computes this itself would be inventing provenance.
+    public var ageAtCareerStart: ProposedField<Int> = .absent
+    /// Verbatim career-span text from a prose source. Never synthesised.
+    public var careerSpanRaw: ProposedField<String> = .absent
     public var akas: ProposedField<[String]> = .absent
     public var tags: ProposedField<[String]> = .absent
     public var photoURL: ProposedField<URL> = .absent
+    /// Additional images offered for the actor's photo gallery.
+    ///
+    /// Separate from `photoURL` because the user chooses these individually —
+    /// none, some, or all — rather than accepting them as one field. Core stores
+    /// references and downloads only what the user ticks.
+    public var galleryURLs: ProposedField<[URL]> = .absent
     /// Reference links only. Core stores them; it never fetches them.
     public var externalLinks: ProposedField<[URL]> = .absent
 

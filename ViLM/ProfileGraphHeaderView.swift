@@ -193,16 +193,33 @@ struct ProfileGraphHeaderView: View {
                         let metadataStrings: [String] = [
                             profile.gender.map { "Gender: \($0)" },
                             profile.hairColor.map { "Hair Color: \($0)" },
-                            profile.birthYear.map { "Birth Year: \($0)" },
+                            // resolvedBirthYear rather than birthYear: a record
+                            // that carries only a full date still shows a year.
+                            profile.resolvedBirthYear.map { "Birth Year: \($0)" },
                             profile.countryOfOrigin.map { "Country: \($0)" }
                         ].compactMap { $0 }
-                        
+
                         if !metadataStrings.isEmpty {
                             Text(metadataStrings.joined(separator: " • "))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                        
+
+                        // Career span gets its own line rather than joining the
+                        // bulleted list: it is a sentence, not a field, and it
+                        // would crowd the line out on a phone.
+                        //
+                        // Every part of it is computed from stored years, so the
+                        // "years active" figure moves on its own each year
+                        // instead of going stale.
+                        if let career = profile.careerDisplay {
+                            Label(career, systemImage: "calendar")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel("Career: \(career)")
+                        }
+
                         if let homePage = profile.homePage, let url = URL(string: homePage) {
                             Link("Visit Website", destination: url)
                                 .font(.callout)

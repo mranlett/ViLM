@@ -25,7 +25,7 @@ public enum ActorCSV {
     /// 1 Bio           4 Gender      7 CountryOfOrigin   10 Tags
     /// 2 PhotoURL      5 HairColor   8 Rating
     /// ```
-    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags"
+    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart"
 
     /// Rows with fewer cells than this are skipped. Historic guard: a row must at
     /// least carry Name/Bio/PhotoURL/HomePage to be worth merging.
@@ -131,6 +131,17 @@ public enum ActorCSV {
             // way out as well as the way in, so a no-edit round trip is stable.
             escape(joinList(union([], profile?.akas ?? [], excludingName: name))),
             escape(joinList(union([], profile?.tags ?? [], excludingName: name))),
+            // Career span (schema v17). Appended at indices 11+ so every earlier
+            // column keeps its position — the importer reads by index, not by
+            // header, so inserting anywhere else would import silently wrong.
+            escape(profile?.birthDate ?? ""),
+            escape(profile?.careerSpanRaw ?? ""),
+            escape(profile?.careerStartYear.map { String($0) } ?? ""),
+            escape(profile?.careerEndYear.map { String($0) } ?? ""),
+            // The STORED value only. `careerStartAge` derives one when this is
+            // empty, and exporting a derived number would turn it into a stored
+            // fact on the next import.
+            escape(profile?.ageAtCareerStart.map { String($0) } ?? ""),
         ]
         return cells.joined(separator: ",") + "\n"
     }
@@ -310,7 +321,15 @@ public enum ActorCSV {
             galleryUrls: existing?.galleryUrls ?? [],
             akas: cell(9).map { union(existing?.akas ?? [], splitList($0), excludingName: name) }
                 ?? existing?.akas ?? [],
-            createdAt: existing?.createdAt ?? now
+            createdAt: existing?.createdAt ?? now,
+            birthDate: cell(11) ?? existing?.birthDate,
+            careerSpanRaw: cell(12) ?? existing?.careerSpanRaw,
+            careerStartYear: cell(13).flatMap(Int.init) ?? existing?.careerStartYear,
+            // A blank end cell means "unchanged", NOT "clear the end year" —
+            // consistent with every other column here. An open span is expressed
+            // by never having had an end, not by blanking one out.
+            careerEndYear: cell(14).flatMap(Int.init) ?? existing?.careerEndYear,
+            ageAtCareerStart: cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart
         )
     }
 }

@@ -64,6 +64,21 @@ struct EntityProfileEditorView: View {
     
     // Gender Entry State
     @State private var isShowingGenderSuggestions = false
+
+    // Enrichment. The button exists only when a plugin that can do it is
+    // installed — in a default build there is no such plugin, so this section
+    // is absent rather than disabled (D3).
+    @State private var isShowingEnrichment = false
+
+    // Career span (schema v17). No UI yet — these are carried through so that
+    // opening the editor and pressing Save cannot erase values that arrived by
+    // CSV import or enrichment. Every field the editor does not render still
+    // has to survive it.
+    @State private var birthDate: String?
+    @State private var careerSpanRaw: String?
+    @State private var careerStartYear: Int?
+    @State private var careerEndYear: Int?
+    @State private var ageAtCareerStart: Int?
     
     private var filteredTagSuggestions: [String] {
         if newTagValue.isEmpty { return [] }
@@ -101,6 +116,11 @@ struct EntityProfileEditorView: View {
         }
         _countryOfOrigin = State(initialValue: initialCountry)
         _rating = State(initialValue: profile?.rating ?? 0)
+        _birthDate = State(initialValue: profile?.birthDate)
+        _careerSpanRaw = State(initialValue: profile?.careerSpanRaw)
+        _careerStartYear = State(initialValue: profile?.careerStartYear)
+        _careerEndYear = State(initialValue: profile?.careerEndYear)
+        _ageAtCareerStart = State(initialValue: profile?.ageAtCareerStart)
         _tags = State(initialValue: profile?.tags ?? [])
         _akas = State(initialValue: profile?.akas ?? [])
         
@@ -151,6 +171,20 @@ struct EntityProfileEditorView: View {
                         .foregroundColor(.secondary)
                     }
                 }
+                if let provider = installedActorProvider {
+                    Section {
+                        Button {
+                            isShowingEnrichment = true
+                        } label: {
+                            Label("Import from \(provider.displayName)", systemImage: "sparkles")
+                        }
+                        .buttonStyle(.plain)
+                    } footer: {
+                        Text("Looks this actor up by name and shows you what it found. "
+                             + "Nothing changes until you review it and press Save.")
+                    }
+                }
+
                 Section(header: Text("Photo Gallery").font(.headline)) {
                     HStack {
                         TextField("https://...", text: $newGalleryUrl)
@@ -408,6 +442,21 @@ struct EntityProfileEditorView: View {
             }
             .padding()
             .navigationTitle("Edit Profile")
+            .sheet(isPresented: $isShowingEnrichment) {
+                if let provider = installedActorProvider {
+                    ActorEnrichmentSheet(
+                        provider: provider,
+                        entityId: entityId,
+                        actorName: displayName,
+                        // Built from the LIVE field values, not the profile this
+                        // view opened with — otherwise an edit made just now
+                        // would read as an empty field and be "filled" with the
+                        // source's value.
+                        currentProfile: editedProfile,
+                        onApply: applyEnrichment
+                    )
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -442,7 +491,13 @@ struct EntityProfileEditorView: View {
                             rating: rating == 0 ? nil : rating,
                             tags: tags,
                             galleryUrls: galleryUrls,
-                            akas: akas
+                            akas: akas,
+                            createdAt: initialProfile?.createdAt ?? Date(),
+                            birthDate: birthDate,
+                            careerSpanRaw: careerSpanRaw,
+                            careerStartYear: careerStartYear,
+                            careerEndYear: careerEndYear,
+                            ageAtCareerStart: ageAtCareerStart
                         )
                         
                         if !finalPhotoUrl.isEmpty {
@@ -520,6 +575,69 @@ struct EntityProfileEditorView: View {
         .popoverFrame()
     }
     
+    /// The entity's name. Ids follow the "actor:Name" convention used across
+    /// the app, so the name is everything after the first colon.
+    private var displayName: String {
+        guard let colon = entityId.firstIndex(of: ":") else { return entityId }
+        return String(entityId[entityId.index(after: colon)...])
+    }
+
+    /// The first installed plugin that can enrich an actor.
+    ///
+    /// `installed` is the only list the enrichment UI may consult — an available
+    /// but uninstalled plugin must have no affordance anywhere (D3). Takes the
+    /// first because provider precedence is still an open spec decision; with
+    /// one plugin installed the question does not arise.
+    private var installedActorProvider: (any ActorMetadataProvider)? {
+        PluginEnvironment.registry.installed
+            .compactMap { $0 as? any ActorMetadataProvider }
+            .first
+    }
+
+    /// The profile as it stands in the form right now.
+    private var editedProfile: EntityProfile {
+        EntityProfile(
+            id: entityId,
+            bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
+            photoUrl: photoUrl.isEmpty ? nil : photoUrl,
+            homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,
+            gender: gender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : gender,
+            hairColor: hairColor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : hairColor,
+            birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
+            countryOfOrigin: countryOfOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : countryOfOrigin,
+            rating: rating == 0 ? nil : rating,
+            tags: tags,
+            galleryUrls: galleryUrls,
+            akas: akas,
+            createdAt: initialProfile?.createdAt,
+            birthDate: birthDate,
+            careerSpanRaw: careerSpanRaw,
+            careerStartYear: careerStartYear,
+            careerEndYear: careerEndYear,
+            ageAtCareerStart: ageAtCareerStart
+        )
+    }
+
+    /// Drops accepted values into the form. Deliberately NOT a save: the user
+    /// still reviews the populated fields and presses Save, and the gallery
+    /// downloads happen on that existing save path.
+    private func applyEnrichment(_ merged: EntityProfile) {
+        bio = merged.bio ?? bio
+        photoUrl = merged.photoUrl ?? photoUrl
+        gender = merged.gender ?? gender
+        hairColor = merged.hairColor ?? hairColor
+        birthYearString = merged.birthYear.map(String.init) ?? birthYearString
+        countryOfOrigin = merged.countryOfOrigin ?? countryOfOrigin
+        tags = merged.tags
+        akas = merged.akas
+        galleryUrls = merged.galleryUrls
+        birthDate = merged.birthDate ?? birthDate
+        careerSpanRaw = merged.careerSpanRaw ?? careerSpanRaw
+        careerStartYear = merged.careerStartYear ?? careerStartYear
+        careerEndYear = merged.careerEndYear ?? careerEndYear
+        ageAtCareerStart = merged.ageAtCareerStart ?? ageAtCareerStart
+    }
+
     private func saveTag() {
         let val = newTagValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !val.isEmpty else {

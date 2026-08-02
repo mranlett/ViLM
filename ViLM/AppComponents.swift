@@ -5,7 +5,22 @@
 // loader and grid-cell thumbnail views, TagBubble, and FlowLayout.
 
 import SwiftUI
-import AVFoundation
+// @preconcurrency because AVFoundation is not Sendable-audited: AVAsset and
+// friends predate strict concurrency and carry no annotations, so Swift 6 warns
+// on every capture of one in a @Sendable closure.
+//
+// The capture in question (FrameExtractView.loadFrame) is genuinely safe:
+// AVURLAsset is documented as supporting concurrent reading, and
+// AVAssetImageGenerator is designed to be driven from a background queue —
+// which is exactly what FrameCache's decode gate does. The asset is read-only
+// once constructed and nothing mutates it.
+//
+// The alternative — passing the URL and building an AVURLAsset inside the
+// closure — would silence the warning without an annotation, but it would build
+// one asset per frame instead of reusing the cached one, re-loading track info
+// sixteen times per contact sheet. That caching is part of a measured 24.6%
+// load-time win, so it stays.
+@preconcurrency import AVFoundation
 import AVKit
 import LibraryCore
 import CoreGraphics

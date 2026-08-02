@@ -263,6 +263,23 @@ public class LibraryStore {
             }
         }
 
+        // v17: career span + precise birth date. Additive only, five nullable
+        // columns — old .vilmbackup archives still restore, and every existing
+        // row reads as "no career recorded" rather than as wrong data.
+        //
+        // Generic on purpose: a career span carries no domain assumption and is
+        // populated by CSV import, by hand, or not at all. Nothing here depends
+        // on a metadata provider existing.
+        migrator.registerMigration("v17") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "birth_date", .text)
+                t.add(column: "career_span_raw", .text)
+                t.add(column: "career_start_year", .integer)
+                t.add(column: "career_end_year", .integer)
+                t.add(column: "age_at_career_start", .integer)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -793,3 +810,4 @@ public class LibraryStore {
         }
     }
 }
+
