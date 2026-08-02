@@ -7,7 +7,12 @@
 // dependency graph is the gate; there is no roster here to leak.
 //
 // To use plugins in a local build:
-//   1. Add the plugin package as a dependency in Xcode (NOT committed).
+//   1. Put the plugin's sources in ViLM/LocalPlugins/ (gitignored). ViLM/ is a
+//      file-system synchronized folder, so they compile automatically when
+//      present and simply do not exist in a clean clone. Deliberately NOT a
+//      Swift package dependency: package references live in project.pbxproj,
+//      which IS tracked, so that route would both name the package publicly and
+//      leave every clone unable to resolve it.
 //   2. Create ViLM/LocalPlugins.swift (gitignored) with:
 //
 //        import LibraryCore

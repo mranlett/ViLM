@@ -24,6 +24,7 @@
 
 /* Begin PBXFileReference section */
 		E95BEF432FF2C34B004B0156 /* ViLMUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViLMUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = LocalPlugins.xcconfig; sourceTree = "<group>"; };
 		E9B441E12F36CB4500687CCF /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		E9B441FB2F36CDAA00687CCF /* LibraryCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = LibraryCore; sourceTree = "<group>"; };
 		E9D469542F3425C300D52C46 /* ViLM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ViLM.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +93,7 @@
 				E95BEF442FF2C34B004B0156 /* ViLMUITests */,
 				E9D469552F3425C300D52C46 /* Products */,
 				E9905C202F350284006C5910 /* Frameworks */,
+				E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};

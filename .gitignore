@@ -82,5 +82,9 @@ greptile.json
 # The public repository contains the extension point (PluginBootstrap.swift) and
 # nothing that uses it: no module name, no package reference, no roster.
 ViLM/LocalPlugins.swift
+# Local plugin sources, symlinked in from their own private repo.
+# ViLM/ is a synchronized folder, so this compiles automatically when present
+# and simply does not exist in a clean public clone.
+ViLM/LocalPlugins/
 *.local.xcconfig
 LocalPlugins.xcconfig
