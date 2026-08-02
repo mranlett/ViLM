@@ -283,7 +283,7 @@ struct ActorGridView: View {
                 AlphaPickerView(filter: $alphaFilter)
                     .padding(.horizontal)
                     .padding(.bottom)
-                
+
                 if filteredActors.isEmpty {
                     if allUniqueActors.isEmpty {
                         ContentUnavailableView(
