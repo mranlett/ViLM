@@ -3,7 +3,7 @@
 
 ---
 spec: "ViLM Plugin Architecture"
-status: Draft
+status: Approved
 kind: Epic
 priority: P2
 notion: https://app.notion.com/p/ViLM-Plugin-Architecture-3b0adccaf4288104bf63d59ca436f6da

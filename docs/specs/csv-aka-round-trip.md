@@ -3,7 +3,7 @@
 
 ---
 spec: "Actor CSV export is lossy — AKA and tag round-trip"
-status: Approved
+status: Implemented
 kind: Bugfix
 priority: P2
 notion: https://app.notion.com/p/Actor-CSV-export-is-lossy-AKA-and-tag-round-trip-3afadccaf4288162980bd957ae0eb99e
@@ -11,7 +11,7 @@ notion: https://app.notion.com/p/Actor-CSV-export-is-lossy-AKA-and-tag-round-tri
 
 # Actor CSV export is lossy — AKA and tag round-trip
 
-> Data-fidelity defect in the actor CSV export/import. The export omits fields the library actively curates, so a CSV is a lossy representation of the catalogue and a round-trip silently discards user data. **Status: APPROVED 2026-08-02 — cleared for implementation.** All four decisions (D1–D4) are closed.
+> Data-fidelity defect in the actor CSV export/import. The export omitted fields the library actively curates, so a CSV was a lossy representation of the catalogue and a round-trip silently discarded user data. **Status: IMPLEMENTED 2026-08-02.** Shipped in `ed25942`; verified against the live 1,336-actor library. See the Delivery record at the foot of this page.
 ## Intention
 Make the actor CSV a faithful representation of an actor profile, so that exporting and re-importing preserves what the user has curated — and so that any external tool consuming the export can see the fields that matter for identity.
 ## The defect
@@ -104,5 +104,32 @@ Characterization first, per personal standards — capture current export/import
 - ✅ **Merge semantics** — resolved: union with dedup. See D3.
 - ✅ **Column indices** — resolved: AKAs at 9, Tags at 10. See D4.
 *All open decisions are closed. This specification is ready for approval.*
+## Delivery record — IMPLEMENTED 2026-08-02
+Shipped in commit `ed25942`. GitHub: [#11](https://github.com/mranlett/ViLM/issues/11) (closed), plus [#12](https://github.com/mranlett/ViLM/issues/12) raised and fixed along the way.
+### What shipped
+- **Format extracted to ****`LibraryCore/ActorCSV.swift`** — it previously lived inside a SwiftUI view and could not be tested at all. The two country transforms are injected, since `CountryFlagHelper` is app-target-only.
+- **AKAs at index 9, Tags at index 10**, pipe-delimited, with backslash escaping so a literal `|` round-trips instead of splitting.
+- **Union-with-dedup on import**, case-insensitive, existing casing preserved, entries equal to the primary name dropped on both export and import so a no-edit round trip is stable.
+- **Header validation** — `importCSV` now rejects a reordered, renamed or headerless file naming the offending column, while still accepting nine-column legacy files, extra trailing columns, case differences, surrounding whitespace and a BOM.
+- **Zero-row imports now report an error** rather than succeeding silently.
+- **44 tests** in `ActorCSVTests`; 360 across `LibraryCore`.
+### Verified in production (1,346 videos / 1,339 actors, iPhone 16 Pro Max)
+- Export: 1,336 rows, all 11 columns, no ragged rows. **All nine original columns byte-identical in fill rate**, proving the extraction changed nothing.
+- Import: AKAs and tags merged into real profiles.
+- Invariants held on real data — zero self-referential AKAs, zero duplicates.
+### ⚠️ Defect discovered during implementation — #12
+Writing the characterization tests exposed a latent bug: **Swift treats ****`\r\n`**** as a SINGLE Character**, so the parser's `char == "\n" || char == "\r"` never matched a Windows line ending. A CRLF file collapsed into one row, `dropFirst()` discarded it, and **the import silently did nothing**.
+It then hit the Human Operator in production on the first real round trip — an edited file, saved by a spreadsheet editor as CRLF, imported zero of 1,336 rows while reporting success. Proven on the actual file:
+```javascript
+BEFORE (literal comparison)     AFTER (isNewline)
+  parsed rows      : 1            parsed rows      : 1337
+  after dropFirst(): 0            after dropFirst(): 1336
+```
+Fixed by testing `Character.isNewline`, and paired with the zero-row error so the same class of silent failure cannot recur unseen.
+### Residual
+The **reordered-header rejection** is unit-tested (nine cases) and wired, but has never been exercised on device by feeding the app a deliberately scrambled CSV. Low risk, recorded for completeness.
+### Consequence for the enrichment spec
+D2 here put **tags into the CSV**, which supersedes D7 of *Actor Metadata Enrichment*: tag enrichment is no longer Phase-3-only, so the batch path can now apply `Redhead` and ethnicity tags across all matched actors.
+---
 ## Evidence
 `ActorGridView.swift:607` (export header), `:678-720` (positional import), `:713-715` (collection fields preserved, not read). `EntityProfile.swift` (`akas`, `tags`, `galleryUrls`). In-app Help text already tells users that tags, gallery photos and aliases are preserved because "this format doesn't carry them" — the behaviour is documented, but the omission is still a fidelity gap. Defect-inventory context: C3 (the `try?`-fetch-then-save wipe, since fixed) and M4 (row-by-row saves, since made transactional).
