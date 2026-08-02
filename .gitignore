@@ -77,3 +77,10 @@ greptile.json
 # Directive-installed CI (unrequested on this repo)
 .github/workflows/deft-core-guard.yml
 .github/codeql/codeql-config.yml
+
+# Plugin architecture — local wiring is NEVER committed (epic D2/D7).
+# The public repository contains the extension point (PluginBootstrap.swift) and
+# nothing that uses it: no module name, no package reference, no roster.
+ViLM/LocalPlugins.swift
+*.local.xcconfig
+LocalPlugins.xcconfig

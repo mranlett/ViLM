@@ -67,6 +67,17 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Section(header: Text("Plugins")) {
+                    NavigationLink {
+                        PluginSettingsView(
+                            registry: PluginEnvironment.registry,
+                            installer: PluginEnvironment.installer(libraryURL: libraryURL)
+                        )
+                    } label: {
+                        Label("Plugins", systemImage: "puzzlepiece.extension")
+                    }
+                }
                 
                 Section(
                     header: Text("Library"),
