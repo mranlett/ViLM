@@ -604,33 +604,17 @@ struct ActorGridView: View {
     // MARK: - CSV Logic
     
     private func exportCSV() {
-        var csvString = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating\n"
-        for actor in allUniqueActors {
-            let profile = actorProfiles["actor:\(actor)"]
-            let name = escapeCSV(actor)
-            let bio = escapeCSV(profile?.bio ?? "")
-            let photoUrl = escapeCSV(profile?.photoUrl ?? "")
-            let homePage = escapeCSV(profile?.homePage ?? "")
-            let gender = escapeCSV(profile?.gender ?? "")
-            let hairColor = escapeCSV(profile?.hairColor ?? "")
-            let birthYear = escapeCSV(profile?.birthYear.map { String($0) } ?? "")
-            // CSV can't reliably carry flag emoji, so export the country name
-            // only; import re-adds the flag.
-            let country = escapeCSV(CountryFlagHelper.strippedOfFlag(profile?.countryOfOrigin ?? ""))
-            let rating = escapeCSV(profile?.rating.map { String($0) } ?? "")
-            
-            csvString.append("\(name),\(bio),\(photoUrl),\(homePage),\(gender),\(hairColor),\(birthYear),\(country),\(rating)\n")
-        }
+        // Format lives in LibraryCore (ActorCSV) so it can be unit-tested; this view
+        // only supplies the data. The country transform is injected because
+        // CountryFlagHelper is app-target-only: CSV can't reliably carry a flag
+        // emoji, so the export writes the country name and the import re-adds it.
+        let csvString = ActorCSV.document(
+            actors: allUniqueActors,
+            profileFor: { actorProfiles["actor:\($0)"] },
+            stripCountry: CountryFlagHelper.strippedOfFlag
+        )
         csvDocument = CSVDocument(text: csvString)
         isShowingExportPicker = true
-    }
-    
-    private func escapeCSV(_ text: String) -> String {
-        var escaped = text.replacingOccurrences(of: "\"", with: "\"\"")
-        if escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n") {
-            escaped = "\"\(escaped)\""
-        }
-        return escaped
     }
     
     private func importCSV(from url: URL) {
@@ -663,7 +647,7 @@ struct ActorGridView: View {
                 }
 
                 let store = try LibraryStore(at: libraryURL)
-                let records = parseCSV(content)
+                let records = ActorCSV.parse(content)
 
                 // Assuming header is first line
                 let rows = records.dropFirst()
@@ -676,11 +660,11 @@ struct ActorGridView: View {
                 var merged: [String: EntityProfile] = [:]
 
                 for columns in rows {
-                    if columns.count >= 4 {
+                    if columns.count >= ActorCSV.minimumColumnCount {
                         let name = columns[0]
                         if name.isEmpty { continue }
 
-                        let entityId = "actor:\(name)"
+                        let entityId = ActorCSV.entityId(forName: name)
                         // Merge into whatever's already there rather than replacing
                         // the profile wholesale. A CSV row is usually a partial
                         // edit — a handful of fields filled in for many actors at
@@ -694,27 +678,15 @@ struct ActorGridView: View {
                         // third instance of this bug class).
                         let existing = try merged[entityId] ?? store.fetchEntityProfile(for: entityId)
 
-                        func cell(_ index: Int) -> String? {
-                            guard index < columns.count, !columns[index].isEmpty else { return nil }
-                            return columns[index]
-                        }
-
-                        let profile = EntityProfile(
-                            id: entityId,
-                            bio: cell(1) ?? existing?.bio,
-                            photoUrl: cell(2) ?? existing?.photoUrl,
-                            homePage: cell(3) ?? existing?.homePage,
-                            gender: cell(4) ?? existing?.gender,
-                            hairColor: cell(5) ?? existing?.hairColor,
-                            birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
-                            // Re-attach the flag emoji the export stripped out.
-                            countryOfOrigin: cell(7).map { CountryFlagHelper.withFlag($0) } ?? existing?.countryOfOrigin,
-                            rating: cell(8).flatMap(Int.init) ?? existing?.rating,
-                            tags: existing?.tags ?? [],
-                            galleryUrls: existing?.galleryUrls ?? [],
-                            akas: existing?.akas ?? [],
-                            createdAt: existing?.createdAt ?? Date()
-                        )
+                        // Field-by-field merge lives in LibraryCore (ActorCSV.merge) and is
+                        // unit-tested there: blank cells leave existing values alone, AKAs and
+                        // tags are UNIONED with what's already stored, and gallery URLs — which
+                        // this format doesn't represent — are carried over untouched.
+                        guard let profile = ActorCSV.merge(
+                            columns: columns,
+                            existing: existing,
+                            decorateCountry: CountryFlagHelper.withFlag
+                        ) else { continue }
                         merged[entityId] = profile
                     }
                 }
@@ -733,46 +705,6 @@ struct ActorGridView: View {
     
     // Pure text parsing, safe from any thread (called from the detached
     // import task).
-    nonisolated private func parseCSV(_ content: String) -> [[String]] {
-        var results: [[String]] = []
-        var currentRow: [String] = []
-        var currentCell = ""
-        var insideQuotes = false
-        
-        let characters = Array(content)
-        var i = 0
-        while i < characters.count {
-            let char = characters[i]
-            
-            if char == "\"" {
-                if insideQuotes && i + 1 < characters.count && characters[i + 1] == "\"" {
-                    currentCell.append("\"")
-                    i += 1
-                } else {
-                    insideQuotes.toggle()
-                }
-            } else if char == "," && !insideQuotes {
-                currentRow.append(currentCell)
-                currentCell = ""
-            } else if (char == "\n" || char == "\r") && !insideQuotes {
-                if char == "\r" && i + 1 < characters.count && characters[i + 1] == "\n" {
-                    i += 1
-                }
-                currentRow.append(currentCell)
-                results.append(currentRow)
-                currentRow = []
-                currentCell = ""
-            } else {
-                currentCell.append(char)
-            }
-            i += 1
-        }
-        if !currentCell.isEmpty || !currentRow.isEmpty {
-            currentRow.append(currentCell)
-            results.append(currentRow)
-        }
-        return results
-    }
 }
 
 struct ActorGridItemView: View {

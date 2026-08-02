@@ -53,12 +53,9 @@ struct AssetsGridView: View {
     // cleared so the toggle doesn't linger showing actors for an empty query.
     @State private var resultViewMode: ResultViewMode = .assets
     
-    enum SortOption: String, CaseIterable {
-        case seriesOrder = "Series Order"
-        case name = "Name"
-        case date = "Date Added"
-        case size = "File Size"
-    }
+    /// One definition, shared with LibraryCore so the ordering rules it drives can
+    /// be unit-tested (see AssetSortTests). Call sites keep saying `SortOption`.
+    typealias SortOption = AssetSort.Option
     
     @State private var sortOption: SortOption = .name
     @State private var sortAscending: Bool = true
@@ -193,38 +190,14 @@ struct AssetsGridView: View {
             return true
         }
         
-        return filtered.sorted { a, b in
-            let compare: Bool
-            switch sortOption {
-            case .seriesOrder:
-                compare = seriesOrderIsAscending(a, b)
-            case .name:
-                compare = a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
-            case .date:
-                compare = a.createdAt < b.createdAt
-            case .size:
-                let sizeA = fileSizes[a.id] ?? 0
-                let sizeB = fileSizes[b.id] ?? 0
-                compare = sizeA < sizeB
-            }
-            return sortAscending ? compare : !compare
-        }
+        // Ordering rules live in LibraryCore (AssetSort) so they can be unit-tested
+        // without a view; see AssetSortTests. Behaviour is unchanged.
+        return AssetSort.sorted(filtered,
+                                by: sortOption,
+                                ascending: sortAscending,
+                                fileSizes: fileSizes)
     }
 
-    /// Ordering within a series: season, then episode, then date added, then
-    /// filename. A missing season is treated as Season 1 (an unnumbered entry
-    /// is the original); a missing episode sorts last within its season so
-    /// numbered episodes lead. Used by the "Series Order" sort.
-    private func seriesOrderIsAscending(_ a: Asset, _ b: Asset) -> Bool {
-        let sa = a.seasonNumber ?? 1
-        let sb = b.seasonNumber ?? 1
-        if sa != sb { return sa < sb }
-        let ea = a.episodeNumber ?? Int.max
-        let eb = b.episodeNumber ?? Int.max
-        if ea != eb { return ea < eb }
-        if a.createdAt != b.createdAt { return a.createdAt < b.createdAt }
-        return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
-    }
     
     // MARK: - Title Logic
     private var sidebarSelectionTitle: String {

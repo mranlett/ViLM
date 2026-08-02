@@ -116,29 +116,22 @@ struct DetailGridView: View {
     }
 
     private func computeTimes(for avAsset: AVURLAsset) async {
+        // Geometry and timing live in LibraryCore (FrameGrid) as pure functions so
+        // they can be unit-tested without a video fixture. This view only supplies
+        // the values loaded from AVFoundation.
         if let track = try? await avAsset.loadTracks(withMediaType: .video).first,
            let size = try? await track.load(.naturalSize),
-           let transform = try? await track.load(.preferredTransform) {
-            let transformedSize = size.applying(transform)
-            let width = abs(transformedSize.width)
-            let height = abs(transformedSize.height)
-            if height > 0 {
-                await MainActor.run {
-                    self.computedAspectRatio = width / height
-                }
+           let transform = try? await track.load(.preferredTransform),
+           let ratio = FrameGrid.aspectRatio(naturalSize: size, transform: transform) {
+            await MainActor.run {
+                self.computedAspectRatio = ratio
             }
         }
-        
+
         guard let dur = try? await avAsset.load(.duration) else { return }
 
-        let total = dur.seconds
-        guard total.isFinite, total > 0 else { return }
-
-        let count = 16
-        let newTimes = (0..<count).map { i -> Double in
-            let t = (Double(i) + 1) / Double(count + 1) * total
-            return min(max(0, t), max(0, total - 0.25))
-        }
+        let newTimes = FrameGrid.frameTimes(duration: dur.seconds)
+        guard !newTimes.isEmpty else { return }
 
         times = newTimes
     }

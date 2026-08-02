@@ -25,3 +25,55 @@ Package.resolved
 # macOS
 #
 .DS_Store
+
+# Deft framework: ignore local-only caches and scratch directories
+# Hybrid deposit (#1942): reconstituted by `directive init` like node_modules.
+# The vendored→hybrid un-commit for existing tracked deposits is #1941.
+.deft-cache/
+.deft/cache/
+.deft/.cli/
+.deft/ritual-state.json
+.deft/last-session.json
+.deft/routing.local.json
+vbrief/.triage-cache/candidates.jsonl
+vbrief/.triage-cache/summary-history.jsonl
+vbrief/.triage-cache/scope-lifecycle.jsonl
+vbrief/.triage-cache/decompositions/
+vbrief/.triage-cache/doctor-state.json
+xbrief/.triage-cache/candidates.jsonl
+xbrief/.triage-cache/summary-history.jsonl
+xbrief/.triage-cache/scope-lifecycle.jsonl
+xbrief/.triage-cache/decompositions/
+xbrief/.triage-cache/doctor-state.json
+vbrief/*.lock
+.deft/core.bak-*/
+.deft/*.bak-*
+.deft/xbrief-migrate-backup-*/
+*.premigrate.*
+vbrief/.eval/results/
+xbrief/.eval/results/
+.deft/core/
+
+# Deft / Directive tooling — local-only, never committed.
+# Directive is installed per-machine via `directive init` and reconstitutes
+# these itself. Keeping them out of the repo keeps ViLM free of agent-tooling
+# noise. NOTE: xbrief/ work state is therefore local-only and not versioned.
+.deft/
+.agents/
+xbrief/
+AGENTS.md
+Taskfile.yml
+greptile.json
+.prettierignore
+.gitattributes
+.githooks/
+
+# Agent/assistant host configs installed by Directive
+.claude/
+.codex/
+.cursor/
+.grok/
+
+# Directive-installed CI (unrequested on this repo)
+.github/workflows/deft-core-guard.yml
+.github/codeql/codeql-config.yml

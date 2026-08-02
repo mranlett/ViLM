@@ -225,12 +225,15 @@ struct DuplicateDetectionView: View {
             .foregroundColor(color)
     }
 
+    // Display formatting lives in LibraryCore (MediaFormat) so it can be unit-tested;
+    // see MediaFormatTests. F6 will change where width/height/duration COME FROM —
+    // these strings must not move with them.
     private func metaLine(_ m: FileMeta) -> String {
-        var parts: [String] = [byteString(m.sizeBytes)]
-        if m.width > 0, m.height > 0 { parts.append("\(m.width)×\(m.height)") }
-        if let mbps = m.bitrateMbps { parts.append(String(format: "%.1f Mbps", mbps)) }
-        if let duration = m.durationSeconds { parts.append(Self.durationString(duration)) }
-        return parts.joined(separator: " · ")
+        MediaFormat.metaLine(sizeBytes: m.sizeBytes,
+                             width: m.width,
+                             height: m.height,
+                             bitrateMbps: m.bitrateMbps,
+                             durationSeconds: m.durationSeconds)
     }
 
     private func toggleSelection(_ id: Asset.ID) {
@@ -474,17 +477,12 @@ struct DuplicateDetectionView: View {
     // MARK: - Formatting
 
     private func byteString(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        MediaFormat.byteCount(bytes)
     }
 
     // Static + nonisolated so the background scan closure can format the
     // overlap-offset note without touching main-actor state.
     nonisolated private static func durationString(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
-        return String(format: "%d:%02d", m, s)
+        MediaFormat.duration(seconds: seconds)
     }
 }
