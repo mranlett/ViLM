@@ -61,7 +61,11 @@ struct DetailGridView: View {
     var isInteractive: Bool = true
     var onSelectTime: ((Double) -> Void)? = nil
 
-    @State private var times: [Double] = Array(repeating: 0, count: 16)
+    // Empty until computeTimes resolves the real timestamps. It used to start as
+    // sixteen ZEROS, so all 16 cells decoded frame 0 — identical, discarded —
+    // and then decoded again when the real times arrived: 32 decodes per load,
+    // half of them waste, plus the black flash as every cell reset (#4 / F1).
+    @State private var times: [Double] = []
     @State private var computedAspectRatio: CGFloat = 16.0 / 9.0
     // One AVURLAsset per video, held across renders. `body` used to build a
     // fresh instance on every render and hand it to all 16 cells; the cell
@@ -86,16 +90,17 @@ struct DetailGridView: View {
                         HStack(spacing: 2) {
                             ForEach(0..<4, id: \.self) { col in
                                 let index = row * 4 + col
-                                let start = times.indices.contains(index) ? times[index] : 0
+                                let start: Double? = times.indices.contains(index) ? times[index] : nil
 
                                 FrameExtractView(
                                     videoAsset: videoAsset,
+                                    assetKey: url.path,
                                     timeSeconds: start,
                                     aspectRatio: computedAspectRatio
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    guard isInteractive else { return }
+                                    guard isInteractive, let start else { return }
                                     onSelectTime?(start)
                                 }
                             }
@@ -140,7 +145,11 @@ struct DetailGridView: View {
 // MARK: - Individual Frame Extractor (image at an explicit timestamp)
 struct FrameExtractView: View {
     let videoAsset: AVAsset
-    let timeSeconds: Double
+    /// Identifies the video for cache purposes (its file path).
+    let assetKey: String
+    /// `nil` until the grid has resolved real timestamps — decoding before then
+    /// produced 16 throwaway frames per load. See DetailGridView.times.
+    let timeSeconds: Double?
     var aspectRatio: CGFloat = 16.0 / 9.0
 
     @State private var frame: CGImage?
@@ -157,22 +166,32 @@ struct FrameExtractView: View {
                     .overlay(ProgressView().controlSize(.small))
             }
         }
-        // Critical: rerun when the timestamp changes (times[] initially 0 then updates)
+        // Runs once the timestamp resolves. Deliberately does NOT clear `frame`
+        // first: blanking on every id change is what made the grid flash black.
         .task(id: timeSeconds) {
-            frame = nil
-            await generateFrame()
+            await loadFrame()
         }
     }
 
-    private func generateFrame() async {
-        let generator = AVAssetImageGenerator(asset: videoAsset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 800, height: 600)
+    private func loadFrame() async {
+        guard let timeSeconds else { return }
+        let key = FrameCache.key(assetKey: assetKey, timeSeconds: timeSeconds)
+        let asset = videoAsset
 
-        let time = CMTime(seconds: max(0, timeSeconds), preferredTimescale: 600)
-        if let (cgImage, _) = try? await generator.image(at: time) {
-            frame = cgImage
+        // A cache hit skips both the decode and the concurrency gate, so
+        // re-opening a video costs nothing.
+        let image = await FrameCache.shared.image(for: key) {
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 800, height: 600)
+            let time = CMTime(seconds: max(0, timeSeconds), preferredTimescale: 600)
+            guard let (cgImage, _) = try? await generator.image(at: time) else { return nil }
+            return cgImage
         }
+
+        // Navigating away mid-load cancels the task; don't publish a stale frame.
+        guard !Task.isCancelled, let image else { return }
+        frame = image
     }
 }
 

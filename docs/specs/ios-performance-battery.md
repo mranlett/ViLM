@@ -36,7 +36,8 @@ play_count, last_played_at
 > **Cross-system conflict (Article I).** The ViLM application charter's data-model section claims the assets table holds `file_size, duration, width, height, codec, modified_at`. It does not. Raised, not silently corrected — tracked as **C1**.
 ## ⚠️ P0 prerequisite — establish a baseline first
 **No performance baseline exists.** Every acceptance criterion below is expressed as a relative improvement, and none can be evaluated without a before-measurement. The audit's own action plan calls for Instruments validation but does not require a baseline capture.
-**No optimisation task may be marked Done before its baseline is recorded.** Capture on a physical iPhone via Instruments (Energy Log + CPU Profiler + Allocations), against a fixed reference library, recording:
+**No optimisation task may be marked Done before its baseline is recorded.** Capture on a physical iPhone via Instruments (**Power Profiler** + CPU Profiler + Allocations), against a fixed reference library, recording:
+> ⚠️ **"Energy Log" no longer exists.** Verified against Xcode 26.6 with `xcrun xctrace list templates` — the template was replaced by **Power Profiler**. Capture with **Product → Profile (⌘I)**, which builds the **Release** configuration; a Debug build is far slower and would flatter every later comparison. Profile **over wireless rather than USB**, since a cabled device is charging and that distorts power readings.
 - Energy impact and CPU% during a 4×4 contact-sheet grid render
 - Energy, wall-clock and peak memory for a duplicate scan over a fixed video count
 - Peak resident memory during sustained actor-grid scrolling
@@ -113,7 +114,7 @@ The reference library, device model and iOS version are recorded with the number
 4. **Phase 3 · Schema-backed metadata.** F5 and F6 together — they share one migration, one scanner change and one backfill. Largest and riskiest; sequenced last deliberately.
 ## Decisions — Human Operator
 ### ✅ D1 — Reference baseline
-**iPhone 16 Pro**, against a reference library of:
+**iPhone 16 Pro Max** *(corrected 2026-08-02 — previously recorded as iPhone 16 Pro; thermal envelope and core configuration differ, so measurements are only comparable within the same model)*, against a reference library of:
 - **~1,300 videos**, ~450 MB each — approximately **585 GB** total
 - **~1,300 actor profiles**, ~2 JPGs each — approximately **2,600 images**
 All comparisons are valid only against this device, this library shape, and a recorded iOS version. Any number quoted without that trio is not evidence.
@@ -141,5 +142,72 @@ Stage A delivers F5's win almost immediately. Stage B runs after, with its own p
 This also gives a natural task split for the backlog without splitting the schema.
 ## Corrections raised
 - **C1 · Charter data model is inaccurate.** ✅ **Corrected in Notion 2026-08-01.** The ViLM application charter claimed the assets table holds `file_size, duration, width, height, codec, modified_at`. Verified absent from `LibraryStore.swift:114-218`; the charter now lists the columns that actually exist and notes that this specification's Phase 3 will add the metadata columns.
+# ⚠️ REVISIONS FROM ON-DEVICE MEASUREMENT (2026-08-02)
+**Status returned to In Review.** Baseline capture on the reference device contradicted **four** of the six findings. Everything below is measured, not inferred, and supersedes the corresponding sections above.
+## Measured baseline — iPhone 16 Pro Max, iOS 26.6, Release build
+Library: **1,346 videos, 1,339 actors** (93 without photos). Exact figures, not the "~1,300" originally assumed.
+**Important context from the Human Operator:** every video is **already fingerprinted** and every contact sheet is **already generated**. These scenarios exercise existing on-disk assets; no fingerprinting or sheet generation occurred.
+| Scenario | Power | CPU | Allocated |
+| --- | --- | --- | --- |
+| Actor gallery scroll, 2 passes | **30.7 %/hr** | — | **19,937 MiB** |
+| 4×4 grid, 10 loads | 21.8 %/hr | 16.89 s | 1,925 MiB |
+| Unspecified earlier run | 23.3 %/hr | — | — |
+The grid scenario was run twice — **17.01 s and 16.89 s CPU, 0.71% spread**. Sub-1% noise, so a 5% change is measurable.
+---
+## R1 · F1 rewritten — 32 decodes per load, and on-disk assets ignored
+The audit said 16 concurrent decodes. It is **32**.
+`DetailGridView` initialises `times` to sixteen zeros. The cells render immediately and each `.task(id: timeSeconds)` fires — **16 decodes of frame 0, identical, all discarded.** `computeTimes` then assigns real timestamps, changing every cell's id, setting `frame = nil` and firing **16 more**. Half the work is waste, and that `frame = nil` is why the grid visibly flashes to black-with-spinner.
+`FrameExtractView.generateFrame` consults **no cache at all** — not an in-memory one, not `ThumbnailLoader` (which already implements this pattern with an `NSCache` keyed on modification date), and not the contact sheet already on disk at `.catalog/contactSheets/<id>.jpg`.
+> **Reuse caveat:** the stored sheet is **4×3 = 12 frames** (`columns: 4, rows: 3`); the detail grid shows **4×4 = 16** at different sample points. Not a drop-in substitute.
+### The CPU criterion was unachievable — removed
+```javascript
+16.89 s 100.0%  ViLM
+13.57 s  80.4%    ViLMApp.$main()             <- MAIN THREAD
+ 8.66 s  51.2%      _UIUpdateSequenceRunNext  <- SwiftUI view updates
+```
+**`AVAssetImageGenerator`**** appears nowhere in the heaviest path.** Main-thread SwiftUI work is 80.4%; everything else across all threads — the bucket containing decode — is 19.6%. **With decoding entirely free, CPU falls only to 13.57 s: a 19.7% improvement**, short of the 20% aim.
+CPU profiling under-represents hardware decode, which burns power and wall-clock on the media engine at little CPU cost. This bounds the *CPU* case only.
+**New primary metric: wall clock per grid load — baseline 3.80 s.**
+### Revised acceptance criteria for F1 (#4)
+- A grid load performs **16 decodes, not 32** — asserted by counting generator invocations.
+- Re-opening an already-viewed video performs **zero** decodes.
+- **Wall clock per load below 3.80 s**, aiming for ≤ 3.04 s.
+- Allocation per load below 192.5 MiB.
+- No black flash: a cell never reverts to placeholder once it has shown a frame.
+- Same 16 frames, timestamps and order (pinned by `FrameGridTests`).
+- Concurrency bounded by a named constant; navigating away cancels outstanding work.
+- ~~CPU measurably below baseline~~ — **removed**, capped at 19.7% by construction.
+---
+## R2 · F4 rewritten — the premise is disproven
+F4 assumed ~288 MB of cache ceilings invite Jetsam pressure. **Measured live heap after two full passes over 1,339 actors: 28.59 MB — 10% of that ceiling.** The caches never fill. Memory pressure from oversized caches is **not observed** in the scenario most likely to cause it.
+The real signal is churn: **19.47 GiB cumulative against 28.59 MB live — a ~697× ratio, ~7.4 MiB per actor cell**, on a second pass over identical content. That is the signature of images being decoded again on every appearance.
+**F4 is re-aimed at cache *****ineffectiveness*****, not cache size.** Adjusting a ceiling that is 10% used changes nothing. Recommended first step: scroll one screenful repeatedly and watch Total Bytes; if it climbs on already-decoded content, the cache is missing on its own entries.
+---
+## R3 · F3 should be closed — dormant, and deliberate by design
+Two independent reasons:
+**It does not execute on a mature library.** `DuplicateDetectionView` early-exits via `continue` for any video with a valid cached fingerprint. `caches[owner]!.save()` is reached **only for newly fingerprinted videos**. With every video already fingerprinted, the per-item save never fires.
+**It is intentional where it does fire.** The code states the trade explicitly: *"each one costs seconds of frame decoding, the save costs milliseconds — so a scan interrupted at video 600 of 1300 resumes from 600 instead of starting over."* Batching every 25 items would discard up to 25 fingerprints on interruption, each costing seconds to rebuild — directly contradicting that rationale.
+The audit's "500+ JSON encodings during a 500-video scan" is true only on a **first** scan of 500 **new** videos, where the saves are dwarfed by the decoding they protect.
+**Recommendation: close #6 as by-design.** If revisited, the case must be made on first-import cost, not steady state, and must preserve resume granularity.
+---
+## R4 · F2 re-scoped — its headline example is also dormant
+F2's motivating example is fingerprinting 1,000+ videos at `.userInitiated`. On a fingerprinted library that path does not run either.
+F2 nonetheless **remains valid**: 20 `.userInitiated` sites across 12 files, only 2 uses of `.utility`/`.background` app-wide. Library backup, transfer, actor sync and thumbnail generation all still execute. The finding stands; its justification should cite those, not the fingerprint scan.
+---
+## R5 · NEW FINDING F7 · SwiftUI update churn is the largest measured cost
+**51.2% of all CPU** sits in `_UIUpdateSequenceRunNext`; **80.4%** is main-thread SwiftUI work. No existing finding addresses it.
+A plausible contributor is in F1's territory: `DetailGridView` mutates `@State` twice per load (`computedAspectRatio`, then `times`), each triggering a full view-graph update across all 16 cells — and the second also invalidates every cell's `.task`.
+Curiosity worth a look: **174 ms of locale parsing** (`GetBaseLanguageIdentifierFromIdentifier` → `NSLocale._components(fromLocaleIdentifier:)`) inside the view-update path, beneath `ViewGraphFeatureBuffer.needsUpdate`. Locale decomposition during layout is almost always accidental and cacheable.
+**Proposed:** raise as a new issue. Largest single lever measured; currently unowned.
+---
+## R6 · Re-sequenced delivery
+The audit put F1/F2 first as "highest energy yield". Measurement says the **actor gallery** is the most expensive screen — 1.4× the power and 10.4× the allocation of grid loading — and no finding targets it correctly.
+1. **F4 re-aimed (#7)** — actor-gallery cache ineffectiveness. Highest measured cost.
+2. **F1 (#4)** — halve the decodes, cache frames, kill the flash. Measured on wall clock.
+3. **F7 (new)** — SwiftUI update churn, 51.2% of CPU.
+4. **F2 (#5)** — QoS classification, re-justified.
+5. **F5 / F6 (#8–10)** — schema-backed metadata, unchanged.
+6. ~~F3 (#6)~~ — **close as by-design.**
+---
 ## Evidence
 Verified 2026-08-01 against `~/Development/ViLM/ViLM` at commit `34ba4a0`. Source of findings: the Auditor's engineering review, linked above. Verification commands and full inventories are reproducible by grep over the paths cited in each finding.
