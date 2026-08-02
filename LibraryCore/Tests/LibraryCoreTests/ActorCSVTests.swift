@@ -64,21 +64,63 @@ final class ActorCSVTests: XCTestCase {
         XCTAssertEqual(ActorCSV.parse("a,b\rc,d\r"), [["a", "b"], ["c", "d"]])
     }
 
-    /// KNOWN DEFECT — pinned, not endorsed.
+    /// Regression test for the CRLF defect (#12).
     ///
-    /// Swift treats "\r\n" as a SINGLE Character (grapheme cluster U+D U+A), so the
-    /// parser's `char == "\n" || char == "\r"` test never matches a CRLF line ending
-    /// and the whole document collapses into one row. `importCSV` then calls
-    /// `dropFirst()` on that single row and imports NOTHING — silently, with no error.
-    ///
-    /// The surrounding code clearly intends to support CRLF (it looks ahead for "\n"
-    /// after a "\r"), so this is a latent bug rather than a deliberate limitation.
-    /// Any CSV written with Windows line endings is affected.
-    func testKNOWNDEFECT_CRLFLineEndingsCollapseIntoASingleRow() {
-        let parsed = ActorCSV.parse("a,b\r\nc,d")
-        XCTAssertEqual(parsed.count, 1, "CRLF is not recognised as a row separator")
-        XCTAssertEqual(parsed, [["a", "b\r\nc", "d"]],
-                       "the line ending ends up INSIDE a cell — this is the bug")
+    /// Swift treats "\r\n" as a SINGLE Character (grapheme cluster U+D U+A) which
+    /// equals neither "\n" nor "\r", so the original literal comparison never split
+    /// Windows-authored files: the document became one row, `dropFirst()` discarded
+    /// it, and the import silently did nothing. This previously asserted the broken
+    /// behaviour; it now asserts the fix.
+    func testCRLFLineEndingsSplitRows() {
+        XCTAssertEqual(ActorCSV.parse("a,b\r\nc,d"), [["a", "b"], ["c", "d"]])
+    }
+
+    func testAllThreeLineEndingsProduceIdenticalRows() {
+        let expected = [["Name", "Bio"], ["Jane", "a bio"], ["John", "another"]]
+        for (label, sep) in [("LF", "\n"), ("CRLF", "\r\n"), ("CR", "\r")] {
+            let doc = "Name,Bio\(sep)Jane,a bio\(sep)John,another"
+            XCTAssertEqual(ActorCSV.parse(doc), expected, "\(label) must parse like the others")
+        }
+    }
+
+    func testMixedLineEndingsInOneFileParseCorrectly() {
+        XCTAssertEqual(ActorCSV.parse("a,b\r\nc,d\ne,f\rg,h"),
+                       [["a", "b"], ["c", "d"], ["e", "f"], ["g", "h"]])
+    }
+
+    func testACRLFFileWithQuotedEmbeddedNewlinesStillParses() {
+        // The embedded newline is inside quotes and must stay part of the value,
+        // while the CRLF outside the quotes still ends the row.
+        let parsed = ActorCSV.parse("\"line1\nline2\",b\r\nc,d")
+        XCTAssertEqual(parsed.count, 2)
+        XCTAssertEqual(parsed[0], ["line1\nline2", "b"])
+        XCTAssertEqual(parsed[1], ["c", "d"])
+    }
+
+    func testAFullCRLFDocumentImportsTheSameProfilesAsLF() {
+        let body = "Jane Doe,a bio,,,,Brown,1990,US,4,Janet,Redhead"
+        let lf   = ActorCSV.header + "\n"   + body
+        let crlf = ActorCSV.header + "\r\n" + body
+        let lfRows   = Array(ActorCSV.parse(lf).dropFirst())
+        let crlfRows = Array(ActorCSV.parse(crlf).dropFirst())
+        XCTAssertEqual(lfRows.count, 1, "LF: one data row after skipping the header")
+        XCTAssertEqual(crlfRows.count, 1, "CRLF: the bug made this ZERO, so nothing imported")
+        XCTAssertEqual(lfRows, crlfRows)
+
+        let a = ActorCSV.merge(columns: lfRows[0], existing: nil, decorateCountry: identity)
+        let b = ActorCSV.merge(columns: crlfRows[0], existing: nil, decorateCountry: identity)
+        XCTAssertEqual(a?.akas, b?.akas)
+        XCTAssertEqual(a?.tags, b?.tags)
+        XCTAssertEqual(a?.bio, b?.bio)
+    }
+
+    /// `isNewline` also covers the Unicode line separators. Deliberate: they are
+    /// line terminators, and none is plausible inside an actor field.
+    func testUnicodeLineSeparatorsAlsoSplitRows() {
+        for sep in ["\u{0B}", "\u{0C}", "\u{85}", "\u{2028}", "\u{2029}"] {
+            XCTAssertEqual(ActorCSV.parse("a,b\(sep)c,d"), [["a", "b"], ["c", "d"]],
+                           "U+\(String(sep.unicodeScalars.first!.value, radix: 16, uppercase: true)) is a line terminator")
+        }
     }
 
     func testParseKeepsEmbeddedNewlineInsideQuotes() {
@@ -207,6 +249,74 @@ final class ActorCSVTests: XCTestCase {
             XCTAssertEqual(merged?.akas, akas, "no-edit round trip must be byte-identical")
             XCTAssertEqual(merged?.tags, ["T1"])
         }
+    }
+
+    // MARK: - Header validation
+
+    func testTheCanonicalHeaderIsAccepted() {
+        XCTAssertNil(ActorCSV.validateHeader(ActorCSV.columnNames))
+    }
+
+    func testANineColumnLegacyHeaderIsAcceptedAsAValidPrefix() {
+        let legacy = Array(ActorCSV.columnNames.prefix(9))
+        XCTAssertNil(ActorCSV.validateHeader(legacy),
+                     "files written before AKAs and Tags existed must keep importing")
+    }
+
+    func testExtraTrailingColumnsAreAccepted() {
+        XCTAssertNil(ActorCSV.validateHeader(ActorCSV.columnNames + ["SomethingNew", "AndAnother"]),
+                     "indices beyond the contract are ignored anyway")
+    }
+
+    func testCaseWhitespaceAndAByteOrderMarkAreTolerated() {
+        var messy = ActorCSV.columnNames.map { $0.uppercased() }
+        messy[0] = "\u{FEFF}  name  "
+        XCTAssertNil(ActorCSV.validateHeader(messy),
+                     "editors introduce all three; none changes which field a column denotes")
+    }
+
+    func testAReorderedHeaderIsRejectedAndNamesTheOffendingColumn() {
+        var swapped = ActorCSV.columnNames
+        swapped.swapAt(1, 3)                       // Bio <-> HomePage
+        let problem = ActorCSV.validateHeader(swapped)
+        XCTAssertEqual(problem, .unexpectedColumn(index: 1, found: "HomePage", expected: "Bio"))
+        XCTAssertTrue(problem!.message.contains("column 2"), "1-based for the user")
+        XCTAssertTrue(problem!.message.contains("HomePage"))
+        XCTAssertTrue(problem!.message.contains("Bio"))
+    }
+
+    func testARenamedColumnIsRejected() {
+        var renamed = ActorCSV.columnNames
+        renamed[9] = "Aliases"                     // AKAs renamed
+        XCTAssertEqual(ActorCSV.validateHeader(renamed),
+                       .unexpectedColumn(index: 9, found: "Aliases", expected: "AKAs"))
+    }
+
+    func testAnInsertedColumnIsRejectedRatherThanShiftingEveryValue() {
+        var inserted = ActorCSV.columnNames
+        inserted.insert("Notes", at: 2)
+        let problem = ActorCSV.validateHeader(inserted)
+        XCTAssertEqual(problem, .unexpectedColumn(index: 2, found: "Notes", expected: "PhotoURL"),
+                       "this is the case that would silently file every later value wrongly")
+    }
+
+    func testAHeaderlessFileIsRejectedRatherThanLosingItsFirstActor() {
+        // Today the first row is discarded unread; without validation a headerless
+        // file silently loses one actor.
+        let dataRow = ["Jane Doe", "a bio", "", "", "", "Brown", "1990", "US", "4", "", ""]
+        XCTAssertEqual(ActorCSV.validateHeader(dataRow),
+                       .unexpectedColumn(index: 0, found: "Jane Doe", expected: "Name"))
+    }
+
+    func testAnEmptyOrBlankHeaderIsRejected() {
+        XCTAssertEqual(ActorCSV.validateHeader([]), .empty)
+        XCTAssertEqual(ActorCSV.validateHeader(["", "  ", ""]), .empty)
+    }
+
+    func testAValidatedDocumentRoundTripsThroughItsOwnHeader() {
+        let doc = ActorCSV.document(actors: ["Jane Doe"], profileFor: { _ in nil }, stripCountry: identity)
+        XCTAssertNil(ActorCSV.validateHeader(ActorCSV.parse(doc)[0]),
+                     "what export writes must be what import accepts")
     }
 
     // MARK: - Backward compatibility

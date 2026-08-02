@@ -152,6 +152,17 @@ public enum ActorCSV {
 
     /// Splits CSV text into rows of cells, honouring quoted cells, doubled quotes
     /// as a literal quote, and CR / LF / CRLF line endings.
+    ///
+    /// Row separation tests `Character.isNewline` rather than comparing against
+    /// `"\n"` and `"\r"` literally. **Swift treats "\r\n" as a SINGLE Character**
+    /// (grapheme cluster U+D U+A) which equals neither literal, so the literal form
+    /// silently failed to split Windows-authored files: the whole document became
+    /// one row, the header-skipping `dropFirst()` discarded it, and the import did
+    /// nothing at all without reporting an error.
+    ///
+    /// `isNewline` is also true for the Unicode line separators (U+000B, U+000C,
+    /// U+0085, U+2028, U+2029). Treating those as row breaks is intentional — they
+    /// are line terminators, and none is plausible inside an actor field.
     public static func parse(_ content: String) -> [[String]] {
         var results: [[String]] = []
         var currentRow: [String] = []
@@ -173,10 +184,9 @@ public enum ActorCSV {
             } else if char == "," && !insideQuotes {
                 currentRow.append(currentCell)
                 currentCell = ""
-            } else if (char == "\n" || char == "\r") && !insideQuotes {
-                if char == "\r" && i + 1 < characters.count && characters[i + 1] == "\n" {
-                    i += 1
-                }
+            } else if char.isNewline && !insideQuotes {
+                // No CR/LF lookahead is needed: a CRLF pair is already one Character,
+                // so consuming a following "\n" separately could never happen.
                 currentRow.append(currentCell)
                 results.append(currentRow)
                 currentRow = []
@@ -196,6 +206,64 @@ public enum ActorCSV {
     /// The entity id a row maps to. Column 0 is the identity key — changing it
     /// creates a NEW actor rather than updating the existing one.
     public static func entityId(forName name: String) -> String { "actor:\(name)" }
+
+    // MARK: - Header validation
+
+    /// The canonical column names, in contractual order.
+    public static var columnNames: [String] {
+        header.split(separator: ",").map(String.init)
+    }
+
+    /// Why a header row was rejected.
+    public enum HeaderProblem: Equatable, Sendable {
+        /// The file had no usable first row.
+        case empty
+        /// A column is not the one the importer expects at that position.
+        case unexpectedColumn(index: Int, found: String, expected: String)
+
+        /// Message suitable for showing to the user, naming the offending column.
+        public var message: String {
+            switch self {
+            case .empty:
+                return "the file is empty or has no header row."
+            case let .unexpectedColumn(index, found, expected):
+                let shown = found.isEmpty ? "an empty cell" : "\"\(found)\""
+                return "column \(index + 1) is \(shown) but should be \"\(expected)\". "
+                     + "Columns must stay in their original order — reordering or renaming them "
+                     + "would file values under the wrong fields."
+            }
+        }
+    }
+
+    /// Checks a parsed header row against the contract.
+    ///
+    /// The importer reads by INDEX and never consults column names, so a reordered
+    /// or renamed header would import silently wrong — a bio landing in `homePage`.
+    /// This is the only thing standing between that and the user.
+    ///
+    /// Accepted deliberately:
+    /// - **Fewer columns than the contract.** A nine-column file written before AKAs
+    ///   and Tags existed is a valid prefix and must keep importing.
+    /// - **Extra trailing columns.** Indices beyond the contract are ignored anyway.
+    /// - **Case, surrounding whitespace, and a leading byte-order mark.** Spreadsheet
+    ///   editors introduce all three; none changes which field a column denotes.
+    ///
+    /// - Returns: `nil` when the header is acceptable, otherwise the problem.
+    public static func validateHeader(_ columns: [String]) -> HeaderProblem? {
+        let cleaned = columns.map {
+            $0.replacingOccurrences(of: "\u{FEFF}", with: "")
+              .trimmingCharacters(in: .whitespaces)
+        }
+        guard cleaned.contains(where: { !$0.isEmpty }) else { return .empty }
+
+        let expected = columnNames
+        for (i, name) in expected.enumerated() where i < cleaned.count {
+            if cleaned[i].caseInsensitiveCompare(name) != .orderedSame {
+                return .unexpectedColumn(index: i, found: cleaned[i], expected: name)
+            }
+        }
+        return nil
+    }
 
     // MARK: - Merge
 

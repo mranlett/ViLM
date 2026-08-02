@@ -649,8 +649,28 @@ struct ActorGridView: View {
                 let store = try LibraryStore(at: libraryURL)
                 let records = ActorCSV.parse(content)
 
-                // Assuming header is first line
+                // The importer reads by INDEX and never consults column names, so a
+                // reordered or renamed header would import silently WRONG — a bio
+                // landing in homePage. Refuse rather than corrupt. A nine-column file
+                // from before AKAs/Tags existed is a valid prefix and still passes.
+                if let problem = ActorCSV.validateHeader(records.first ?? []) {
+                    AppErrorReporter.report("CSV import failed: \(problem.message)")
+                    return
+                }
+
                 let rows = records.dropFirst()
+
+                // Report a file that parsed to nothing rather than reporting success.
+                // Silence here is what hid the CRLF defect (#12) for so long: a
+                // Windows-authored file collapsed into a single row, dropFirst()
+                // discarded it, and the import "succeeded" having changed nothing.
+                guard !rows.isEmpty else {
+                    AppErrorReporter.report(
+                        "CSV import failed: no actor rows were found. The file may be empty, "
+                        + "contain only a header, or not be a ViLM actor export."
+                    )
+                    return
+                }
 
                 // Merged rows are collected first and written as ONE
                 // transaction at the end — a mid-file failure imports nothing
