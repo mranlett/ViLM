@@ -69,13 +69,23 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     public let title: String
     /// Secondary line — a year, a disambiguation, a known alias.
     public let subtitle: String?
+    /// Small image for a compact row. Kept deliberately small: a picker showing
+    /// several rows would otherwise pull a full-size portrait for each.
     public let thumbnailURL: URL?
+    /// Full-size image, for when the user needs a better look before choosing.
+    ///
+    /// Separate from `thumbnailURL` because the two are wanted at different
+    /// moments — a list wants small and fast, a decision wants big and clear.
+    /// A provider with only one size may supply the same URL for both.
+    public let fullImageURL: URL?
 
-    public init(id: String, title: String, subtitle: String? = nil, thumbnailURL: URL? = nil) {
+    public init(id: String, title: String, subtitle: String? = nil,
+                thumbnailURL: URL? = nil, fullImageURL: URL? = nil) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.thumbnailURL = thumbnailURL
+        self.fullImageURL = fullImageURL ?? thumbnailURL
     }
 }
 

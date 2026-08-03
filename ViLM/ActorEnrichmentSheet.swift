@@ -13,6 +13,11 @@ struct ActorEnrichmentSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let actorName: String
+
+    /// Remembered across sheets: someone who needs big pictures to tell
+    /// performers apart needs them every time, and re-choosing on each lookup
+    /// would be its own small annoyance.
+    @AppStorage("pluginPickerLargeImages") private var showsLargeImages = false
     /// Handed the merged profile when the user confirms. The caller puts the
     /// values in its fields; nothing is written to the library here.
     let onApply: (EntityProfile) -> Void
@@ -39,6 +44,19 @@ struct ActorEnrichmentSheet: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { dismiss() }
                     }
+                    if case .choosing = model.phase {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button {
+                                showsLargeImages.toggle()
+                            } label: {
+                                Image(systemName: showsLargeImages
+                                      ? "list.bullet" : "square.grid.2x2.fill")
+                            }
+                            .help(showsLargeImages ? "Show as list" : "Show larger pictures")
+                            .accessibilityLabel(showsLargeImages
+                                                ? "Show as list" : "Show larger pictures")
+                        }
+                    }
                     if case .reviewing = model.phase {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Apply") {
@@ -64,7 +82,11 @@ struct ActorEnrichmentSheet: View {
             progress("Loading details…")
 
         case .choosing(let candidates):
-            candidatePicker(candidates)
+            if showsLargeImages {
+                candidateGallery(candidates)
+            } else {
+                candidatePicker(candidates)
+            }
 
         case .reviewing(let review):
             reviewList(review)
@@ -136,6 +158,63 @@ struct ActorEnrichmentSheet: View {
             } footer: {
                 Text("Pick the right one. Nothing is changed until you review and apply.")
             }
+        }
+    }
+
+    /// The same choice, shown large.
+    ///
+    /// Two columns rather than three: the point is to see a face clearly enough
+    /// to be sure, and three-up on a phone is barely larger than the list.
+    private func candidateGallery(_ candidates: [PluginCandidate]) -> some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 16) {
+                ForEach(candidates) { candidate in
+                    Button {
+                        Task { await model.choose(candidate) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            // fullImageURL, not the thumbnail — upscaling a small
+                            // image would make this view worse than the list it
+                            // replaces.
+                            AsyncImage(url: candidate.fullImageURL ?? candidate.thumbnailURL) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                case .failure:
+                                    placeholderFace
+                                case .empty:
+                                    ZStack { Color.gray.opacity(0.1); ProgressView() }
+                                @unknown default:
+                                    placeholderFace
+                                }
+                            }
+                            .frame(height: 220)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+
+                            Text(candidate.title).font(.subheadline).bold()
+                                .lineLimit(1)
+                            if let subtitle = candidate.subtitle {
+                                Text(subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+
+            Text("Pick the right one. Nothing is changed until you review and apply.")
+                .font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .padding(.bottom)
         }
     }
 
