@@ -18,6 +18,21 @@ struct ActorEnrichmentSheet: View {
     /// performers apart needs them every time, and re-choosing on each lookup
     /// would be its own small annoyance.
     @AppStorage("pluginPickerLargeImages") private var showsLargeImages = false
+
+    /// A candidate whose full set of images is being examined.
+    ///
+    /// One picture is often not enough to separate two similarly-named
+    /// performers — especially the single-word names, where a search can return
+    /// ten candidates and the text tells you nothing.
+    @State private var examining: PluginCandidate?
+
+    /// Show the proposed photos large.
+    ///
+    /// The default grid packs many small tiles, which is right for ticking
+    /// through photos you already recognise — and wrong when you are trying to
+    /// decide whether these images are even the right person. Remembered,
+    /// because someone who needs the larger view needs it every time.
+    @AppStorage("pluginReviewLargePhotos") private var showsLargePhotos = false
     /// Handed the merged profile when the user confirms. The caller puts the
     /// values in its fields; nothing is written to the library here.
     let onApply: (EntityProfile) -> Void
@@ -42,7 +57,19 @@ struct ActorEnrichmentSheet: View {
 #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
+                        // While reviewing a candidate that came from a picker,
+                        // Cancel is the wrong exit: it discards the search and
+                        // the next attempt re-queries the source for the same
+                        // list. Offer the way back instead.
+                        if case .reviewing = model.phase, model.canReturnToPicker {
+                            Button {
+                                model.returnToPicker()
+                            } label: {
+                                Label("Choose Someone Else", systemImage: "chevron.left")
+                            }
+                        } else {
+                            Button("Cancel") { dismiss() }
+                        }
                     }
                     if case .choosing = model.phase {
                         ToolbarItem(placement: .primaryAction) {
@@ -68,6 +95,60 @@ struct ActorEnrichmentSheet: View {
                     }
                 }
                 .task { await model.search(name: actorName) }
+        }
+        .frame(minWidth: 380, minHeight: 480)
+        .sheet(item: $examining) { candidate in
+            candidatePhotoGrid(candidate)
+        }
+    }
+
+    /// Every image a candidate has, large. The point is deciding WHO this is,
+    /// so choosing is available from here without going back.
+    @ViewBuilder
+    private func candidatePhotoGrid(_ candidate: PluginCandidate) -> some View {
+        NavigationStack {
+            ScrollView {
+                if let subtitle = candidate.subtitle {
+                    Text(subtitle)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal).padding(.top, 8)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 10)], spacing: 10) {
+                    ForEach(candidate.imageURLs, id: \.absoluteString) { url in
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().aspectRatio(contentMode: .fit)
+                            case .failure:
+                                placeholderFace
+                            case .empty:
+                                ZStack { Color.gray.opacity(0.1); ProgressView() }
+                            @unknown default:
+                                placeholderFace
+                            }
+                        }
+                        .frame(minHeight: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle(candidate.title)
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Back") { examining = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("This Person") {
+                        examining = nil
+                        Task { await model.choose(candidate) }
+                    }
+                }
+            }
         }
         .frame(minWidth: 380, minHeight: 480)
     }
@@ -146,6 +227,20 @@ struct ActorEnrichmentSheet: View {
                                 }
                             }
                             Spacer(minLength: 0)
+                            if candidate.imageURLs.count > 1 {
+                                Button {
+                                    examining = candidate
+                                } label: {
+                                    Label("\(candidate.imageURLs.count)",
+                                          systemImage: "photo.on.rectangle.angled")
+                                        .font(.caption)
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .overlay(Capsule().strokeBorder(.quaternary))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel("See all \(candidate.imageURLs.count) photos")
+                            }
                             Image(systemName: "chevron.right")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
@@ -156,7 +251,8 @@ struct ActorEnrichmentSheet: View {
             } header: {
                 Text("\(candidates.count) performers match “\(actorName)”")
             } footer: {
-                Text("Pick the right one. Nothing is changed until you review and apply.")
+                Text("Pick the right one. Tap a photo count to see all of someone's pictures. "
+                     + "Nothing is changed until you review and apply.")
             }
         }
     }
@@ -193,9 +289,43 @@ struct ActorEnrichmentSheet: View {
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+                            .overlay(alignment: .bottomTrailing) {
+                                // Only when there IS more to see. Roughly half
+                                // of performers carry a single image, so a badge
+                                // on every card would promise nothing.
+                                if candidate.imageURLs.count > 1 {
+                                    Button {
+                                        examining = candidate
+                                    } label: {
+                                        Label("\(candidate.imageURLs.count)",
+                                              systemImage: "photo.on.rectangle.angled")
+                                            .font(.caption).bold()
+                                            .padding(.horizontal, 8).padding(.vertical, 5)
+                                            .background(.black.opacity(0.65), in: Capsule())
+                                            .foregroundStyle(.white)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(8)
+                                    .accessibilityLabel("See all \(candidate.imageURLs.count) photos")
+                                }
+                            }
 
-                            Text(candidate.title).font(.subheadline).bold()
-                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                Text(candidate.title).font(.subheadline).bold()
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                if candidate.imageURLs.count > 1 {
+                                    Button {
+                                        examining = candidate
+                                    } label: {
+                                        Label("\(candidate.imageURLs.count)",
+                                              systemImage: "photo.on.rectangle.angled")
+                                            .font(.caption2)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("See all \(candidate.imageURLs.count) photos")
+                                }
+                            }
                             if let subtitle = candidate.subtitle {
                                 Text(subtitle)
                                     .font(.caption2)
@@ -260,10 +390,20 @@ struct ActorEnrichmentSheet: View {
                     }
                 } header: {
                     Text("Matched")
+                    if model.canReturnToPicker {
+                        Button {
+                            model.returnToPicker()
+                        } label: {
+                            Label("Not this person — choose another",
+                                  systemImage: "person.2.badge.gearshape")
+                        }
+                    }
                 } footer: {
                     // Shown even when the picker was skipped, so the identity
                     // decision is never invisible.
-                    Text("Check this is the right person before applying.")
+                    Text(model.canReturnToPicker
+                         ? "Check this is the right person. You can go back to the list without searching again."
+                         : "Check this is the right person before applying.")
                 }
             }
 
@@ -292,9 +432,22 @@ struct ActorEnrichmentSheet: View {
                 Section {
                     photoGrid
                 } header: {
-                    HStack {
+                    HStack(spacing: 14) {
                         Text("Photos")
                         Spacer()
+                        Button {
+                            showsLargePhotos.toggle()
+                        } label: {
+                            Label(showsLargePhotos ? "Smaller" : "Larger",
+                                  systemImage: showsLargePhotos
+                                    ? "rectangle.grid.3x2" : "rectangle.grid.1x2")
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel(showsLargePhotos
+                                            ? "Show photos smaller" : "Show photos larger")
+
                         Button(model.allPhotosSelected ? "Select None" : "Select All") {
                             model.toggleAllPhotos()
                         }
@@ -318,7 +471,9 @@ struct ActorEnrichmentSheet: View {
     /// A grid rather than a list: choosing photos is a visual decision, and
     /// rows would show one face at a time.
     private var photoGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
+        // One or two per row when large, so a face is actually legible.
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: showsLargePhotos ? 170 : 84),
+                                     spacing: 8)], spacing: 8) {
             ForEach(model.galleryCandidates, id: \.absoluteString) { url in
                 let isOn = model.acceptedPhotos.contains(url.absoluteString)
                 Button {
@@ -337,7 +492,7 @@ struct ActorEnrichmentSheet: View {
                                 placeholderFace
                             }
                         }
-                        .frame(height: 112)
+                        .frame(height: showsLargePhotos ? 260 : 112)
                         .frame(maxWidth: .infinity)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -345,7 +500,10 @@ struct ActorEnrichmentSheet: View {
                             RoundedRectangle(cornerRadius: 8)
                                 .strokeBorder(isOn ? Color.accentColor : Color.clear, lineWidth: 3)
                         )
-                        .opacity(isOn ? 1 : 0.65)
+                        // Barely dimmed when large: the selection state should
+                        // not fight the job of SEEING the photo. The border and
+                        // the checkmark already carry that signal.
+                        .opacity(isOn ? 1 : (showsLargePhotos ? 0.92 : 0.65))
 
                         Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                             .font(.title3)

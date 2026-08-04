@@ -79,13 +79,30 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     /// A provider with only one size may supply the same URL for both.
     public let fullImageURL: URL?
 
+    /// EVERY image the source has for this candidate, largest first.
+    ///
+    /// A picker row shows one image, which is often not enough to tell two
+    /// similarly-named performers apart. These let the UI expand a candidate
+    /// into a grid without a second request — a search response typically
+    /// carries them already, so exposing them costs nothing.
+    ///
+    /// Empty when the source offers none; never contains `thumbnailURL`
+    /// separately from its full-size original.
+    public let imageURLs: [URL]
+
     public init(id: String, title: String, subtitle: String? = nil,
-                thumbnailURL: URL? = nil, fullImageURL: URL? = nil) {
+                thumbnailURL: URL? = nil, fullImageURL: URL? = nil,
+                imageURLs: [URL] = []) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.thumbnailURL = thumbnailURL
         self.fullImageURL = fullImageURL ?? thumbnailURL
+        // Falling back to the single image keeps a provider that supplies only
+        // one from producing an empty grid.
+        self.imageURLs = imageURLs.isEmpty
+            ? [fullImageURL ?? thumbnailURL].compactMap { $0 }
+            : imageURLs
     }
 }
 

@@ -176,6 +176,16 @@ struct ActorGridView: View {
             }
         }
         
+        // Enrichment outcome (schema v18). Applied HERE because this grid
+        // filters inline and never calls ActorFilterCriteria.matches() — the
+        // shared matcher carries the same rule for the callers that do use it,
+        // and the two must agree.
+        if filterCriteria.enrichment != .any {
+            result = result.filter { actor in
+                filterCriteria.enrichment.accepts(actorProfiles["actor:\(actor)"]?.enrichmentState)
+            }
+        }
+
         if !filterCriteria.selectedGenders.isEmpty {
             // Match case-insensitively: the actor's stored gender values are
             // lowercased below, so the selected filter values must be too —
@@ -509,9 +519,18 @@ struct ActorGridView: View {
                 pendingSortAscending = nil
             }
             deriveActorProfiles()
+            deriveActorVideoCounts()
         }
         .onChange(of: entityProfiles) { _, _ in
             deriveActorProfiles()
+            deriveActorVideoCounts()
+        }
+        // Counts depend on the ASSETS as well as the profiles. Without this the
+        // map goes stale whenever a video is added, removed or re-tagged — and
+        // if it is never built at all, every actor reads as 0 videos, which is
+        // exactly what happened when these calls were lost.
+        .onChange(of: assets) { _, _ in
+            deriveActorVideoCounts()
         }
     }
     

@@ -58,6 +58,16 @@ final class ActorEnrichmentModel: ObservableObject {
     /// including in the single-match case that skips the picker.
     private(set) var chosen: PluginCandidate?
 
+    /// The candidates the search returned, RETAINED after one is chosen.
+    ///
+    /// Picking wrongly used to mean cancelling the whole sheet and starting
+    /// again, which re-ran the search — repeated identical queries against the
+    /// source purely because the UI had thrown the list away.
+    private(set) var candidates: [PluginCandidate] = []
+
+    /// True when there is a list worth going back to.
+    var canReturnToPicker: Bool { candidates.count > 1 }
+
     private let entityId: String
     private let currentProfile: EntityProfile?
 
@@ -89,11 +99,26 @@ final class ActorEnrichmentModel: ObservableObject {
                 // without ever hiding the identity decision.
                 await choose(candidates[0])
             default:
+                self.candidates = candidates
                 phase = .choosing(candidates)
             }
         } catch {
             phase = .failed(Self.message(for: error))
         }
+    }
+
+    /// Return to the picker without touching the network.
+    ///
+    /// Resets the review state so a second choice starts clean rather than
+    /// inheriting the first candidate's ticked fields.
+    func returnToPicker() {
+        guard canReturnToPicker else { return }
+        chosen = nil
+        proposal = nil
+        accepted = []
+        acceptedPhotos = []
+        galleryCandidates = []
+        phase = .choosing(candidates)
     }
 
     func choose(_ candidate: PluginCandidate) async {
