@@ -239,3 +239,40 @@ extension VideoEnrichmentReviewTests {
         XCTAssertTrue(merged.actions.isEmpty)
     }
 }
+
+/// The release's own page. Fetched but discarded until now.
+extension VideoEnrichmentReviewTests {
+
+    private func linkProposal(_ urls: [String]) -> VideoMetadataProposal {
+        var p = VideoMetadataProposal()
+        p.externalLinks = .init(urls.compactMap(URL.init(string:)))
+        return p
+    }
+
+    func testTheFirstLinkIsOffered() throws {
+        let rows = VideoEnrichmentReview.changes(
+            for: Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            proposal: linkProposal(["https://studio.example/scene", "https://aggregator.example/x"]))
+        let row = try XCTUnwrap(rows.first { $0.field == VideoEnrichmentReview.Field.externalLink })
+        XCTAssertEqual(row.proposed, "https://studio.example/scene")
+        XCTAssertEqual(row.sourceNote, "1 other link not stored",
+                       "only one is storable, so say so rather than implying there was one")
+    }
+
+    func testAcceptingTheLinkStoresIt() {
+        let merged = VideoEnrichmentReview.merged(
+            asset: Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            proposal: linkProposal(["https://studio.example/scene"]),
+            accepting: [VideoEnrichmentReview.Field.externalLink])
+        XCTAssertEqual(merged.externalLink, "https://studio.example/scene")
+    }
+
+    func testAnExistingLinkIsAConflictNotAnOverwrite() {
+        var asset = Asset(relativePath: "a.mp4", fileName: "a.mp4")
+        asset.externalLink = "https://mine.example/page"
+        let rows = VideoEnrichmentReview.changes(
+            for: asset, proposal: linkProposal(["https://studio.example/scene"]))
+        XCTAssertEqual(rows.first { $0.field == VideoEnrichmentReview.Field.externalLink }?.kind,
+                       .conflict)
+    }
+}

@@ -99,6 +99,23 @@ struct FilterBuilderView: View {
                     .pickerStyle(.segmented)
                 }
                 
+                Section {
+                    Picker("Lookup Result", selection: $criteria.enrichment) {
+                        ForEach(EnrichmentFilter.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                } header: {
+                    Text("External Lookup")
+                } footer: {
+                    // A separate axis from review status above: one is whether
+                    // YOU have watched it, the other whether a source could
+                    // identify it. A video can be fully reviewed and never
+                    // looked up, or matched and never watched.
+                    Text("Find videos an external lookup could not resolve. "
+                         + "“Not findable (you decided)” holds the ones you have ruled out.")
+                }
+
                 Section("Minimum Rating") {
                     Stepper(value: Binding(
                         get: { criteria.minRating ?? 0 },

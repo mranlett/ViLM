@@ -66,6 +66,7 @@ public enum VideoEnrichmentReview {
         public static let episodeTitle = "episodeTitle"
         public static let releaseDate = "releaseDate"
         public static let studio = "studio"
+        public static let externalLink = "externalLink"
         public static let performers = "performers"
     }
 
@@ -111,6 +112,12 @@ public enum VideoEnrichmentReview {
                note: proposal.episodeTitle.sourceNote ?? proposal.title.sourceNote)
         scalar(Field.releaseDate, "Release Date", current: asset.releaseDate,
                proposed: proposal.releaseDate.value, note: proposal.releaseDate.sourceNote)
+        // The release's own page. Only one is storable, and the provider puts
+        // the studio's own site first — the durable one, and the one someone
+        // following the link actually wants.
+        scalar(Field.externalLink, "Link", current: asset.externalLink,
+               proposed: proposal.externalLinks.value?.first?.absoluteString,
+               note: linkNote(proposal))
 
         // Studio is a tag, so "already has it" means the tag is present.
         if let studio = proposal.studio.value, !studio.isEmpty {
@@ -146,6 +153,14 @@ public enum VideoEnrichmentReview {
     ///
     /// A field not named in `accepting` is left exactly as it was, which is what
     /// makes an untouched conflict harmless.
+    /// Says how many other addresses were on offer, since only one is storable.
+    /// Without it the row looks like the source knew of exactly one page.
+    private static func linkNote(_ proposal: VideoMetadataProposal) -> String? {
+        let count = proposal.externalLinks.value?.count ?? 0
+        guard count > 1 else { return proposal.externalLinks.sourceNote }
+        return "\(count - 1) other link\(count == 2 ? "" : "s") not stored"
+    }
+
     /// Every tag the source offers that this video does not already carry,
     /// each marked with whether the library already uses it.
     ///
@@ -184,6 +199,24 @@ public enum VideoEnrichmentReview {
     /// - Parameter acceptedTags: the exact tag names to add, chosen
     ///   individually. Nothing outside this set is applied, so a tag the
     ///   operator did not tick can never arrive by another route.
+    /// The asset with a lookup outcome recorded on it.
+    ///
+    /// Separate from `merged` because the two happen at different moments: an
+    /// outcome is known as soon as the source answers, whereas the merge waits
+    /// for the operator to choose what to accept. A video that matched but
+    /// whose proposals were all declined has still been looked up, and must not
+    /// be offered again as unchecked.
+    public static func recordingOutcome(_ asset: Asset,
+                                        state: EnrichmentState,
+                                        source: String?,
+                                        checkedAt: Date = Date()) -> Asset {
+        var updated = asset
+        updated.enrichmentState = state
+        updated.enrichmentSource = source
+        updated.enrichmentCheckedAt = checkedAt
+        return updated
+    }
+
     public static func merged(asset: Asset,
                               proposal: VideoMetadataProposal,
                               accepting: Set<String>,
@@ -197,6 +230,8 @@ public enum VideoEnrichmentReview {
             if let v = proposal.episodeTitle.value ?? proposal.title.value { merged.episode = v }
         }
         if accepting.contains(Field.releaseDate), let v = proposal.releaseDate.value { merged.releaseDate = v }
+        if accepting.contains(Field.externalLink),
+           let v = proposal.externalLinks.value?.first { merged.externalLink = v.absoluteString }
 
         var tags = merged.tags
         func addTag(_ raw: String) {

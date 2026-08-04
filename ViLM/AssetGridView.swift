@@ -979,6 +979,38 @@ struct AssetsGridView: View {
     }
     
     @ViewBuilder
+    /// How old THIS actor was when the video was released.
+    ///
+    /// Only on an actor's own page: the figure is a property of the pairing,
+    /// not of the video, so on a tag or studio page there is no single person
+    /// it could be about. Absent when either date is unknown — the gap belongs
+    /// on the actor's profile, not repeated under every card.
+    @ViewBuilder
+    private func ageAtReleasePill(for asset: Asset) -> some View {
+        if let age = ageAtRelease(for: asset) {
+            HStack(spacing: 3) {
+                Text(age.displayText)
+                // An approximate figure is marked, because a birth year cannot
+                // say whether the birthday had come round yet.
+                if !age.isExact { Image(systemName: "questionmark").font(.system(size: 7)) }
+            }
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Color.teal.opacity(0.18))
+            .foregroundStyle(Color.teal)
+            .clipShape(Capsule())
+            .help(age.isExact ? "Age at release" : "Age at release — approximate, only a birth year is recorded")
+        }
+    }
+
+    private func ageAtRelease(for asset: Asset) -> AgeAtRelease? {
+        guard sidebarSelection.count == 1,
+              case .actor(let name)? = sidebarSelection.first,
+              let profile = entityProfiles["actor:\(name)"]
+        else { return nil }
+        return AgeAtReleaseCalculator.age(of: profile, at: asset.releaseDate)
+    }
+
     private func gridItem(for asset: Asset) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
@@ -995,6 +1027,8 @@ struct AssetsGridView: View {
                 .font(.caption)
                 .lineLimit(isSingleSeriesSelected ? 2 : 1)
                 .foregroundStyle(.primary)
+
+            ageAtReleasePill(for: asset)
         }
         // Fill the column and left-align so every card is the same width — the
         // title wraps within the card and the image can't be pushed off-center

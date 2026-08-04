@@ -24,7 +24,6 @@ struct VideoManualSearchView: View {
 
     @State private var newPerformer = ""
     @State private var newTag = ""
-    @State private var showsSubject = false
     @State private var expanded: PluginCandidate?
 
     var body: some View {
@@ -42,30 +41,10 @@ struct VideoManualSearchView: View {
         }
     }
 
-    /// The file's own frames, collapsed by default.
-    ///
-    /// Recognising a scene means comparing it against something, and asking
-    /// someone to hold sixteen frames in their head while scrolling a list of
-    /// candidates is asking them to guess. Collapsed to begin with because the
-    /// filters are what you reach for first; one tap away when the results
-    /// start looking similar.
-    @ViewBuilder
+    /// The same context strip the editing screens use.
     private var subjectGrid: some View {
-        DisclosureGroup(isExpanded: $showsSubject) {
-            DetailGridView(asset: model.subject,
-                           libraryURL: model.subjectLibraryURL,
-                           isInteractive: false)
-                .padding(.bottom, 6)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "square.grid.3x3")
-                Text("This video").font(.caption).fontWeight(.medium)
-                if let local = model.localDuration {
-                    Text(timeText(local)).font(.caption2).foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(.horizontal).padding(.top, 8)
+        VideoContextPanel(asset: model.subject, libraryURL: model.subjectLibraryURL)
+            .padding(.horizontal).padding(.top, 8)
     }
 
     // MARK: - Filters

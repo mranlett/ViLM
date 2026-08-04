@@ -19,6 +19,7 @@ struct SettingsView: View {
     var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
+    var onTagCaseCleanup: (() -> Void)?
     var onMoveVideos: (() -> Void)?
     var onBackupRestore: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
@@ -110,6 +111,9 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Tag & Actor Cleanup", icon: "paintbrush", action: onTagCleanup)
                         .disabled(session.isFederated)
+                    // Reads and writes one library's own tags, so unlike the
+                    // merge tools it is safe while federated.
+                    toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
                 }
 
                 Section(

@@ -13,6 +13,11 @@ struct ActorEnrichmentSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let actorName: String
+    /// Held for the context strip: the same "what does this record already say"
+    /// block every other editing and matching screen shows.
+    let entityId: String
+    let currentProfile: EntityProfile?
+    let libraryURL: URL?
 
     /// Remembered across sheets: someone who needs big pictures to tell
     /// performers apart needs them every time, and re-choosing on each lookup
@@ -44,16 +49,23 @@ struct ActorEnrichmentSheet: View {
          entityId: String,
          actorName: String,
          currentProfile: EntityProfile?,
+         libraryURL: URL? = nil,
          onApply: @escaping (EntityProfile, String?) -> Void) {
         _model = StateObject(wrappedValue: ActorEnrichmentModel(
             provider: provider, entityId: entityId, currentProfile: currentProfile))
+        self.entityId = entityId
+        self.currentProfile = currentProfile
+        self.libraryURL = libraryURL
         self.actorName = actorName
         self.onApply = onApply
     }
 
     var body: some View {
         NavigationStack {
-            content
+            VStack(spacing: 0) {
+                contextStrip
+                content
+            }
                 .navigationTitle(model.provider.displayName)
 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -156,6 +168,17 @@ struct ActorEnrichmentSheet: View {
             }
         }
         .frame(minWidth: 380, minHeight: 480)
+    }
+
+    /// Shown above every phase, so the record being matched is visible while
+    /// choosing between candidates — not just afterwards while reviewing.
+    /// Aliases especially: a lookup misses most often because the library files
+    /// someone under a name the source does not use.
+    @ViewBuilder
+    private var contextStrip: some View {
+        ActorContextPanel(entityId: entityId, profile: currentProfile, libraryURL: libraryURL)
+            .padding(.horizontal)
+            .padding(.top, 8)
     }
 
     @ViewBuilder

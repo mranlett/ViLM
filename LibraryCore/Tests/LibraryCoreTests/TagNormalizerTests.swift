@@ -11,9 +11,18 @@ final class TagNormalizerTests: XCTestCase {
     
     func testTitleCased() {
         XCTAssertEqual(TagNormalizer.titleCased("the return of the king"), "The Return Of The King")
-        // Already-uppercased and mixed-case letters are normalized down.
-        XCTAssertEqual(TagNormalizer.titleCased("THE HEIST"), "The Heist")
-        XCTAssertEqual(TagNormalizer.titleCased("iCarly gOES hOME"), "Icarly Goes Home")
+        // Capitalization the writer typed is PRESERVED. The previous rule
+        // lowercased everything past the first letter, which flattened every
+        // acronym and every name with a capital inside it — POV to Pov, SCUBA to
+        // Scuba, O'Brien to O'brien. There is no way to tell an acronym from a
+        // shouted ordinary word without a dictionary, so the cost of getting it
+        // wrong decides: preserving is recoverable by retyping, flattening
+        // destroys information for good.
+        //
+        // The price is that shouting survives too, which is the deliberate
+        // trade.
+        XCTAssertEqual(TagNormalizer.titleCased("THE HEIST"), "THE HEIST")
+        XCTAssertEqual(TagNormalizer.titleCased("iCarly gOES hOME"), "iCarly gOES hOME")
         // Apostrophes are NOT word breaks (the key difference from .capitalized).
         XCTAssertEqual(TagNormalizer.titleCased("valentine's day"), "Valentine's Day")
         // Hyphens ARE word breaks, and the hyphen is preserved.
@@ -75,5 +84,55 @@ final class TagNormalizerTests: XCTestCase {
             tags: ["actor:Luna"]
         )
         XCTAssertEqual(asset.suggestedFileNameFromTags, "Luna")
+    }
+}
+
+/// The capitalization contract, stated as the cases that drove it.
+extension TagNormalizerTests {
+
+    /// Acronyms. The reported failure: these were being flattened to Pov, Scuba.
+    func testAcronymsSurvive() {
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "POV"), "POV")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "SCUBA"), "SCUBA")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "SCUBA (30+)"), "SCUBA (30+)")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "4K Available"), "4K Available")
+    }
+
+    /// Names with a capital inside them — the other half of the report.
+    func testInternalCapitalsSurvive() {
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "Erin O'Brien"), "Erin O'Brien")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "Anna MacLeod"), "Anna MacLeod")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "RoseAnn Blue"), "RoseAnn Blue")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "iPhone Footage"), "iPhone Footage")
+    }
+
+    /// Unstyled input is still tidied — the reason this function exists.
+    func testAllLowercaseIsStillCapitalized() {
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "running fast"), "Running Fast")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "  outdoors  "), "Outdoors")
+        XCTAssertEqual(TagNormalizer.normalize(tagValue: "spider-man"), "Spider-Man")
+    }
+
+    /// A word already capitalized correctly is left exactly as it is, rather
+    /// than being rebuilt into the same string by a different route.
+    func testAlreadyCorrectInputIsUnchanged() {
+        for value in ["Deep Dive", "Big Skies", "Valentine's Day", "X-Men"] {
+            XCTAssertEqual(TagNormalizer.normalize(tagValue: value), value)
+        }
+    }
+
+    /// Entries written under the OLD rule read "Pov" and "Scuba". A writer typing
+    /// "POV" today must not create a second tag beside the first.
+    func testOldAndNewSpellingsAreRecognizedAsOneTag() {
+        XCTAssertTrue(TagNormalizer.isSameTag("Pov", "POV"))
+        XCTAssertTrue(TagNormalizer.isSameTag("Scuba", "SCUBA"))
+        XCTAssertTrue(TagNormalizer.isSameTag("Erin O'brien", "Erin O'Brien"))
+        XCTAssertFalse(TagNormalizer.isSameTag("Climbing", "Climbdown"))
+    }
+
+    func testPrefixedTagsKeepTheirCategory() {
+        XCTAssertEqual(TagNormalizer.normalize(fullTag: "tag:POV"), "tag:POV")
+        XCTAssertEqual(TagNormalizer.normalize(fullTag: "actor:erin o'Brien"),
+                       "actor:Erin o'Brien")
     }
 }

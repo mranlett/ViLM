@@ -361,6 +361,13 @@ struct SingleInspectorView: View {
                 VideoEnrichmentSheet(asset: asset, libraryURL: url,
                                      knownTags: knownTagVocabulary) { updated in
                     updateAsset(updated, at: LibrarySession.shared.url(for: updated.id) ?? url)
+                    // Every other write on this screen announces itself. Without
+                    // it the grid behind, and anything deriving from the title,
+                    // keep rendering the values from before the match until the
+                    // view is rebuilt by navigating away and back.
+                    gridRefreshID = UUID()
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ReloadAssets"), object: nil)
                 }
             }
         }
@@ -833,17 +840,34 @@ struct SingleInspectorView: View {
                     // carries the performers, tags and studio being entered,
                     // and it is encoded there for ~95% of files while the
                     // catalogue knows them for far fewer.
-                    sourceFileNameHeader
+                    // The same context strip every editing and matching
+                    // screen shows, in the same shape and closed by default —
+                    // the question "what does this record already say" should
+                    // not have a different answer depending on which screen
+                    // asked it.
+                    VideoContextPanel(asset: asset, libraryURL: libraryURL)
 
-                    // Non-interactive: there is no player behind this sheet to
-                    // seek, so a tap would have nowhere to go. These are for
-                    // reference while typing, not for scrubbing.
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Preview frames", systemImage: "square.grid.3x3")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        DetailGridView(asset: asset, libraryURL: libraryURL, isInteractive: false)
+                    // The same escape the actor editor offers. A re-cut copy
+                    // will never match a fingerprint however many times it is
+                    // tried, so there has to be a way to say so and have it
+                    // stick.
+                    Toggle(isOn: Binding(
+                        get: { asset.enrichmentState == .unmatchable },
+                        set: { on in
+                            var updated = asset
+                            updated.enrichmentState = on ? .unmatchable : nil
+                            updated.enrichmentSource = on ? asset.enrichmentSource : nil
+                            updated.enrichmentCheckedAt = on ? Date() : nil
+                            if let url = libraryURL { updateAsset(updated, at: url) }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Not findable in online sources")
+                            Text("Stops this video appearing in the lookup queue.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
+                    .font(.callout)
 
                     Divider()
 

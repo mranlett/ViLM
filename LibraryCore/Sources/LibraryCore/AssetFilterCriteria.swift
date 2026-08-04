@@ -19,6 +19,13 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     public var reviewStatus: ReviewStatusFilter = .all
     public var minRating: Int? = nil
 
+    /// Filter on what an external lookup concluded (schema v22).
+    ///
+    /// The same axis the actor filter uses, and deliberately separate from
+    /// review status: a video can be fully reviewed by you and still never have
+    /// been looked up, or matched by a source and never watched.
+    public var enrichment: EnrichmentFilter = .any
+
     public var actorsLogic: Logic = .and
     public var selectedActors: Set<String> = []
 
@@ -44,7 +51,7 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     public var minActorRating: Int? = nil
 
     public var isEmpty: Bool {
-        reviewStatus == .all && minRating == nil && minActorRating == nil &&
+        reviewStatus == .all && enrichment == .any && minRating == nil && minActorRating == nil &&
         selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
         selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
     }
@@ -85,6 +92,11 @@ extension AssetFilterCriteria {
         case .reviewed: if asset.status != .reviewed { return false }
         case .unreviewed: if asset.status != .unreviewed { return false }
         }
+
+        // What an external lookup concluded. A separate axis from review
+        // status: one is whether YOU have seen it, the other whether a source
+        // could identify it.
+        if !enrichment.accepts(asset.enrichmentState) { return false }
 
         // Minimum rating (an unrated video counts as 0).
         if let minRating {

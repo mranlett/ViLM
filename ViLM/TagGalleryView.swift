@@ -16,7 +16,16 @@ enum TagScope {
     case shared
 }
 
+/// A tag being renamed. `String` is not `Identifiable`, and keying the sheet on
+/// the value is what makes it re-present correctly for a different tag.
+private struct RenamingTag: Identifiable {
+    let value: String
+    var id: String { value }
+}
+
 struct TagGalleryView: View {
+
+    @State private var renamingTag: RenamingTag?
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     let libraryURL: URL?
@@ -129,6 +138,16 @@ struct TagGalleryView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            // Right-click on macOS, long-press on iOS — the
+                            // gesture the video grid already uses for per-item
+                            // actions.
+                            .contextMenu {
+                                Button {
+                                    renamingTag = RenamingTag(value: tag)
+                                } label: {
+                                    Label("Rename Tag…", systemImage: "pencil")
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -170,6 +189,12 @@ struct TagGalleryView: View {
         }
         .sheet(isPresented: $isShowingHelp) {
             HelpView(initialTopicID: HelpContent.tagGallery.id)
+        }
+        .sheet(item: $renamingTag) { tag in
+            EntityRenameSheet(category: "tag", currentName: tag.value,
+                              existingNames: Array(tagCounts.keys)) { _ in
+                sidebarSelection.remove(.tag(tag.value))
+            }
         }
         .onAppear {
             recomputeTags()

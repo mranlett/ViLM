@@ -223,3 +223,93 @@ final class AssetFilterCriteriaTests: XCTestCase {
         XCTAssertFalse(matches(criteria, asset(status: .reviewed, tags: ["actor:Nobody"], rating: 5)))
     }
 }
+
+/// Filtering videos by how an external lookup went — the mirror of the actor
+/// filter, sharing one enum so the two cannot drift apart on what the states
+/// mean.
+extension AssetFilterCriteriaTests {
+
+    private func asset(_ state: EnrichmentState?) -> Asset {
+        Asset(relativePath: "a.mp4", fileName: "a.mp4", enrichmentState: state)
+    }
+
+    private func matches(_ filter: EnrichmentFilter, _ state: EnrichmentState?) -> Bool {
+        var criteria = AssetFilterCriteria()
+        criteria.enrichment = filter
+        return criteria.matches(asset(state), mappedActors: [], entityProfiles: [:])
+    }
+
+    func testAnyAcceptsEverything() {
+        for state: EnrichmentState? in [nil, .matched, .noMatch, .ambiguous, .unmatchable] {
+            XCTAssertTrue(matches(.any, state))
+        }
+    }
+
+    func testNeedsAttentionExcludesMatchedAndRuledOut() {
+        XCTAssertTrue(matches(.needsAttention, .noMatch))
+        XCTAssertTrue(matches(.needsAttention, .ambiguous))
+        XCTAssertFalse(matches(.needsAttention, .matched))
+        XCTAssertFalse(matches(.needsAttention, .unmatchable),
+                       "ruling a video out is what takes it OUT of the queue")
+    }
+
+    /// The point of the feature: a video you have ruled out stays reachable.
+    func testRuledOutVideosAreStillFindable() {
+        XCTAssertTrue(matches(.unmatchable, .unmatchable))
+        XCTAssertFalse(matches(.unmatchable, .noMatch))
+    }
+
+    func testNeverCheckedIsNotAFailure() {
+        XCTAssertTrue(matches(.neverChecked, nil))
+        XCTAssertFalse(matches(.neverChecked, .noMatch))
+        XCTAssertFalse(matches(.neverChecked, .unmatchable))
+    }
+
+    /// Lookup state and review status are independent axes.
+    func testLookupStateIsSeparateFromReviewStatus() {
+        var criteria = AssetFilterCriteria()
+        criteria.enrichment = .matched
+        criteria.reviewStatus = .unreviewed
+        var video = asset(.matched)
+        video.status = .reviewed
+        XCTAssertFalse(criteria.matches(video, mappedActors: [], entityProfiles: [:]),
+                       "matched but reviewed — the review filter still applies")
+    }
+
+    func testAnOutcomeIsRecordedWithoutTouchingAnythingElse() {
+        let original = Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: ["tag:Keep"])
+        let recorded = VideoEnrichmentReview.recordingOutcome(
+            original, state: .noMatch, source: "TestSource")
+        XCTAssertEqual(recorded.enrichmentState, .noMatch)
+        XCTAssertEqual(recorded.enrichmentSource, "TestSource")
+        XCTAssertNotNil(recorded.enrichmentCheckedAt)
+        XCTAssertEqual(recorded.tags, original.tags)
+    }
+}
+
+/// The v22 fields must survive a round-trip.
+///
+/// A field added to `Asset` has three places to reach — the memberwise init,
+/// the coding keys, and the custom `init(from:)`. Missing the third compiles
+/// cleanly and returns nil on every load, which is how this project previously
+/// lost AKAs, career span, enrichment state and links.
+extension AssetFilterCriteriaTests {
+
+    func testLookupStateSurvivesACodingRoundTrip() throws {
+        let checked = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                             enrichmentState: .unmatchable,
+                             enrichmentSource: "TestSource",
+                             enrichmentCheckedAt: checked)
+        let decoded = try JSONDecoder().decode(Asset.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(decoded.enrichmentState, .unmatchable)
+        XCTAssertEqual(decoded.enrichmentSource, "TestSource")
+        XCTAssertEqual(decoded.enrichmentCheckedAt, checked)
+    }
+
+    func testAnAssetWithNoLookupStateDecodesCleanly() throws {
+        let original = Asset(relativePath: "a.mp4", fileName: "a.mp4")
+        let decoded = try JSONDecoder().decode(Asset.self, from: JSONEncoder().encode(original))
+        XCTAssertNil(decoded.enrichmentState)
+    }
+}

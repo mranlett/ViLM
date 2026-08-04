@@ -39,7 +39,16 @@ struct VideoEnrichmentSheet: View {
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
+                        Button("Close") {
+                            // A search that found nothing still happened. Losing
+                            // that on dismissal means the video is offered as
+                            // unchecked forever.
+                            if let (state, source) = model.outcomeToRecord() {
+                                onApply(VideoEnrichmentReview.recordingOutcome(
+                                    asset, state: state, source: source))
+                            }
+                            dismiss()
+                        }
                     }
                     ToolbarItem(placement: .primaryAction) {
                         if case .reviewing = model.phase {
@@ -174,6 +183,10 @@ struct VideoEnrichmentSheet: View {
 
     private var review: some View {
         List {
+            Section {
+                VideoContextPanel(asset: asset, libraryURL: libraryURL)
+            }
+
             if let route = model.matchRoute {
                 Section {
                     Label(route, systemImage: routeIcon)

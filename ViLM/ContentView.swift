@@ -85,6 +85,7 @@ struct ContentView: View {
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
     @State private var isShowingActorPhotoCleanup = false
+    @State private var isShowingTagCaseCleanup = false
     @State private var isShowingDuplicateDetection = false
     @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
@@ -219,6 +220,7 @@ struct ContentView: View {
                     onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                     onTagCleanup: { isShowingTagCleanup = true },
                     onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
+                    onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
                     onBackupRestore: { isShowingLibraryBackup = true },
                     onExportActorLibrary: { isShowingActorLibraryExport = true },
@@ -278,6 +280,13 @@ struct ContentView: View {
                         // scans it (Check for Changes) and flags any missing files.
                         processFolder(at: restoredURL)
                     })
+                }
+            }
+            .sheet(isPresented: $isShowingTagCaseCleanup) {
+                if let url = selectedLibraryURL {
+                    TagCaseCleanupView(libraryURL: url) {
+                        reloadUnionAssets()
+                    }
                 }
             }
             .sheet(isPresented: $isShowingActorPhotoCleanup) {

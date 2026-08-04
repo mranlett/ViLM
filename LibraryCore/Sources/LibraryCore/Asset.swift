@@ -27,6 +27,13 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     /// never there — the same string then displays as a different day depending
     /// on where the reader is.
     public var releaseDate: String?
+
+    // Lookup state (v22). The mirror of the actor fields: the same question is
+    // worth asking of a video, and the same answer — "I looked, it isn't
+    // there" — has to be recordable so it can leave the queue.
+    public var enrichmentState: EnrichmentState?
+    public var enrichmentSource: String?
+    public var enrichmentCheckedAt: Date?
     public var playCount: Int              // Number of distinct viewing sessions
     public var lastPlayedAt: Date?         // When the video was last played
 
@@ -51,6 +58,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 episodeNumber: Int? = nil,
                 episode: String? = nil,
                 releaseDate: String? = nil,
+                enrichmentState: EnrichmentState? = nil,
+                enrichmentSource: String? = nil,
+                enrichmentCheckedAt: Date? = nil,
                 playCount: Int = 0,
                 lastPlayedAt: Date? = nil) {
         self.id = id
@@ -67,6 +77,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.episodeNumber = episodeNumber
         self.episode = episode
         self.releaseDate = releaseDate
+        self.enrichmentState = enrichmentState
+        self.enrichmentSource = enrichmentSource
+        self.enrichmentCheckedAt = enrichmentCheckedAt
         self.playCount = playCount
         self.lastPlayedAt = lastPlayedAt
     }
@@ -90,6 +103,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
         self.releaseDate = try container.decodeIfPresent(String.self, forKey: .releaseDate)
+        self.enrichmentState = try container.decodeIfPresent(EnrichmentState.self, forKey: .enrichmentState)
+        self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
+        self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
         self.lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         
@@ -120,6 +136,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case episodeNumber = "episode_number"
         case episode
         case releaseDate = "release_date"
+        case enrichmentState = "enrichment_state"
+        case enrichmentSource = "enrichment_source"
+        case enrichmentCheckedAt = "enrichment_checked_at"
         case playCount = "play_count"
         case lastPlayedAt = "last_played_at"
     }

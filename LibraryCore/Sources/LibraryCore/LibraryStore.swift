@@ -305,6 +305,20 @@ public class LibraryStore {
             }
         }
 
+        // v22 — lookup state on a video.
+        //
+        // The actor side has had this since v18. A video an external source
+        // cannot identify — a re-cut copy, something never catalogued — is
+        // otherwise indistinguishable from one nobody has tried yet, so it
+        // sits in the queue forever.
+        migrator.registerMigration("v22") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "enrichment_state", .text)
+                t.add(column: "enrichment_source", .text)
+                t.add(column: "enrichment_checked_at", .datetime)
+            }
+        }
+
         // v21 — publication date.
         //
         // The only field a matched source record carries that the library had

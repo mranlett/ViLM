@@ -7,7 +7,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LibraryCore
 
+/// A studio being renamed. `String` is not `Identifiable`.
+private struct RenamingStudio: Identifiable {
+    let value: String
+    var id: String { value }
+}
+
 struct SidebarView: View {
+    @State private var renamingStudio: RenamingStudio?
     @Binding var selection: Set<SidebarItem>
     let assets: [Asset]
     let libraryURL: URL?
@@ -217,6 +224,13 @@ struct SidebarView: View {
                     sidebarRow(title: studio, icon: "building.2", isSelected: selection.contains(.studio(studio)), count: studioCounts[studio]) {
                         toggleSelection(item: .studio(studio))
                     }
+                    .contextMenu {
+                        Button {
+                            renamingStudio = RenamingStudio(value: studio)
+                        } label: {
+                            Label("Rename Studio…", systemImage: "pencil")
+                        }
+                    }
                 }
             } label: { Text("Studios").font(.headline) }
         }
@@ -240,6 +254,13 @@ struct SidebarView: View {
             .background(.ultraThinMaterial)
         }
         .navigationTitle("ViLM")
+        .sheet(item: $renamingStudio) { studio in
+            EntityRenameSheet(category: "studio", currentName: studio.value,
+                              existingNames: Array(studioCounts.keys)) { _ in
+                selection.remove(.studio(studio.value))
+                recomputeDerivedData()
+            }
+        }
         .fileImporter(isPresented: $isShowingAttachPicker, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { onAttachLibrary(url) }
         }

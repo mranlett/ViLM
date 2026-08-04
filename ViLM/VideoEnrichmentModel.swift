@@ -358,14 +358,33 @@ final class VideoEnrichmentModel: ObservableObject {
     func selectAllTags() { acceptedTags = Set(tagOptions.map(\.name)) }
     func selectNoTags() { acceptedTags = [] }
 
+    /// Records that a lookup happened, whatever the operator then accepts.
+    ///
+    /// Called on dismissal as well as on apply: a video that was searched and
+    /// found nothing has been checked, and leaving it blank would offer it
+    /// again forever. `.unmatchable` is never set here — that stays a human
+    /// judgement, the same rule the actor side follows.
+    func outcomeToRecord() -> (EnrichmentState, String?)? {
+        switch phase {
+        case .reviewing, .nothingToApply: return (.matched, providerName)
+        case .noMatches: return (.noMatch, providerName)
+        case .choosing: return (.ambiguous, providerName)
+        default: return nil
+        }
+    }
+
+    private var providerName: String? { provider?.displayName }
+
     /// The asset as it would be saved, or nil when nothing was accepted.
     ///
     /// Returns a value rather than persisting: the caller owns the write, the
     /// same way the actor editor does.
     func apply() -> Asset? {
         guard let proposal, hasAnythingToApply else { return nil }
-        return VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
-                                            accepting: accepted, acceptedTags: acceptedTags)
+        let merged = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
+                                                  accepting: accepted, acceptedTags: acceptedTags)
+        return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,
+                                                      source: providerName)
     }
 
     private func friendly(_ error: Error) -> String {

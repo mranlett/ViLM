@@ -431,6 +431,12 @@ struct EntityProfileEditorView: View {
                 }
                 
                 Section {
+                    ActorContextPanel(entityId: entityId,
+                                      profile: initialProfile,
+                                      libraryURL: libraryURL)
+                }
+
+                Section {
                     Toggle(isOn: Binding(
                         get: { enrichmentState == .unmatchable },
                         set: { on in
@@ -563,6 +569,7 @@ struct EntityProfileEditorView: View {
                         // would read as an empty field and be "filled" with the
                         // source's value.
                         currentProfile: editedProfile,
+                        libraryURL: libraryURL,
                         onApply: { merged, renameTo in
                             applyEnrichment(merged)
                             // Held until Save: the rename rewrites this record's
