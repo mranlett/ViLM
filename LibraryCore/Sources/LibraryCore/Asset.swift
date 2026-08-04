@@ -20,6 +20,13 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public var seasonNumber: Int?          // Season / Movie number (Star Wars 3, MWC Season 4)
     public var episodeNumber: Int?         // Episode number
     public var episode: String?            // Episode Title (freeform, e.g. "Valentine's Day")
+    /// When the work was published, as `yyyy-MM-dd`.
+    ///
+    /// Stored verbatim rather than as a Date: sources state a calendar day with
+    /// no timezone, and parsing it into an instant invents a precision that was
+    /// never there — the same string then displays as a different day depending
+    /// on where the reader is.
+    public var releaseDate: String?
     public var playCount: Int              // Number of distinct viewing sessions
     public var lastPlayedAt: Date?         // When the video was last played
 
@@ -43,6 +50,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 seasonNumber: Int? = nil,
                 episodeNumber: Int? = nil,
                 episode: String? = nil,
+                releaseDate: String? = nil,
                 playCount: Int = 0,
                 lastPlayedAt: Date? = nil) {
         self.id = id
@@ -58,6 +66,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.episode = episode
+        self.releaseDate = releaseDate
         self.playCount = playCount
         self.lastPlayedAt = lastPlayedAt
     }
@@ -80,6 +89,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         self.episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
+        self.releaseDate = try container.decodeIfPresent(String.self, forKey: .releaseDate)
         self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
         self.lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
         
@@ -109,6 +119,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case seasonNumber = "season_number"
         case episodeNumber = "episode_number"
         case episode
+        case releaseDate = "release_date"
         case playCount = "play_count"
         case lastPlayedAt = "last_played_at"
     }

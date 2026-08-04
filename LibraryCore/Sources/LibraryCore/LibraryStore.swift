@@ -305,6 +305,18 @@ public class LibraryStore {
             }
         }
 
+        // v21 — publication date.
+        //
+        // The only field a matched source record carries that the library had
+        // nowhere to put. Series, volume, episode number and episode title all
+        // map onto columns that already exist; performers and studio ride on
+        // the tag conventions.
+        migrator.registerMigration("v21") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "release_date", .text)
+            }
+        }
+
         // v20 — deletions recorded as facts.
         //
         // Sync unions what each library holds, so an absence is indistinguishable
