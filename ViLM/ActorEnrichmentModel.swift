@@ -38,6 +38,20 @@ final class ActorEnrichmentModel: ObservableObject {
     /// which pre-ticks fills and leaves conflicts off (core's policy, not ours).
     @Published var accepted: Set<String> = []
 
+    /// Adopt the source's spelling of the name.
+    ///
+    /// ON by default (operator's decision, after testing): when a lookup only
+    /// matched because the local name was a misspelling or an alias, adopting
+    /// the source's spelling is almost always the point of the exercise.
+    ///
+    /// Still kept OUT of `accepted`: every other proposal writes a column on
+    /// this row, but a name IS the row's identity. Accepting it rewrites the
+    /// `actor:` tag on every video and moves every profile photo file — and if
+    /// the new name already exists locally, merges two actors into one. That
+    /// last case is why the toggle stays visible and separate rather than being
+    /// folded in with the field fills.
+    @Published var acceptsCanonicalName = true
+
     /// Gallery photos the user has ticked, as absolute strings.
     ///
     /// Starts EMPTY on purpose. Scalar fills are pre-ticked because they cost
@@ -70,6 +84,41 @@ final class ActorEnrichmentModel: ObservableObject {
 
     private let entityId: String
     private let currentProfile: EntityProfile?
+
+    /// The name as the library currently stores it, from the `actor:Name` id.
+    var localName: String {
+        guard let colon = entityId.firstIndex(of: ":") else { return entityId }
+        return String(entityId[entityId.index(after: colon)...])
+    }
+
+    /// The source's spelling, when it differs from ours.
+    ///
+    /// `nil` when they agree, or when no candidate has been chosen. A pure
+    /// case difference still counts — the operator may well want the source's
+    /// capitalisation — but see `renameWouldBeNoOp`.
+    var proposedName: String? {
+        guard let title = chosen?.title.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty,
+              title != localName
+        else { return nil }
+        return title
+    }
+
+    /// True when the rename would normalise to the same tag, so the store would
+    /// early-return and nothing would change. Worth saying rather than offering
+    /// an action that silently does nothing.
+    var renameWouldBeNoOp: Bool {
+        guard let proposedName else { return true }
+        return TagNormalizer.normalize(fullTag: "actor:\(proposedName)")
+            == TagNormalizer.normalize(fullTag: entityId)
+    }
+
+    /// The name to rename to, or nil when the user declined or there is nothing
+    /// to do. This is what the editor acts on.
+    var acceptedCanonicalName: String? {
+        guard acceptsCanonicalName, !renameWouldBeNoOp else { return nil }
+        return proposedName
+    }
 
     init(provider: any ActorMetadataProvider,
          entityId: String,
@@ -118,6 +167,10 @@ final class ActorEnrichmentModel: ObservableObject {
         accepted = []
         acceptedPhotos = []
         galleryCandidates = []
+        // Back to the default, not to off — picking a different candidate
+        // proposes a different name, and it should arrive in the same state a
+        // first choice would.
+        acceptsCanonicalName = true
         phase = .choosing(candidates)
     }
 
@@ -148,7 +201,9 @@ final class ActorEnrichmentModel: ObservableObject {
     }
 
     /// True when anything at all is ticked — a field or a photo.
-    var canApply: Bool { !accepted.isEmpty || !acceptedPhotos.isEmpty }
+    var canApply: Bool {
+        !accepted.isEmpty || !acceptedPhotos.isEmpty || acceptedCanonicalName != nil
+    }
 
     /// The accepted fields and photos, merged onto the current profile.
     ///

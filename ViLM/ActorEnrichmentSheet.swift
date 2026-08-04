@@ -35,13 +35,16 @@ struct ActorEnrichmentSheet: View {
     @AppStorage("pluginReviewLargePhotos") private var showsLargePhotos = false
     /// Handed the merged profile when the user confirms. The caller puts the
     /// values in its fields; nothing is written to the library here.
-    let onApply: (EntityProfile) -> Void
+    /// - Parameter renameTo: the source's canonical name, when the user chose to
+    ///   adopt it. Handled separately from the profile because a rename is not a
+    ///   field write — it changes the record's identity and every video's tag.
+    let onApply: (EntityProfile, String?) -> Void
 
     init(provider: any ActorMetadataProvider,
          entityId: String,
          actorName: String,
          currentProfile: EntityProfile?,
-         onApply: @escaping (EntityProfile) -> Void) {
+         onApply: @escaping (EntityProfile, String?) -> Void) {
         _model = StateObject(wrappedValue: ActorEnrichmentModel(
             provider: provider, entityId: entityId, currentProfile: currentProfile))
         self.actorName = actorName
@@ -87,7 +90,9 @@ struct ActorEnrichmentSheet: View {
                     if case .reviewing = model.phase {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Apply") {
-                                if let profile = model.apply() { onApply(profile) }
+                                if let profile = model.apply() {
+                                    onApply(profile, model.acceptedCanonicalName)
+                                }
                                 dismiss()
                             }
                             .disabled(!model.canApply)
@@ -404,6 +409,31 @@ struct ActorEnrichmentSheet: View {
                     Text(model.canReturnToPicker
                          ? "Check this is the right person. You can go back to the list without searching again."
                          : "Check this is the right person before applying.")
+                }
+            }
+
+            if let proposed = model.proposedName, !model.renameWouldBeNoOp {
+                Section {
+                    Toggle(isOn: $model.acceptsCanonicalName) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(model.localName)
+                                .font(.subheadline)
+                                .strikethrough(model.acceptsCanonicalName)
+                                .foregroundStyle(.secondary)
+                            Label(proposed, systemImage: "arrow.turn.down.right")
+                                .font(.subheadline).bold()
+                        }
+                    }
+                } header: {
+                    Text("Name")
+                } footer: {
+                    // Deliberately blunt, and more so now that this is ON by
+                    // default: the merge case is the one people would otherwise
+                    // discover after the fact rather than before.
+                    Text("Renames this actor everywhere — every video's tag and every "
+                         + "profile photo moves with it. **If “\(proposed)” already exists "
+                         + "in your library, the two actors are merged into one.** "
+                         + "Turn this off to keep your spelling.")
                 }
             }
 

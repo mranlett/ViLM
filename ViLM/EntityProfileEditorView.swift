@@ -70,6 +70,13 @@ struct EntityProfileEditorView: View {
     // is absent rather than disabled (D3).
     @State private var isShowingEnrichment = false
 
+    /// A canonical name the operator accepted, applied on Save.
+    ///
+    /// Deferred rather than applied immediately because renaming changes this
+    /// record's identity — doing it mid-edit would leave the open form pointing
+    /// at an id that no longer exists.
+    @State private var pendingCanonicalName: String?
+
     // Career span (schema v17). No UI yet — these are carried through so that
     // opening the editor and pressing Save cannot erase values that arrived by
     // CSV import or enrichment. Every field the editor does not render still
@@ -463,7 +470,13 @@ struct EntityProfileEditorView: View {
                         // would read as an empty field and be "filled" with the
                         // source's value.
                         currentProfile: editedProfile,
-                        onApply: applyEnrichment
+                        onApply: { merged, renameTo in
+                            applyEnrichment(merged)
+                            // Held until Save: the rename rewrites this record's
+                            // identity, so it must not happen while the form is
+                            // still open against the old one.
+                            pendingCanonicalName = renameTo
+                        }
                     )
                 }
             }
@@ -489,8 +502,18 @@ struct EntityProfileEditorView: View {
                             }
                         }
                         
+                        // RENAME FIRST, then write. renameTagGlobally moves the
+                        // profile row, every video's actor: tag and every photo
+                        // file; saving before it would write a row the rename
+                        // then moves out from under us.
+                        //
+                        // Runs across EVERY open library because the user sees
+                        // one tag space — renaming in only one would leave the
+                        // federated view showing both names.
+                        let savedEntityId = performCanonicalRename() ?? entityId
+
                         var profile = EntityProfile(
-                            id: entityId,
+                            id: savedEntityId,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
                             photoUrl: finalPhotoUrl.isEmpty ? nil : finalPhotoUrl,
                             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,
@@ -533,11 +556,13 @@ struct EntityProfileEditorView: View {
                             let primaryChanged = finalPhotoUrl != (initialProfile?.photoUrl ?? "")
                             downloadProfileImage(urlString: finalPhotoUrl,
                                                  isGallery: false,
-                                                 overwrite: primaryChanged)
+                                                 overwrite: primaryChanged,
+                                                 forEntityId: savedEntityId)
                         }
                         for url in galleryUrls {
                             if url != finalPhotoUrl {
-                                downloadProfileImage(urlString: url, isGallery: true)
+                                downloadProfileImage(urlString: url, isGallery: true,
+                                                     forEntityId: savedEntityId)
                             }
                         }
                         
@@ -676,6 +701,37 @@ struct EntityProfileEditorView: View {
         enrichmentCheckedAt = merged.enrichmentCheckedAt ?? enrichmentCheckedAt
     }
 
+    /// Applies an accepted canonical name across every open library.
+    ///
+    /// Returns the new entity id, or nil when there was nothing to do. Errors
+    /// are surfaced rather than swallowed: a half-completed rename is exactly
+    /// the failure this operation is most prone to, and silence would leave the
+    /// operator believing it worked.
+    private func performCanonicalRename() -> String? {
+        guard let newName = pendingCanonicalName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !newName.isEmpty else { return nil }
+        let newTag = "actor:\(newName)"
+        guard TagNormalizer.normalize(fullTag: newTag)
+                != TagNormalizer.normalize(fullTag: entityId) else { return nil }
+
+        do {
+            for libURL in LibrarySession.shared.allURLs {
+                let store = try LibraryStore(at: libURL)
+                try store.renameTagGlobally(oldTag: entityId, newTag: newTag)
+            }
+            pendingCanonicalName = nil
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+            return TagNormalizer.normalize(fullTag: newTag)
+        } catch {
+            AppErrorReporter.report("Couldn't rename this actor across the library: "
+                                    + error.localizedDescription)
+            // Fall back to saving under the EXISTING id. The other enrichment
+            // values are still worth keeping, and the operator can retry the
+            // rename from the profile menu.
+            return nil
+        }
+    }
+
     private func saveTag() {
         let val = newTagValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !val.isEmpty else {
@@ -791,7 +847,14 @@ struct EntityProfileEditorView: View {
     ///   primary", not "this image is cached" — so starring a different photo
     ///   updated photo_url in the database and then declined to replace the
     ///   file the UI actually renders.
-    private func downloadProfileImage(urlString: String, isGallery: Bool, overwrite: Bool = false) {
+    /// - Parameter forEntityId: whose profile these files belong to. Defaults to
+    ///   this view's id, but a Save that renamed the actor must pass the NEW one:
+    ///   the files have already been moved by then, and writing under the old id
+    ///   would strand them.
+    private func downloadProfileImage(urlString: String, isGallery: Bool,
+                                      overwrite: Bool = false,
+                                      forEntityId: String? = nil) {
+        let entityId = forEntityId ?? self.entityId
         guard urlString != "local://primary" else { return }
         guard let url = URL(string: urlString), let libraryURL = libraryURL,
               url.scheme == "http" || url.scheme == "https" else { return }
