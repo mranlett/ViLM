@@ -230,7 +230,7 @@ enum HelpContent {
                   description: "Tap it to browse a full-screen gallery of every photo you've added for this actor. Swipe left or right to move between photos, including wrapping from the last photo back to the first. Pinch to zoom in on a photo, and double-tap to reset it back to fit."),
             .init(label: "Ellipsis menu",
                   description: "Rename Globally changes this actor's name everywhere in your library at once. Edit Bio opens the full details form. Delete Profile removes the actor's profile — only available once they have no videos left."),
-            .init(label: "Edit Bio form",
+            .init(label: "Edit Profile form",
                   description: "Add a profile photo and gallery photos (by pasting an image URL), bio, home page, gender, hair color, birth year, country of origin (this adds a flag emoji automatically), tags, and aliases (AKAs) used to automatically match old filenames to this actor."),
             .init(label: "Filmography",
                   description: "Every video featuring this actor, shown as a grid — tap one to open it."),

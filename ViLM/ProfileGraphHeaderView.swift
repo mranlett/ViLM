@@ -118,7 +118,7 @@ struct ProfileGraphHeaderView: View {
                         Button {
                             isShowingEditor = true
                         } label: {
-                            Label("Edit Bio", systemImage: "person.text.rectangle")
+                            Label("Edit Profile", systemImage: "person.text.rectangle")
                         }
                         
                         if filteredAssets.count == 0 && entityProfile != nil {

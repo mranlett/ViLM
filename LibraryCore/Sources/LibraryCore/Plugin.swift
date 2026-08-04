@@ -153,8 +153,12 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     /// none, some, or all — rather than accepting them as one field. Core stores
     /// references and downloads only what the user ticks.
     public var galleryURLs: ProposedField<[URL]> = .absent
-    /// Reference links only. Core stores them; it never fetches them.
-    public var externalLinks: ProposedField<[URL]> = .absent
+    /// Reference links, LABELLED with whatever system each is on.
+    ///
+    /// Labelled rather than bare URLs because a list of naked links renders
+    /// poorly and the source usually knows the site name already. Core stores
+    /// them; it never fetches them.
+    public var externalLinks: ProposedField<[EntityLink]> = .absent
 
     public init() {}
 }

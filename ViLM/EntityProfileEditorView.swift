@@ -365,7 +365,13 @@ struct EntityProfileEditorView: View {
                     }
                     .accessibilityElement(children: .contain)
 
-                    Text("Bio")
+                    // "Notes" rather than "Bio": no external source supplies a
+                    // biography here (the chosen provider carries none at all,
+                    // 1 of 1,336 rows populated), so this field is and always
+                    // has been the operator's own free text. Naming it after
+                    // data that never arrives invites the question of why it is
+                    // empty.
+                    Text("Notes")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     TextEditor(text: $bio)

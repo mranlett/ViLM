@@ -22,11 +22,25 @@ public enum EnrichmentState: String, Codable, Equatable, Sendable, CaseIterable 
     case ambiguous
     /// Matched, but something disagreed and a human must settle it.
     case needsReview
+    /// A PERSON looked and concluded this entity is not in the source.
+    ///
+    /// Distinct from `noMatch`, which only means an automated search returned
+    /// nothing — a name may be misspelled, or the search term wrong. This one
+    /// is a human decision to stop asking, and it is the only state a machine
+    /// never assigns.
+    case unmatchable
 
     /// Whether this outcome is waiting on a person.
+    ///
+    /// `unmatchable` is settled, not pending: someone already looked. Counting
+    /// it would leave the queue permanently full of entities nobody can do
+    /// anything about, which is the fastest way to make a queue ignored.
     public var needsAttention: Bool {
-        self != .matched
+        self != .matched && self != .unmatchable
     }
+
+    /// True when only a person can have set this. Nothing automated may.
+    public var isHumanJudgement: Bool { self == .unmatchable }
 
     public var displayName: String {
         switch self {
@@ -34,6 +48,7 @@ public enum EnrichmentState: String, Codable, Equatable, Sendable, CaseIterable 
         case .noMatch: return "No match"
         case .ambiguous: return "Ambiguous"
         case .needsReview: return "Needs review"
+        case .unmatchable: return "Not findable"
         }
     }
 }
@@ -103,6 +118,13 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     /// as `noMatch` — conflating them would make every un-enriched entity look
     /// like a failure.
     public var enrichmentCheckedAt: Date?
+
+    /// Labelled external references (schema v19).
+    ///
+    /// Generalises the single `homePage` field: an entity may sit on several
+    /// systems, and a bare URL with no label renders poorly. Populated by the
+    /// operator, by a provider, or both. Core stores them and never fetches them.
+    public var links: [EntityLink] = []
 
     /// True only when a lookup has run and concluded something needing a person.
     /// An entity never checked is not "needing attention"; it is unknown.
@@ -190,7 +212,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentCheckedAt: Date? = nil) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
+        self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
         self.enrichmentCheckedAt = enrichmentCheckedAt
@@ -236,6 +259,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case enrichmentState = "enrichment_state"
         case enrichmentSource = "enrichment_source"
         case enrichmentCheckedAt = "enrichment_checked_at"
+        case links
     }
     
     public init(from decoder: Decoder) throws {
@@ -261,6 +285,16 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
             .flatMap { $0.flatMap(EnrichmentState.init(rawValue:)) }
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
+        // Stored as a JSON string in SQLite, like tags/akas — accept either
+        // shape so an archive and a live row both decode.
+        if let array = try? container.decode([EntityLink].self, forKey: .links) {
+            self.links = array
+        } else if let text = try? container.decode(String.self, forKey: .links),
+                  let data = text.data(using: .utf8) {
+            self.links = (try? JSONDecoder().decode([EntityLink].self, from: data)) ?? []
+        } else {
+            self.links = []
+        }
         
         var decodedTags: [String] = []
         if let tagsArray = try? container.decode([String].self, forKey: .tags) {
@@ -312,6 +346,12 @@ extension EntityProfile {
         container["enrichment_state"] = enrichmentState?.rawValue
         container["enrichment_source"] = enrichmentSource
         container["enrichment_checked_at"] = enrichmentCheckedAt
+        if let data = try? JSONEncoder().encode(links),
+           let string = String(data: data, encoding: .utf8) {
+            container["links"] = string
+        } else {
+            container["links"] = "[]"
+        }
         
         if let data = try? JSONEncoder().encode(tags),
            let string = String(data: data, encoding: .utf8) {

@@ -293,6 +293,18 @@ public class LibraryStore {
             }
         }
 
+        // v19: labelled external links. Additive, one nullable column holding a
+        // JSON array — same shape as tags/akas/gallery_urls.
+        //
+        // Generalises `home_page`, which is kept: a single home page is still a
+        // meaningful concept, and dropping a column would break the additive-only
+        // rule the backup feature depends on.
+        migrator.registerMigration("v19") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "links", .text).notNull().defaults(to: "[]")
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

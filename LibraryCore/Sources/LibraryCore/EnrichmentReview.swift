@@ -94,19 +94,19 @@ public enum ActorEnrichment {
         public static let careerStartYear = "careerStartYear"
         public static let careerEndYear = "careerEndYear"
         public static let ageAtCareerStart = "ageAtCareerStart"
+        // Schema v19.
+        public static let links = "links"
 
         public static let all = [bio, gender, hairColor, countryOfOrigin,
                                  birthYear, photoUrl, akas, tags,
                                  birthDate, careerSpanRaw, careerStartYear,
-                                 careerEndYear, ageAtCareerStart]
+                                 careerEndYear, ageAtCareerStart, links]
     }
 
     /// Builds the diff. Pure: no store, no network, no view.
     ///
-    /// Career span and birth date land as of schema v17. `externalLinks` is
-    /// still accepted by the protocol and still has nowhere to go — reference
-    /// links have no column, and silently discarding them beats inventing
-    /// storage for them here.
+    /// Career span and birth date land as of v17; external links as of v19.
+    /// Everything the protocol accepts now has somewhere to go.
     public static func review(
         profile: EntityProfile?,
         proposal: ActorMetadataProposal,
@@ -156,6 +156,13 @@ public enum ActorEnrichment {
                                   current: profile?.akas ?? [], proposed: proposal.akas))
         changes.append(collection(id: Field.tags, label: "Tags",
                                   current: profile?.tags ?? [], proposed: proposal.tags))
+        // Rendered by label so the review reads "IMDb, Wikidata" rather than a
+        // wall of URLs.
+        changes.append(collection(
+            id: Field.links, label: "Links",
+            current: (profile?.links ?? []).map(\.displayLabel),
+            proposed: ProposedField(proposal.externalLinks.value?.map(\.displayLabel),
+                                    sourceNote: proposal.externalLinks.sourceNote)))
 
         return EnrichmentReview(sourceName: sourceName, changes: changes)
     }
@@ -216,7 +223,12 @@ public enum ActorEnrichment {
             careerSpanRaw: take(Field.careerSpanRaw, proposal.careerSpanRaw, profile?.careerSpanRaw),
             careerStartYear: take(Field.careerStartYear, proposal.careerStartYear, profile?.careerStartYear),
             careerEndYear: take(Field.careerEndYear, proposal.careerEndYear, profile?.careerEndYear),
-            ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile?.ageAtCareerStart)
+            ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile?.ageAtCareerStart),
+            // Union, like tags and AKAs: enrichment may add a link but never
+            // removes one the operator curated.
+            links: accepting.contains(Field.links)
+                ? EntityLink.merged(profile?.links ?? [], adding: proposal.externalLinks.value ?? [])
+                : (profile?.links ?? [])
         )
     }
 

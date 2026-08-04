@@ -245,6 +245,21 @@ final class ActorEnrichmentModel: ObservableObject {
         acceptedPhotos = allPhotosSelected ? [] : Set(galleryCandidates.map(\.absoluteString))
     }
 
+    /// The profile to save when the operator decides this person is not in the
+    /// source at all.
+    ///
+    /// A HUMAN decision, never inferred. An automated search returning nothing
+    /// means only that — the name may be misspelled or the search term wrong —
+    /// so the machine records `noMatch` and leaves the entity in the queue. This
+    /// is the operator saying "I looked; stop asking."
+    func markUnmatchable() -> EntityProfile {
+        var profile = currentProfile ?? EntityProfile(id: entityId)
+        profile.enrichmentState = .unmatchable
+        profile.enrichmentSource = provider.displayName
+        profile.enrichmentCheckedAt = Date()
+        return profile
+    }
+
     /// The outcome to record when the user closes the sheet WITHOUT applying.
     ///
     /// A lookup that found nothing is a result worth keeping — otherwise the

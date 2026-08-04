@@ -178,12 +178,15 @@ struct ActorEnrichmentSheet: View {
             reviewList(review)
 
         case .noMatches:
-            ContentUnavailableView(
-                "No Matches",
-                systemImage: "person.fill.questionmark",
-                description: Text("\(model.provider.displayName) has no record under “\(actorName)”. "
-                                  + "If this actor is known by another name, try renaming or adding an AKA.")
-            )
+            VStack(spacing: 20) {
+                ContentUnavailableView(
+                    "No Matches",
+                    systemImage: "person.fill.questionmark",
+                    description: Text("\(model.provider.displayName) has no record under “\(actorName)”. "
+                                      + "If this actor is known by another name, try renaming or adding an AKA.")
+                )
+                markUnmatchableButton
+            }
 
         case .nothingToApply:
             ContentUnavailableView(
@@ -259,7 +262,30 @@ struct ActorEnrichmentSheet: View {
                 Text("Pick the right one. Tap a photo count to see all of someone's pictures. "
                      + "Nothing is changed until you review and apply.")
             }
+
+            Section {
+                markUnmatchableButton
+            } footer: {
+                Text("Use this when none of these is the right person.")
+            }
         }
+    }
+
+    /// Records the operator's judgement that this person is not in the source.
+    ///
+    /// Deliberately worded as a decision rather than a dismissal — it removes
+    /// the actor from the attention queue permanently, and that should feel
+    /// like a choice, not a way to close a dialog.
+    private var markUnmatchableButton: some View {
+        Button {
+            onApply(model.markUnmatchable(), nil)
+            dismiss()
+        } label: {
+            Label("Not in \(model.provider.displayName) — stop asking",
+                  systemImage: "person.crop.circle.badge.xmark")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
     }
 
     /// The same choice, shown large.

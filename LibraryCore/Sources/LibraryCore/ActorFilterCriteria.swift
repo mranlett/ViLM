@@ -24,6 +24,7 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
         case ambiguous
         case needsReview
         case matched
+        case unmatchable
         case neverChecked
 
         public var displayName: String {
@@ -34,6 +35,7 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
             case .ambiguous: return "Ambiguous"
             case .needsReview: return "Needs review"
             case .matched: return "Matched"
+            case .unmatchable: return "Not findable (you decided)"
             case .neverChecked: return "Not yet checked"
             }
         }
@@ -48,6 +50,7 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
             case .ambiguous:      return state == .ambiguous
             case .needsReview:    return state == .needsReview
             case .matched:        return state == .matched
+            case .unmatchable:    return state == .unmatchable
             }
         }
     }

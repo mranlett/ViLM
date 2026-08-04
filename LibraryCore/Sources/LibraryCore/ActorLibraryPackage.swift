@@ -278,7 +278,8 @@ extension LibraryStore {
                 // so an older result must not mask a newer one.
                 enrichmentState: newerEnrichment.enrichmentState,
                 enrichmentSource: newerEnrichment.enrichmentSource,
-                enrichmentCheckedAt: newerEnrichment.enrichmentCheckedAt
+                enrichmentCheckedAt: newerEnrichment.enrichmentCheckedAt,
+                links: EntityLink.merged(existing?.links ?? [], adding: imported.links)
             )
             try saveEntityProfile(merged, in: db)
 

@@ -50,7 +50,7 @@ final class EnrichmentStateTests: XCTestCase {
         // public repository, which is precisely what this guards against. Any
         // addition fails this test, including one naming a source.
         XCTAssertEqual(Set(EnrichmentState.allCases.map(\.rawValue)),
-                       ["matched", "noMatch", "ambiguous", "needsReview"])
+                       ["matched", "noMatch", "ambiguous", "needsReview", "unmatchable"])
     }
 
     func testTheStoredColumnsAreNamedForTheConceptNotTheProvider() {
@@ -202,5 +202,63 @@ final class EnrichmentFilterTests: XCTestCase {
         c.enrichment = .needsAttention
         XCTAssertFalse(c.showNeedingAttentionOnly,
                        "enabling the enrichment filter must not imply the completeness one")
+    }
+}
+
+// MARK: - "Not findable" is a human judgement, never inferred
+
+final class UnmatchableStateTests: XCTestCase {
+
+    func testUnmatchableIsSettledNotPending() {
+        // Someone already looked. Counting it as needing attention would leave
+        // the queue permanently full of entities nobody can act on, which is the
+        // fastest way to make a queue ignored.
+        XCTAssertFalse(EnrichmentState.unmatchable.needsAttention)
+        XCTAssertTrue(EnrichmentState.noMatch.needsAttention)
+    }
+
+    func testOnlyUnmatchableIsAHumanJudgement() {
+        // The machine may record noMatch — a search returned nothing, which can
+        // just mean the name is misspelled. It must never conclude "not findable".
+        XCTAssertTrue(EnrichmentState.unmatchable.isHumanJudgement)
+        for state in EnrichmentState.allCases where state != .unmatchable {
+            XCTAssertFalse(state.isHumanJudgement, "\(state) must not be a human-only verdict")
+        }
+    }
+
+    func testNoMatchAndUnmatchableAreDistinct() {
+        // Collapsing them would let an automated run silently retire an actor.
+        XCTAssertNotEqual(EnrichmentState.noMatch, .unmatchable)
+        XCTAssertEqual(EnrichmentState.unmatchable.rawValue, "unmatchable")
+    }
+
+    func testTheFilterSeparatesThemToo() {
+        typealias Filter = ActorFilterCriteria.EnrichmentFilter
+        XCTAssertTrue(Filter.unmatchable.accepts(.unmatchable))
+        XCTAssertFalse(Filter.unmatchable.accepts(.noMatch))
+        XCTAssertFalse(Filter.needsAttention.accepts(.unmatchable))
+        XCTAssertTrue(Filter.needsAttention.accepts(.noMatch))
+    }
+
+    func testUnmatchableRoundTripsThroughTheCSV() {
+        let original = EntityProfile(id: "actor:A", enrichmentState: .unmatchable,
+                                     enrichmentSource: "Src",
+                                     enrichmentCheckedAt: Date(timeIntervalSince1970: 5))
+        let row = ActorCSV.row(name: "A", profile: original, stripCountry: { $0 })
+        let merged = ActorCSV.merge(columns: ActorCSV.parse(row)[0],
+                                    existing: nil, decorateCountry: { $0 })
+        XCTAssertEqual(merged?.enrichmentState, .unmatchable)
+    }
+
+    func testAManualEditDoesNotUndoTheDecision() {
+        // Adding an alias re-opens a noMatch, because the data a lookup uses
+        // changed. It must NOT re-open a decision a person made deliberately —
+        // they would have to keep re-declaring it.
+        let before = EntityProfile(id: "actor:A", akas: [], enrichmentState: .unmatchable)
+        let after  = EntityProfile(id: "actor:A", akas: ["New Alias"],
+                                   enrichmentState: .unmatchable)
+        XCTAssertEqual(
+            EnrichmentInvalidation.afterManualEdit(previous: before, edited: after).state,
+            .unmatchable)
     }
 }

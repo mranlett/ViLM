@@ -77,7 +77,8 @@ public enum MergeSemantics {
             // view reflects the latest lookup rather than library precedence.
             enrichmentState: newerChecked(higher, lower).enrichmentState,
             enrichmentSource: newerChecked(higher, lower).enrichmentSource,
-            enrichmentCheckedAt: newerChecked(higher, lower).enrichmentCheckedAt
+            enrichmentCheckedAt: newerChecked(higher, lower).enrichmentCheckedAt,
+            links: EntityLink.merged(higher.links, adding: lower.links)
         )
     }
 
