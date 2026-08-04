@@ -289,13 +289,24 @@ final class EnrichmentReviewTests: XCTestCase {
                        .conflict)
     }
 
-    // MARK: - Fields the schema still cannot hold
+    // MARK: - External links (schema v19)
 
-    func testExternalLinksStillHaveNowhereToLand() {
-        // Reference links have no column. Discarding beats inventing storage.
+    func testExternalLinksNowLand() {
+        // Superseded: these were proposed at 87.5% coverage and discarded for
+        // want of a column. v19 gave them one.
         var p = ActorMetadataProposal()
-        p.externalLinks = ProposedField([URL(string: "https://example.test")!])
-        XCTAssertFalse(review(profile(), p).hasAnythingToApply)
+        p.externalLinks = ProposedField([EntityLink(url: "https://example.test", label: "Example")])
+        let r = review(profile(), p)
+        XCTAssertTrue(r.hasAnythingToApply)
+        XCTAssertEqual(change(r, ActorEnrichment.Field.links)?.kind, .fill)
+    }
+
+    func testTheReviewShowsLabelsRatherThanRawURLs() {
+        // A wall of URLs is unreadable; the label is what the operator decides on.
+        var p = ActorMetadataProposal()
+        p.externalLinks = ProposedField([EntityLink(url: "https://a.test", label: "Somewhere")])
+        XCTAssertEqual(change(review(profile(), p), ActorEnrichment.Field.links)?.proposed,
+                       "Somewhere")
     }
 }
 

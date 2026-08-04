@@ -78,7 +78,14 @@ struct SingleInspectorView: View {
     // Watch-first layout: browsing is the default; all metadata editing lives
     // behind the ✎ sheet, maintenance behind the ⋯ menu.
     @State private var isShowingEditSheet = false
-    @State private var isShowingFrames = false
+    /// Remembered rather than reset each time.
+    ///
+    /// It stays collapsed by DEFAULT — it duplicates the player's seek job and
+    /// is the biggest space consumer on this screen. But someone working
+    /// through untagged videos needs it open on every one of them, and
+    /// re-expanding it per video is the kind of friction that stops a
+    /// thousand-video pass.
+    @AppStorage("inspectorShowsFrames") private var isShowingFrames = false
     
     private var currentIndex: Int? {
         contextAssetIDs.firstIndex(of: asset.id)
@@ -155,9 +162,16 @@ struct SingleInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
-                // Frame grid ABOVE the player (user decision) but folded into
-                // an accordion, collapsed by default — it duplicates the
-                // player's seek job and was the biggest space consumer.
+                // The filename first, because on an untagged video it carries
+                // the metadata being entered — performers, tags and studio are
+                // encoded in it for ~95% of files, while the catalogue knows
+                // them for far fewer. Selectable so a name can be copied into a
+                // field rather than retyped.
+                sourceFileNameHeader
+
+                // Frame grid ABOVE the player (user decision), folded into an
+                // accordion. Still collapsed by default for space, but the
+                // choice now persists — see isShowingFrames.
                 framesAccordion
 
                 // Playback controls (platform-specific)
@@ -438,6 +452,26 @@ struct SingleInspectorView: View {
     /// Frame grid above the player (user decision), collapsed by default.
     /// On macOS the thumbnail scrubber tools live here too — they're
     /// frame-preview machinery.
+    /// The file's name on disk, readable and copyable.
+    ///
+    /// Distinct from the display title: `videoName` is what the user chose to
+    /// call it, this is what the file is actually called. When tagging an
+    /// unreviewed video the two differ, and the filename is the useful one.
+    private var sourceFileNameHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("File name", systemImage: "doc.text")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(asset.fileName)
+                .font(.callout.monospaced())
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     private var framesAccordion: some View {
         DisclosureGroup(isExpanded: $isShowingFrames) {
             VStack(alignment: .leading, spacing: 10) {
@@ -711,6 +745,29 @@ struct SingleInspectorView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+
+                    // This sheet OVERLAYS the details page, hiding the two
+                    // things the operator is reading FROM while typing: the
+                    // file name and the frames. Both are repeated here.
+                    //
+                    // The file name matters most — on an unreviewed video it
+                    // carries the performers, tags and studio being entered,
+                    // and it is encoded there for ~95% of files while the
+                    // catalogue knows them for far fewer.
+                    sourceFileNameHeader
+
+                    // Non-interactive: there is no player behind this sheet to
+                    // seek, so a tap would have nowhere to go. These are for
+                    // reference while typing, not for scrubbing.
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Preview frames", systemImage: "square.grid.3x3")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        DetailGridView(asset: asset, libraryURL: libraryURL, isInteractive: false)
+                    }
+
+                    Divider()
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Series Name").font(.subheadline).foregroundColor(.secondary)
                         TextField("e.g. Movie Name or TV Show", text: $seriesNameDraft)
