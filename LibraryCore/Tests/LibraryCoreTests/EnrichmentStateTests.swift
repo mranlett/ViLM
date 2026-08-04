@@ -262,3 +262,51 @@ final class UnmatchableStateTests: XCTestCase {
             .unmatchable)
     }
 }
+
+/// Marking someone as not findable, and getting them back later.
+extension EnrichmentStateTests {
+
+    func testUnmatchableLeavesTheAttentionQueue() {
+        XCTAssertFalse(EnrichmentState.unmatchable.needsAttention)
+        XCTAssertTrue(EnrichmentState.noMatch.needsAttention)
+        XCTAssertTrue(EnrichmentState.ambiguous.needsAttention)
+    }
+
+    /// The reason a broad toggle is safe: they stay reachable.
+    func testUnmatchableIsStillReachableByItsOwnFilter() {
+        XCTAssertTrue(ActorFilterCriteria.EnrichmentFilter.unmatchable.accepts(.unmatchable))
+        XCTAssertFalse(ActorFilterCriteria.EnrichmentFilter.unmatchable.accepts(.noMatch))
+        XCTAssertFalse(ActorFilterCriteria.EnrichmentFilter.needsAttention.accepts(.unmatchable))
+    }
+
+    /// Never confused with "nobody has looked yet".
+    func testUnmatchableIsNotTheSameAsNeverChecked() {
+        XCTAssertFalse(ActorFilterCriteria.EnrichmentFilter.neverChecked.accepts(.unmatchable))
+        XCTAssertTrue(ActorFilterCriteria.EnrichmentFilter.neverChecked.accepts(nil))
+    }
+
+    /// A human decision must survive editing the fields a lookup keys on —
+    /// otherwise adding an AKA would silently drag the actor back into the
+    /// queue they were deliberately taken out of.
+    func testEditingMatchInputsDoesNotUndoTheDecision() {
+        var before = EntityProfile(id: "actor:someone")
+        before.enrichmentState = .unmatchable
+        var after = before
+        after.akas = ["A New Alias"]
+
+        let revised = EnrichmentInvalidation.afterManualEdit(previous: before, edited: after)
+        XCTAssertEqual(revised.state, .unmatchable)
+    }
+
+    /// But an unresolved machine verdict IS cleared by the same edit, which is
+    /// the distinction that makes the human decision worth recording.
+    func testEditingMatchInputsDoesClearAnUnresolvedVerdict() {
+        var before = EntityProfile(id: "actor:someone")
+        before.enrichmentState = .noMatch
+        var after = before
+        after.akas = ["A New Alias"]
+
+        let revised = EnrichmentInvalidation.afterManualEdit(previous: before, edited: after)
+        XCTAssertNil(revised.state)
+    }
+}

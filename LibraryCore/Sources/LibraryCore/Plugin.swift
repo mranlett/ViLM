@@ -49,12 +49,22 @@ public protocol Plugin: Sendable {
     /// Requests per second this plugin's source tolerates. Core's shared HTTP
     /// client enforces it; the plugin declares it (D6).
     var requestsPerSecond: Double { get }
+
+    /// Which stored credential this plugin uses. Defaults to its own id.
+    ///
+    /// Override it where two plugins are backed by the same ACCOUNT. Splitting
+    /// one source into separate capabilities is right — a library may want
+    /// video matching without actor lookups — but it must not mean entering the
+    /// same API key twice under two names, where revoking it in one place
+    /// silently leaves the other half working off a stale copy.
+    var credentialId: String { get }
 }
 
 public extension Plugin {
     var attribution: String? { nil }
     var homepage: URL? { nil }
     var requestsPerSecond: Double { 1.0 }
+    var credentialId: String { id }
 }
 
 // MARK: - Candidates
@@ -90,11 +100,22 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     /// separately from its full-size original.
     public let imageURLs: [URL]
 
+    /// Running time, where the source knows it.
+    ///
+    /// Carried on the candidate rather than fetched per record because it is
+    /// the strongest thing a person has to judge by when browsing: two scenes
+    /// with the same cast and studio are told apart by their length long before
+    /// anything else. A picker can compare it against the file in hand and say
+    /// so. Nil where the source does not publish it — and for candidates that
+    /// are not videos at all.
+    public let durationSeconds: Int?
+
     public init(id: String, title: String, subtitle: String? = nil,
                 thumbnailURL: URL? = nil, fullImageURL: URL? = nil,
-                imageURLs: [URL] = []) {
+                imageURLs: [URL] = [], durationSeconds: Int? = nil) {
         self.id = id
         self.title = title
+        self.durationSeconds = durationSeconds
         self.subtitle = subtitle
         self.thumbnailURL = thumbnailURL
         self.fullImageURL = fullImageURL ?? thumbnailURL
@@ -103,6 +124,48 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
         self.imageURLs = imageURLs.isEmpty
             ? [fullImageURL ?? thumbnailURL].compactMap { $0 }
             : imageURLs
+    }
+}
+
+/// What an operator is asking for when they search by hand.
+public struct BrowseQuery: Equatable, Sendable {
+    public var performerNames: [String]
+    public var studio: String?
+    /// Narrows to scenes carrying ALL of these — the way a person uses tags to
+    /// cut a long list down.
+    public var tags: [String]
+    public var title: String?
+
+    public init(performerNames: [String] = [], studio: String? = nil,
+                tags: [String] = [], title: String? = nil) {
+        self.performerNames = performerNames
+        self.studio = studio
+        self.tags = tags
+        self.title = title
+    }
+}
+
+/// Which filter a suggestion list is for.
+public enum BrowseFilterKind: String, Equatable, Sendable, CaseIterable {
+    case performer
+    case studio
+    case tag
+}
+
+public struct BrowseResult: Sendable {
+    public let candidates: [PluginCandidate]
+    public let total: Int
+    /// Filters the source could not resolve and therefore did NOT apply.
+    ///
+    /// Surfaced so the operator can tell "this filter found nothing" from "this
+    /// filter was ignored" — two very different situations that otherwise look
+    /// identical from a list of results.
+    public let unresolvedFilters: [String]
+
+    public init(candidates: [PluginCandidate], total: Int, unresolvedFilters: [String] = []) {
+        self.candidates = candidates
+        self.total = total
+        self.unresolvedFilters = unresolvedFilters
     }
 }
 
@@ -249,6 +312,34 @@ public protocol VideoMetadataProvider: Plugin {
     /// A provider that cannot search this way returns nothing rather than
     /// falling back to one name, because a hundred candidates is not a result.
     func search(performerNames: [String], studio: String?) async throws -> [PluginCandidate]
+
+    /// The outcome of an operator-driven search.
+    ///
+    /// `unresolvedFilters` is the part that matters: a filter the source could
+    /// not interpret is DROPPED, and a dropped filter looks exactly like a
+    /// filter that did nothing. Studio names in a library come from filenames
+    /// and often have the spaces run out of them, so this is common rather than
+    /// exotic — and silently returning everything reads as a broken feature.
+    ///
+    /// An operator-driven search, for when the automatic passes found nothing.
+    ///
+    /// Deliberately laxer than `search(performerNames:studio:)`. That one
+    /// refuses a single name because a hundred candidates is useless to a
+    /// machine deciding on its own. A person BROWSING is in a different
+    /// position: they are narrowing by eye, one name plus a studio is exactly
+    /// how they would do it by hand, and a long list they can page through
+    /// beats being told no match exists.
+    ///
+    /// Returns the page and the total so the UI can say how much is left.
+    func browse(_ query: BrowseQuery, page: Int) async throws -> BrowseResult
+
+    /// Names the source recognises, for completing a filter as it is typed.
+    ///
+    /// These vocabularies are the source's, not the library's, and a filter it
+    /// cannot resolve is simply not applied — so typing one from memory fails
+    /// quietly and looks like a filter that does nothing. Completing against
+    /// the real list turns that from a puzzle into a non-event.
+    func suggestions(for kind: BrowseFilterKind, matching text: String) async throws -> [String]
     func fetch(videoId: String) async throws -> VideoMetadataProposal
     func artwork(videoId: String) async throws -> [ArtworkReference]
 }
@@ -262,4 +353,15 @@ public extension VideoMetadataProvider {
     func match(perceptualHash: UInt64, distance: Int) async throws -> [PluginCandidate] { [] }
 
     func search(performerNames: [String], studio: String?) async throws -> [PluginCandidate] { [] }
+
+    /// Empty means the provider cannot browse, not that nothing exists.
+    func browse(_ query: BrowseQuery, page: Int) async throws -> BrowseResult {
+        BrowseResult(candidates: [], total: 0)
+    }
+
+    /// Empty means the provider cannot complete that filter, never that no such
+    /// name exists — a caller must not treat it as "this name is invalid".
+    func suggestions(for kind: BrowseFilterKind, matching text: String) async throws -> [String] {
+        []
+    }
 }

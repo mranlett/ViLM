@@ -103,7 +103,7 @@ public final class PluginRegistry: @unchecked Sendable {
         guard let plugin = plugin(id: pluginId) else { return nil }
         guard store.isEnabled(pluginId: pluginId) else { return .available }
         if plugin.credentialRequirement != .none,
-           (credentials.credential(for: pluginId) ?? "").isEmpty {
+           (credentials.credential(for: plugin.credentialId) ?? "").isEmpty {
             return .needsCredential
         }
         return .installed

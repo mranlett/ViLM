@@ -274,3 +274,54 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(Set(CredentialRequirement.allCases), [.none, .apiKey, .token])
     }
 }
+
+/// Two plugins backed by one account.
+///
+/// Splitting a source into separate capabilities is right — a library may want
+/// video matching without actor lookups — but it must not mean entering the
+/// same API key twice. Two copies means revoking one leaves the other running
+/// on a stale credential.
+final class SharedCredentialTests: XCTestCase {
+
+    private struct Sharer: Plugin {
+        let id: String
+        let credentialId: String
+        let displayName = "Sharer"
+        let summary = ""
+        let capabilities: Set<PluginCapability> = [.videoMetadata]
+        let credentialRequirement: CredentialRequirement = .apiKey
+    }
+
+    func testAPluginIsInstalledOnItsSharedCredential() {
+        let credentials = InMemoryCredentialStore()
+        credentials.setCredential("secret", for: "shared-account")
+        let registry = PluginRegistry(store: InMemoryPluginStateStore(),
+                                      credentials: credentials)
+        registry.register(Sharer(id: "video-half", credentialId: "shared-account"))
+        registry.setEnabled(true, pluginId: "video-half")
+
+        XCTAssertEqual(registry.state(of: "video-half"), .installed,
+                       "the key is stored under the shared id, not the plugin's own")
+    }
+
+    func testWithoutTheSharedCredentialItStillNeedsOne() {
+        let registry = PluginRegistry(store: InMemoryPluginStateStore(),
+                                      credentials: InMemoryCredentialStore())
+        registry.register(Sharer(id: "video-half", credentialId: "shared-account"))
+        registry.setEnabled(true, pluginId: "video-half")
+        XCTAssertEqual(registry.state(of: "video-half"), .needsCredential)
+    }
+
+    /// The default must stay "its own id", or every existing plugin changes
+    /// which Keychain entry it reads.
+    func testCredentialIdDefaultsToThePluginId() {
+        struct Plain: Plugin {
+            let id = "plain"
+            let displayName = "Plain"
+            let summary = ""
+            let capabilities: Set<PluginCapability> = [.actorMetadata]
+            let credentialRequirement: CredentialRequirement = .apiKey
+        }
+        XCTAssertEqual(Plain().credentialId, "plain")
+    }
+}

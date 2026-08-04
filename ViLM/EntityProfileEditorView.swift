@@ -94,6 +94,10 @@ struct EntityProfileEditorView: View {
     // pressing Save cannot erase it. This is the site that silently destroyed
     // v17's career fields for exactly this reason.
     @State private var enrichmentState: EnrichmentState?
+    /// What the state was before "not findable" was switched on, so switching it
+    /// back off restores the real result rather than discarding it. A matched
+    /// actor toggled on and off again must not come back as never-checked.
+    @State private var stateBeforeUnmatchable: EnrichmentState??
     @State private var enrichmentSource: String?
     @State private var enrichmentCheckedAt: Date?
     
@@ -426,6 +430,41 @@ struct EntityProfileEditorView: View {
                     }
                 }
                 
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { enrichmentState == .unmatchable },
+                        set: { on in
+                            if on {
+                                stateBeforeUnmatchable = .some(enrichmentState)
+                                enrichmentState = .unmatchable
+                            } else {
+                                // Restore what was there, or fall back to
+                                // never-checked when this session did not see
+                                // the earlier value.
+                                enrichmentState = stateBeforeUnmatchable.flatMap { $0 }
+                                stateBeforeUnmatchable = nil
+                            }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Not findable in online sources")
+                            Text("Stops this actor appearing in “needs attention”.")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Lookup").font(.headline)
+                } footer: {
+                    // Deliberately reversible and deliberately visible: an
+                    // actor marked this way is still findable under the
+                    // "Not findable (you decided)" filter, so a judgement made
+                    // early — before an AKA turned up, or before the source
+                    // added them — can be revisited rather than lost.
+                    Text("Use this for actors an online lookup cannot resolve. "
+                         + "They stay reachable under the “Not findable (you decided)” "
+                         + "lookup filter for a later look.")
+                }
+
                 Section(header: Text("Links").font(.headline)) {
                     VStack(alignment: .leading, spacing: 10) {
                         // URL and label are separate fields because the label is

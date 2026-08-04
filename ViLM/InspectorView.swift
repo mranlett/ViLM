@@ -136,6 +136,7 @@ struct SingleInspectorView: View {
 
     // Face-based actor suggestions
     @State private var isShowingEditVideo = false
+    @State private var isShowingVideoMatch = false
 
     // Notes editing buffer (see annotationsSection for why edits are
     // debounced instead of bound directly to the asset).
@@ -282,6 +283,17 @@ struct SingleInspectorView: View {
                             Label("Edit Video (Trim / Flip)", systemImage: "slider.horizontal.below.rectangle")
                         }
                         .disabled(missingAssetIDs.contains(asset.id))
+                        // Only offered when a source is actually installed, and
+                        // labelled with ITS name rather than a hard-coded one —
+                        // this file must not know which sources exist.
+                        if let source = videoMetadataSourceName {
+                            Button {
+                                isShowingVideoMatch = true
+                            } label: {
+                                Label("Match with \(source)", systemImage: "sparkle.magnifyingglass")
+                            }
+                            .disabled(missingAssetIDs.contains(asset.id) || libraryURL == nil)
+                        }
                         Button {
                             suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
                             isShowingRenameDialog = true
@@ -343,6 +355,14 @@ struct SingleInspectorView: View {
             }
         } message: {
             Text("This will move the video file and its metadata to the Trash. This action cannot be undone here.")
+        }
+        .sheet(isPresented: $isShowingVideoMatch) {
+            if let url = libraryURL {
+                VideoEnrichmentSheet(asset: asset, libraryURL: url,
+                                     knownTags: knownTagVocabulary) { updated in
+                    updateAsset(updated, at: LibrarySession.shared.url(for: updated.id) ?? url)
+                }
+            }
         }
         .sheet(isPresented: $isShowingEditVideo) {
             if let url = libraryURL {
@@ -660,8 +680,67 @@ struct SingleInspectorView: View {
     @ViewBuilder
     private var browsePillsSection: some View {
         browsePillRow(title: "Actors", items: asset.actors, category: "actor", color: .blue)
+        ageAtReleaseRow
         browsePillRow(title: "Tags", items: asset.actions, category: "tag", color: .green)
         browsePillRow(title: "Studios", items: asset.studios, category: "studio", color: .purple)
+    }
+
+    /// How old each credited actor was when this was released.
+    ///
+    /// Derived on the fly from the actor's birth date and this video's release
+    /// date — nothing is stored, because either can be corrected later and a
+    /// cached answer would quietly disagree with the record it came from.
+    ///
+    /// Shown only where it can actually be worked out. An actor with no birth
+    /// date is absent rather than listed as unknown: a row of blanks is noise,
+    /// and the gap is already visible on the actor's own page.
+    @ViewBuilder
+    private var ageAtReleaseRow: some View {
+        let ages = AgeAtReleaseCalculator.ages(for: asset, profiles: actorProfiles)
+        if !ages.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Age at release").font(.caption).foregroundColor(.secondary)
+                FlowLayout(spacing: 6) {
+                    ForEach(ages.keys.sorted(), id: \.self) { name in
+                        if let age = ages[name] {
+                            HStack(spacing: 4) {
+                                Text(name).fontWeight(.medium)
+                                // An approximate figure renders as a range so
+                                // it cannot be mistaken for a precise one: a
+                                // birth year cannot say whether the birthday
+                                // had come round yet.
+                                Text(age.displayText)
+                                if !age.isExact {
+                                    Image(systemName: "questionmark.circle")
+                                        .font(.caption2).opacity(0.6)
+                                }
+                            }
+                            .font(.caption2)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.teal.opacity(0.18))
+                            .foregroundColor(.teal)
+                            .clipShape(Capsule())
+                            .help(age.isExact
+                                  ? "Exact — from a full birth date"
+                                  : "Approximate — only a birth year is recorded, so this is \(age.years - 1) or \(age.years)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Profiles for this video's cast, from whichever library owns each one.
+    private var actorProfiles: [String: EntityProfile] {
+        var out: [String: EntityProfile] = [:]
+        for name in asset.actors {
+            let entityId = "actor:\(name)"
+            if let profile = try? LibrarySession.shared.store(forProfile: entityId)
+                .fetchEntityProfile(for: entityId) {
+                out[entityId] = profile
+            }
+        }
+        return out
     }
 
     @ViewBuilder
@@ -1435,6 +1514,20 @@ struct SingleInspectorView: View {
         var updated = asset
         updated.episode = newEpisode
         updateAsset(updated, at: url)
+    }
+
+    /// The installed video source's own name, or nil when none is installed.
+    private var videoMetadataSourceName: String? {
+        PluginEnvironment.registry.installedVideoProviders().first?.displayName
+    }
+
+    /// Every plain tag already used anywhere in the open libraries.
+    ///
+    /// This is what decides which suggested tags arrive pre-ticked. Drawn from
+    /// the whole library rather than this video: the question is whether the
+    /// operator uses a term at all, not whether this particular video has it.
+    private var knownTagVocabulary: Set<String> {
+        Set(assets.flatMap { $0.actions })
     }
 
     private func updateAsset(_ updated: Asset, at url: URL) {
