@@ -11,7 +11,7 @@ notion: https://app.notion.com/p/ViLM-Plugin-Architecture-3b0adccaf4288104bf63d5
 
 # ViLM Plugin Architecture
 
-> Umbrella specification for a plugin architecture in ViLM: a plugin registry, a Settings screen for installing and configuring plugins, and a shared enrichment review pipeline that every plugin feeds. Individual plugins are specified on their own pages. **Status: Draft — awaiting Human Operator approval. No code may be written until Status = Approved.**
+> Umbrella specification for a plugin architecture in ViLM: a plugin registry, a Settings screen for installing and configuring plugins, and a shared enrichment review pipeline that every plugin feeds. Individual plugins are specified on their own pages. **Status: APPROVED 2026-08-02 — cleared for implementation.**
 ## Intention
 ViLM's catalogue is enriched by hand. Several external sources could fill it automatically, but each carries its own vocabulary, licence, credential and appropriateness, and baking any one of them into the app makes the app about that source.
 The architecture keeps the core generic. **Core owns the schema, the merge policy, and the review UI. A plugin owns exactly one thing: how to turn a name or a title into candidate records from one source.** No plugin writes to the library. It proposes; core decides how the proposal is reviewed and applied.
@@ -127,7 +127,12 @@ An installed plugin adds an **Enrich** action to Video Details and to Edit Actor
 - **T7 — Credential handling.** Credentials land in Keychain and are removed on uninstall.
 - **T8 — Cache replay.** A cached response satisfies a repeat request with no network.
 - **T9 — Second-provider drop-in.** Registering a second test provider requires no core change.
-- **T10 — Public repository names no plugin.** An automated check greps tracked files for plugin module names, package paths and source names, and fails on any match. Covers `Package.swift`, project files and xcconfigs, not just Swift sources.
+- **T10 — Public repository names no plugin.** An automated check greps tracked files for plugin module names, package paths and source names, and fails on any match. Covers Swift sources, `Package.swift`, project files and xcconfigs.
+  > ⚠️ **Scope correction (2026-08-02).** As originally written this test fails against **this specification itself**. The page carries `Repo = ViLM` and therefore syncs to `docs/specs/plugin-architecture.md` in the public repository, where the D7 naming-convention table contains `VilmPluginVideoMetadata`, `vilm-plugin-actor-metadata` and the rest — four matches, verified by running the check.
+  > 
+  > That is not a conflict of intent: D7 states these capability-based names are *deliberately* safe to publish ("uniformity, not secrecy"). It is a scope error in the test. **T10 must exclude ****`docs/`** and assert only over code and build configuration — the places where naming a plugin would reveal the roster or wire it into a build.
+  > 
+  > A check that cannot pass gets disabled, and a disabled check protects nothing.
 - **T11 — Default build is local-only.** The build produced from the public repository alone links no plugin and issues no plugin network request under any code path.
 Golden fixtures use recorded responses. No live network in tests.
 ## Open decisions — Human Operator

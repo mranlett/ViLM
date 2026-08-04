@@ -501,7 +501,12 @@ struct EntityProfileEditorView: View {
                         )
                         
                         if !finalPhotoUrl.isEmpty {
-                            downloadProfileImage(urlString: finalPhotoUrl, isGallery: false)
+                            // Re-fetch only when the primary actually changed, so
+                            // editing an unrelated field still costs no network.
+                            let primaryChanged = finalPhotoUrl != (initialProfile?.photoUrl ?? "")
+                            downloadProfileImage(urlString: finalPhotoUrl,
+                                                 isGallery: false,
+                                                 overwrite: primaryChanged)
                         }
                         for url in galleryUrls {
                             if url != finalPhotoUrl {
@@ -746,7 +751,14 @@ struct EntityProfileEditorView: View {
         }
     }
 
-    private func downloadProfileImage(urlString: String, isGallery: Bool) {
+    /// - Parameter overwrite: replace a cached file that already exists.
+    ///   Required when the PRIMARY changes, because the primary's filename is
+    ///   fixed per actor (`actor_Name.jpg`) rather than content-addressed like
+    ///   the gallery's. Without it, "the file exists" means "this actor has a
+    ///   primary", not "this image is cached" — so starring a different photo
+    ///   updated photo_url in the database and then declined to replace the
+    ///   file the UI actually renders.
+    private func downloadProfileImage(urlString: String, isGallery: Bool, overwrite: Bool = false) {
         guard urlString != "local://primary" else { return }
         guard let url = URL(string: urlString), let libraryURL = libraryURL,
               url.scheme == "http" || url.scheme == "https" else { return }
@@ -770,7 +782,31 @@ struct EntityProfileEditorView: View {
         // re-fetched. Without this, every Save re-downloaded the primary and
         // the entire gallery — hitting the network (and any now-broken hosts)
         // just for editing an unrelated field like the rating.
-        guard !FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        //
+        // The contract holds ONLY while the filename identifies the image.
+        // Gallery files are content-addressed, so it always does. The primary
+        // is not, so the caller must say when the URL behind it has changed.
+        guard overwrite || !FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        // A starred photo is a GALLERY entry, so its bytes are almost always
+        // already on disk under the content-addressed gallery name. Copy them
+        // rather than re-fetching.
+        //
+        // Re-fetching raced the UI: the profile page's .task(id: photoUrl)
+        // re-runs on save and reads the primary file, but the download runs
+        // detached, so the read usually won and the page kept showing the old
+        // photo until the view was recreated. A previously-used photo appeared
+        // to work only because URLCache made its fetch fast enough to win that
+        // race — luck, not correctness.
+        //
+        // Written atomically so the primary is never momentarily absent.
+        if !isGallery,
+           let source = LibrarySession.shared.existingProfilePhotoURL(
+                fileName: ProfileImageNaming.galleryFileName(for: entityId, token: urlString)),
+           let bytes = try? Data(contentsOf: source),
+           (try? bytes.write(to: fileURL, options: .atomic)) != nil {
+            return
+        }
 
         Task.detached {
             do {

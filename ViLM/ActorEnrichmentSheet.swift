@@ -277,6 +277,17 @@ struct ActorEnrichmentSheet: View {
                 }
             }
 
+            if !review.conflicts.isEmpty {
+                Section {
+                    ForEach(review.conflicts) { row(($0)) }
+                } header: {
+                    Text("Disagreements")
+                } footer: {
+                    Text("Your value differs from \(review.sourceName)'s. "
+                         + "Left unticked — tick one only if you want it overwritten.")
+                }
+            }
+
             if !model.galleryCandidates.isEmpty {
                 Section {
                     photoGrid
@@ -299,17 +310,6 @@ struct ActorEnrichmentSheet: View {
                          ? "Tap the photos you want added to this actor's gallery. None are selected."
                          : "^[\(model.acceptedPhotos.count) photo](inflect: true) will be added. "
                            + "Existing photos are never replaced.")
-                }
-            }
-
-            if !review.conflicts.isEmpty {
-                Section {
-                    ForEach(review.conflicts) { row(($0)) }
-                } header: {
-                    Text("Disagreements")
-                } footer: {
-                    Text("Your value differs from \(review.sourceName)'s. "
-                         + "Left unticked — tick one only if you want it overwritten.")
                 }
             }
         }

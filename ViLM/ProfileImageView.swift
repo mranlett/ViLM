@@ -28,6 +28,22 @@ private enum ProfileImageCache {
         return c
     }()
 
+    /// Cache key for a file on disk.
+    ///
+    /// Includes the modification date, because the PRIMARY photo's filename is
+    /// fixed per entity (`actor_Name.jpg`) — starring a different photo
+    /// overwrites the same path. Keying on the path alone meant the old decoded
+    /// image was served until the app was relaunched and the cache was empty.
+    ///
+    /// Same rule ThumbnailLoader already uses, and for the same reason:
+    /// "regenerated thumbnails are picked up". Gallery photos are
+    /// content-addressed so they never needed it; the primary always did.
+    static func key(for url: URL) -> NSString {
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        return "\(url.path)|\(modified)" as NSString
+    }
+
     /// Rough decoded-bitmap size in bytes (RGBA), used as the NSCache cost.
     static func cost(of image: PlatformImage) -> Int {
         #if os(iOS)
@@ -119,7 +135,7 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     private var displayImage: Image? {
         if let localImage { return localImage }
         if let url = resolvedFileURL,
-           let cached = ProfileImageCache.shared.object(forKey: url.path as NSString) {
+           let cached = ProfileImageCache.shared.object(forKey: ProfileImageCache.key(for: url)) {
             return Image(platformImage: cached)
         }
         return nil
@@ -219,7 +235,7 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
     }
     
     private func loadImageAsync(from url: URL) async -> Image? {
-        let key = url.path as NSString
+        let key = ProfileImageCache.key(for: url)
         if let cached = ProfileImageCache.shared.object(forKey: key) {
             return Image(platformImage: cached)
         }

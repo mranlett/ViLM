@@ -505,7 +505,15 @@ struct ProfileGraphHeaderView: View {
                             content(wrapped(index)).frame(width: w, height: geo.size.height)
                             content(wrapped(index + 1)).frame(width: w, height: geo.size.height)
                         }
-                        .offset(x: -w + dragOffset)
+                        // No -w here. The HStack is 3w wide and the enclosing
+                        // .frame(width: w) CENTRES it, which already places the
+                        // middle page -- wrapped(index) -- in the visible
+                        // window. Subtracting another w shifted one page
+                        // further, so tapping a thumbnail opened the NEXT photo.
+                        //
+                        // This restores the invariant settle() already documents:
+                        // at dragOffset == 0 the visible page is wrapped(index).
+                        .offset(x: dragOffset)
                         .gesture(
                             DragGesture()
                                 .onChanged { value in

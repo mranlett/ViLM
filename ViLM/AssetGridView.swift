@@ -87,6 +87,12 @@ struct AssetsGridView: View {
     // and per selection change) does not scale, so it only reruns when one of
     // its inputs changes — see the onChange modifiers on the grid.
     @State private var displayedAssets: [Asset] = []
+    /// How many videos the persisted filter model is suppressing on this page.
+    ///
+    /// An empty page that says nothing is indistinguishable from a broken one —
+    /// a review-status filter emptying a tag page cost hours of misdiagnosis
+    /// before anyone noticed a filter was on.
+    @State private var videosHiddenByFilter: Int = 0
     // Seasons the user has collapsed in the grouped series view (nil season = Int.min).
     @State private var collapsedSeasons: Set<Int> = []
     // A–Z letter strip over display titles ("#" = non-letter starts).
@@ -142,9 +148,17 @@ struct AssetsGridView: View {
     private func recomputeDisplayedAssets() {
         displayedAssets = computeFilteredAssets()
         filteredAssetContext = displayedAssets.map(\.id)
+        // Recomputed here rather than per render: this is a second pass over
+        // the assets, cheap on a filter change and wrong to repeat per frame.
+        videosHiddenByFilter = filterCriteria.isEmpty
+            ? 0
+            : max(0, computeFilteredAssets(applyingCriteria: false).count - displayedAssets.count)
     }
 
-    private func computeFilteredAssets() -> [Asset] {
+    /// - Parameter applyingCriteria: pass `false` to skip the persisted filter
+    ///   model and get what this page WOULD show without it. Used to report how
+    ///   many items a filter is hiding, so an empty page is never silent.
+    private func computeFilteredAssets(applyingCriteria: Bool = true) -> [Asset] {
         let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
@@ -167,7 +181,8 @@ struct AssetsGridView: View {
             // sets are the persisted filter model — matched by the shared,
             // unit-tested implementation in LibraryCore so this grid and the
             // Move-Between-Libraries page stay in lockstep.
-            if !filterCriteria.matches(asset, mappedActors: mappedActors(for: asset), entityProfiles: entityProfiles) {
+            if applyingCriteria,
+               !filterCriteria.matches(asset, mappedActors: mappedActors(for: asset), entityProfiles: entityProfiles) {
                 return false
             }
 
@@ -246,6 +261,19 @@ struct AssetsGridView: View {
                         libraryURL: libraryURL
                     )
                     .padding(.top)
+                }
+
+                if videosHiddenByFilter > 0 {
+                    Label {
+                        Text("^[\(videosHiddenByFilter) video](inflect: true) hidden by your filters")
+                    } icon: {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
                 }
 
                 if isFiltered {
@@ -659,8 +687,37 @@ struct AssetsGridView: View {
         return true
     }
 
+    /// Who the Actors tab is about.
+    ///
+    /// The Videos tab answers "what can I watch"; this answers "who is this
+    /// about". Those are the same question for a studio, a series or an actor —
+    /// there the connection genuinely IS "appeared together in these videos".
+    ///
+    /// They are NOT the same for a TAG. A tag page shows every video in which
+    /// any tagged actor appears, so deriving actors from those videos returned
+    /// the whole cast of each: a blonde who happened to be in a video with a
+    /// redhead was listed under "Redhead".
+    ///
+    /// Narrowed only for a single tag selection, using exactly the notion the
+    /// ASSET filter uses above, so the two cannot disagree.
     private var matchingActors: [String] {
-        Set(displayedAssets.flatMap { mappedActors(for: $0) }).sorted()
+        guard sidebarSelection.count == 1,
+              case .tag(let name)? = sidebarSelection.first else {
+            // Studio, series and actor pages: the connection genuinely IS
+            // "appeared together in these videos", so derive from them.
+            return Set(displayedAssets.flatMap { mappedActors(for: $0) }).sorted()
+        }
+        // A tag page is DECOUPLED from the video list. Which actors carry a tag
+        // is a property of the actors, not of which of their videos happen to
+        // pass a video filter — a review-status filter used to empty this tab
+        // entirely, which read as "no actors have this tag".
+        //
+        // Actor-side filtering is a separate axis and belongs to the actor
+        // filter model, not to this one.
+        return entityProfiles.compactMap { key, profile -> String? in
+            guard key.hasPrefix("actor:"), profile.tags.contains(name) else { return nil }
+            return String(key.dropFirst(6))
+        }.sorted()
     }
 
     private func matchingActorsCount(for actor: String) -> Int {

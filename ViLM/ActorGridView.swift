@@ -28,6 +28,19 @@ struct ActorGridView: View {
     // (see deriveActorProfiles()), rather than on every one of the many
     // dictionary lookups below.
     @State private var actorProfiles: [String: EntityProfile] = [:]
+
+    // Video counts per actor, derived once per data change for the same reason
+    // actorProfiles is: they are read from the sort comparator, from the
+    // min/max video-count filter, and from every card that renders.
+    //
+    // Computing them on demand was O(actors x assets): the comparator called
+    // assetsCount twice per comparison, so sorting 1,335 actors performed
+    // ~27,800 calls, each scanning 1,346 assets and allocating a Set per asset
+    // -- roughly 37 MILLION asset inspections, synchronously on the main
+    // thread inside a SwiftUI computed property. That is why the grid could
+    // not be scrolled while sorting, and why it could be killed under memory
+    // pressure. One pass over the assets replaces all of it.
+    @State private var actorVideoCounts: [String: Int] = [:]
     @State private var alphaFilter: Character? = nil
     @State private var hasLoadedDefaults = false
     @Environment(\.usesStackNavigation) private var usesStackNavigation
@@ -588,17 +601,24 @@ struct ActorGridView: View {
 #endif
     }
     
+    /// O(1). See `deriveActorVideoCounts()` for why this is a lookup rather
+    /// than a computation.
     private func assetsCount(for actor: String) -> Int {
-        let profile = actorProfiles["actor:\(actor)"]
-        let akas = Set(profile?.akas ?? [])
-        return assets.filter { asset in
-            if asset.actors.contains(actor) { return true }
-            return !Set(asset.actors).isDisjoint(with: akas)
-        }.count
+        actorVideoCounts[actor] ?? 0
     }
     
     private func deriveActorProfiles() {
         actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
+    }
+
+    /// Rebuilds the counts. The computation itself lives in LibraryCore so it
+    /// can be tested against the per-actor version it replaced (T1) — keeping a
+    /// second copy here would let the two drift.
+    ///
+    /// Reads `entityProfiles` rather than the derived `actorProfiles` so this
+    /// carries no ordering dependency on `deriveActorProfiles()`.
+    private func deriveActorVideoCounts() {
+        actorVideoCounts = ActorVideoCounts.build(assets: assets, profiles: entityProfiles)
     }
     
     // MARK: - CSV Logic
