@@ -376,3 +376,48 @@ final class EnrichmentGalleryTests: XCTestCase {
         XCTAssertEqual(result.galleryUrls, ["https://x/a.jpg"])
     }
 }
+
+// MARK: - Country carries a display flag; comparison must ignore it
+
+final class EnrichmentCountryComparisonTests: XCTestCase {
+
+    private func review(_ stored: String?, _ proposed: String?) -> ProposedChange? {
+        var p = ActorMetadataProposal()
+        p.countryOfOrigin = .init(proposed, sourceNote: "Src")
+        let profile = EntityProfile(id: "actor:A", countryOfOrigin: stored)
+        return ActorEnrichment.review(profile: profile, proposal: p, sourceName: "Src")
+            .changes.first { $0.id == ActorEnrichment.Field.countryOfOrigin }
+    }
+
+    func testAStoredFlagDoesNotMakeAnIdenticalCountryLookLikeAConflict() {
+        // Reported: every enrichment proposed replacing "US 🇺🇸" with "US".
+        // A conflict on every actor is noise that teaches people to skim.
+        XCTAssertEqual(review("US 🇺🇸", "US")?.kind, .unchanged)
+        XCTAssertEqual(review("Russia 🇷🇺", "Russia")?.kind, .unchanged)
+        XCTAssertEqual(review("Czech Republic 🇨🇿", "Czech Republic")?.kind, .unchanged)
+    }
+
+    func testARealCountryDisagreementIsStillAConflict() {
+        // The fix must not make every country look identical.
+        XCTAssertEqual(review("US 🇺🇸", "Hungary")?.kind, .conflict)
+        XCTAssertEqual(review("UK 🇬🇧", "US")?.kind, .conflict)
+    }
+
+    func testABlankCountryIsStillAFill() {
+        XCTAssertEqual(review(nil, "Hungary")?.kind, .fill)
+    }
+
+    func testComparisonIsCaseInsensitive() {
+        XCTAssertEqual(review("hungary", "Hungary")?.kind, .unchanged)
+    }
+
+    func testTheSourceSayingNothingIsNeverAChange() {
+        XCTAssertEqual(review("US 🇺🇸", nil)?.kind, .unchanged)
+    }
+
+    func testTheKeyStripsOnlyDecoration() {
+        XCTAssertEqual(ActorEnrichment.countryKey("US 🇺🇸"), "us")
+        XCTAssertEqual(ActorEnrichment.countryKey("Czech Republic 🇨🇿"), "czech republic")
+        XCTAssertNotEqual(ActorEnrichment.countryKey("US"), ActorEnrichment.countryKey("Hungary"))
+    }
+}

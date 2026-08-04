@@ -489,7 +489,7 @@ struct EntityProfileEditorView: View {
                             }
                         }
                         
-                        let profile = EntityProfile(
+                        var profile = EntityProfile(
                             id: entityId,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
                             photoUrl: finalPhotoUrl.isEmpty ? nil : finalPhotoUrl,
@@ -512,6 +512,20 @@ struct EntityProfileEditorView: View {
                             enrichmentSource: enrichmentSource,
                             enrichmentCheckedAt: enrichmentCheckedAt
                         )
+
+                        // An unresolved lookup verdict is only as good as the
+                        // data it was based on. If the operator supplied an
+                        // alias or a birth date — the things a lookup uses to
+                        // find and disambiguate — the old answer is stale and
+                        // the actor returns to the queue.
+                        //
+                        // Rating, bio and notes changes leave it alone: they
+                        // cannot change what a lookup would find.
+                        let revised = EnrichmentInvalidation.afterManualEdit(
+                            previous: initialProfile ?? profile, edited: profile)
+                        profile.enrichmentState = revised.state
+                        profile.enrichmentSource = revised.source
+                        profile.enrichmentCheckedAt = revised.checkedAt
                         
                         if !finalPhotoUrl.isEmpty {
                             // Re-fetch only when the primary actually changed, so

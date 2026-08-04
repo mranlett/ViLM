@@ -25,7 +25,7 @@ public enum ActorCSV {
     /// 1 Bio           4 Gender      7 CountryOfOrigin   10 Tags
     /// 2 PhotoURL      5 HairColor   8 Rating
     /// ```
-    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart"
+    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt"
 
     /// Rows with fewer cells than this are skipped. Historic guard: a row must at
     /// least carry Name/Bio/PhotoURL/HomePage to be worth merging.
@@ -142,6 +142,13 @@ public enum ActorCSV {
             // empty, and exporting a derived number would turn it into a stored
             // fact on the next import.
             escape(profile?.ageAtCareerStart.map { String($0) } ?? ""),
+            // Enrichment state (schema v18), indices 16-18. The batch path is
+            // the only thing that produces these at scale, and the CSV is its
+            // only channel into the app — without these columns a run's results
+            // stay in a log file.
+            escape(profile?.enrichmentState?.rawValue ?? ""),
+            escape(profile?.enrichmentSource ?? ""),
+            escape(profile?.enrichmentCheckedAt.map(timestamp) ?? ""),
         ]
         return cells.joined(separator: ",") + "\n"
     }
@@ -217,6 +224,33 @@ public enum ActorCSV {
     /// The entity id a row maps to. Column 0 is the identity key — changing it
     /// creates a NEW actor rather than updating the existing one.
     public static func entityId(forName name: String) -> String { "actor:\(name)" }
+
+    // MARK: - Timestamps
+
+    /// ISO 8601 with a UTC offset, so a value means the same thing wherever the
+    /// file is opened. Fixed format rather than a locale-aware one: this is an
+    /// interchange format, not something shown to anyone.
+    /// `nonisolated(unsafe)` because ISO8601DateFormatter is not marked
+    /// Sendable, but Foundation's formatters are documented thread-safe for
+    /// formatting and parsing once configured — and this one is configured once
+    /// and never mutated. Same treatment ThumbnailLoader gives its NSCache.
+    ///
+    /// Shared rather than per-call: this runs once per row, and a 1,335-actor
+    /// export would otherwise build the formatter 1,335 times.
+    nonisolated(unsafe) private static let timestampFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
+    public static func timestamp(_ date: Date) -> String {
+        timestampFormatter.string(from: date)
+    }
+
+    public static func parseTimestamp(_ text: String) -> Date? {
+        timestampFormatter.date(from: text)
+    }
 
     // MARK: - Header validation
 
@@ -329,7 +363,14 @@ public enum ActorCSV {
             // consistent with every other column here. An open span is expressed
             // by never having had an end, not by blanking one out.
             careerEndYear: cell(14).flatMap(Int.init) ?? existing?.careerEndYear,
-            ageAtCareerStart: cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart
+            ageAtCareerStart: cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart,
+            // An unrecognised state decodes as nil rather than failing the row:
+            // a value written by a newer build must not make an actor
+            // unimportable. A blank cell leaves the existing value alone, like
+            // every other column here.
+            enrichmentState: cell(16).flatMap(EnrichmentState.init(rawValue:)) ?? existing?.enrichmentState,
+            enrichmentSource: cell(17) ?? existing?.enrichmentSource,
+            enrichmentCheckedAt: cell(18).flatMap(parseTimestamp) ?? existing?.enrichmentCheckedAt
         )
     }
 }

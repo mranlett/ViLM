@@ -126,7 +126,16 @@ public enum ActorEnrichment {
         scalar(Field.bio, "Bio", current: profile?.bio, proposed: proposal.bio)
         scalar(Field.gender, "Gender", current: profile?.gender, proposed: proposal.gender)
         scalar(Field.hairColor, "Hair Colour", current: profile?.hairColor, proposed: proposal.hairColor)
-        scalar(Field.countryOfOrigin, "Country", current: profile?.countryOfOrigin, proposed: proposal.countryOfOrigin)
+        // Country is compared with its flag stripped. Stored values carry one
+        // ("US 🇺🇸"); a provider proposes a bare name ("US"), so a raw string
+        // comparison reported a conflict on EVERY enrichment — noise that
+        // teaches people to skim past the conflicts that matter.
+        changes.append(makeChange(
+            id: Field.countryOfOrigin, label: "Country",
+            current: normalised(profile?.countryOfOrigin),
+            proposed: normalised(proposal.countryOfOrigin.value),
+            sourceNote: proposal.countryOfOrigin.sourceNote,
+            comparing: countryKey))
         scalar(Field.birthYear, "Birth Year",
                current: profile?.birthYear.map(String.init), proposed: proposal.birthYear)
         scalar(Field.photoUrl, "Photo", current: profile?.photoUrl, proposed: proposal.photoURL)
@@ -224,9 +233,23 @@ public enum ActorEnrichment {
 
     // MARK: - Classification
 
+    /// Comparison key for country: letters and spaces only, case-folded.
+    ///
+    /// Drops the flag emoji the app appends for display, so "US 🇺🇸" and "US"
+    /// are recognised as the same value rather than as a disagreement.
+    static func countryKey(_ text: String) -> String {
+        text.lowercased()
+            .filter { $0.isLetter || $0.isWhitespace }
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// - Parameter comparing: how to decide whether two rendered values mean the
+    ///   same thing. Defaults to exact equality; a field whose stored form
+    ///   carries display decoration supplies its own.
     private static func makeChange(id: String, label: String,
                                    current: String?, proposed: String?,
-                                   sourceNote: String?) -> ProposedChange {
+                                   sourceNote: String?,
+                                   comparing key: (String) -> String = { $0 }) -> ProposedChange {
         let kind: ProposedChange.Kind
         switch (current, proposed) {
         case (_, nil):
@@ -235,7 +258,7 @@ public enum ActorEnrichment {
         case (nil, _):
             kind = .fill
         case let (c?, p?):
-            kind = (c == p) ? .unchanged : .conflict
+            kind = (key(c) == key(p)) ? .unchanged : .conflict
         }
         return ProposedChange(id: id, label: label, current: current,
                               proposed: proposed, kind: kind, sourceNote: sourceNote)

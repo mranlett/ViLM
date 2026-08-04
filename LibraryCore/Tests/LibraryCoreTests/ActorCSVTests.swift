@@ -137,7 +137,8 @@ final class ActorCSVTests: XCTestCase {
         XCTAssertEqual(
             ActorCSV.header,
             "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,"
-            + "BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart"
+            + "BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,"
+            + "EnrichmentState,EnrichmentSource,EnrichmentCheckedAt"
         )
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs", "index 9 is a contract — the importer reads positionally")
@@ -241,7 +242,7 @@ final class ActorCSVTests: XCTestCase {
         cols[9] = "b"
         let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
         XCTAssertEqual(merged?.galleryUrls, ["g1", "g2"], "not in the format, never cleared")
-        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 16, "and no column for it")
+        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 19, "and no column for it")
     }
 
     // MARK: - Career span columns (schema v17)
@@ -250,8 +251,9 @@ final class ActorCSVTests: XCTestCase {
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs")
         XCTAssertEqual(names[10], "Tags")
-        XCTAssertEqual(Array(names.suffix(5)),
-                       ["BirthDate", "CareerSpan", "CareerStart", "CareerEnd", "AgeAtCareerStart"])
+        XCTAssertEqual(Array(names.suffix(8)),
+                       ["BirthDate", "CareerSpan", "CareerStart", "CareerEnd", "AgeAtCareerStart",
+                        "EnrichmentState", "EnrichmentSource", "EnrichmentCheckedAt"])
     }
 
     func testCareerFieldsRoundTripThroughExportAndImport() {
@@ -527,5 +529,76 @@ final class ActorCSVTests: XCTestCase {
         XCTAssertEqual(merged?.birthYear, p.birthYear)
         XCTAssertEqual(merged?.countryOfOrigin, p.countryOfOrigin)
         XCTAssertEqual(merged?.rating, p.rating)
+    }
+}
+
+// MARK: - Enrichment columns (schema v18)
+
+extension ActorCSVTests {
+
+    /// The invariant a silent edit already broke once: the header must name
+    /// exactly as many columns as a row emits, or an export produces a file
+    /// whose own importer cannot read it.
+    func testHeaderNamesExactlyAsManyColumnsAsARowEmits() {
+        let cells = ActorCSV.parse(
+            ActorCSV.row(name: "Jane Doe",
+                         profile: EntityProfile(id: "actor:Jane Doe"),
+                         stripCountry: identity))[0]
+        XCTAssertEqual(cells.count, ActorCSV.header.split(separator: ",").count)
+    }
+
+    func testEnrichmentStateRoundTrips() {
+        let checked = Date(timeIntervalSince1970: 1_800_000_000)
+        let original = EntityProfile(id: "actor:Jane Doe",
+                                     enrichmentState: .ambiguous,
+                                     enrichmentSource: "Some Source",
+                                     enrichmentCheckedAt: checked)
+        let row = ActorCSV.row(name: "Jane Doe", profile: original, stripCountry: identity)
+        let merged = ActorCSV.merge(columns: ActorCSV.parse(row)[0],
+                                    existing: nil, decorateCountry: identity)
+
+        XCTAssertEqual(merged?.enrichmentState, .ambiguous)
+        XCTAssertEqual(merged?.enrichmentSource, "Some Source")
+        XCTAssertEqual(merged?.enrichmentCheckedAt?.timeIntervalSince1970 ?? 0,
+                       checked.timeIntervalSince1970, accuracy: 1)
+    }
+
+    func testAnUnknownStateValueDoesNotMakeARowUnimportable() {
+        // A file written by a newer build must still import here.
+        var cols = Array(repeating: "", count: 19)
+        cols[0] = "Jane Doe"
+        cols[16] = "someFutureState"
+        let merged = ActorCSV.merge(columns: cols, existing: nil, decorateCountry: identity)
+        XCTAssertNotNil(merged, "the row must still import")
+        XCTAssertNil(merged?.enrichmentState)
+    }
+
+    func testBlankEnrichmentCellsNeverClearExistingValues() {
+        let existing = EntityProfile(id: "actor:Jane Doe",
+                                     enrichmentState: .matched, enrichmentSource: "Src",
+                                     enrichmentCheckedAt: Date(timeIntervalSince1970: 5))
+        var cols = Array(repeating: "", count: 19)
+        cols[0] = "Jane Doe"
+        let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
+        XCTAssertEqual(merged?.enrichmentState, .matched)
+        XCTAssertEqual(merged?.enrichmentSource, "Src")
+    }
+
+    func testAPreV18RowStillImports() {
+        // 16 columns, exported before enrichment state existed.
+        var cols = Array(repeating: "", count: 16)
+        cols[0] = "Jane Doe"
+        let existing = EntityProfile(id: "actor:Jane Doe", enrichmentState: .noMatch)
+        let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
+        XCTAssertEqual(merged?.enrichmentState, .noMatch, "untouched, not cleared")
+    }
+
+    func testTimestampsAreUTCAndStable() {
+        // Interchange format: the same instant must serialise identically
+        // wherever the export runs.
+        let d = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertEqual(ActorCSV.timestamp(d), "2027-01-15T08:00:00Z")
+        XCTAssertEqual(ActorCSV.parseTimestamp(ActorCSV.timestamp(d))?.timeIntervalSince1970,
+                       d.timeIntervalSince1970)
     }
 }
