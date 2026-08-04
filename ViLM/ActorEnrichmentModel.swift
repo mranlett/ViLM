@@ -131,13 +131,24 @@ final class ActorEnrichmentModel: ObservableObject {
     /// fields, and the user presses Save. Nothing reaches disk from here.
     func apply() -> EntityProfile? {
         guard let proposal else { return nil }
-        return ActorEnrichment.apply(proposal,
+        var merged = ActorEnrichment.apply(proposal,
                                      to: currentProfile,
                                      entityId: entityId,
                                      accepting: accepted,
                                      acceptingGalleryURLs: galleryCandidates
                                         .map(\.absoluteString)
                                         .filter { acceptedPhotos.contains($0) })
+
+        // Record that a lookup ran and what it concluded (schema v18).
+        // Reaching apply() means the user chose a candidate and accepted at
+        // least one value, so this actor is matched and off the backlog.
+        //
+        // The SOURCE is the provider's own display name, supplied at runtime —
+        // core stores what a plugin handed it and names nothing itself.
+        merged.enrichmentState = .matched
+        merged.enrichmentSource = provider.displayName
+        merged.enrichmentCheckedAt = Date()
+        return merged
     }
 
     func togglePhoto(_ url: URL) {
@@ -152,6 +163,20 @@ final class ActorEnrichmentModel: ObservableObject {
 
     func toggleAllPhotos() {
         acceptedPhotos = allPhotosSelected ? [] : Set(galleryCandidates.map(\.absoluteString))
+    }
+
+    /// The outcome to record when the user closes the sheet WITHOUT applying.
+    ///
+    /// A lookup that found nothing is a result worth keeping — otherwise the
+    /// same actor is re-checked on every run and never leaves the backlog. Nil
+    /// while the flow is still in progress, or when the user simply cancelled.
+    var unappliedOutcome: EnrichmentState? {
+        switch phase {
+        case .noMatches: return .noMatch
+        case .choosing: return .ambiguous   // dismissed at the picker
+        case .nothingToApply: return .matched
+        default: return nil
+        }
     }
 
     func toggle(_ id: String) {

@@ -11,6 +11,27 @@ notion: https://app.notion.com/p/Actor-Tag-Browsing-UX-Corrections-3b1adccaf4288
 
 # Actor & Tag Browsing — UX Corrections
 
+## 📊 Implementation status — updated 2026-08-03
+Traceability: Notion spec → GitHub issue → code → device verification. A row is **Done** only when the Human Operator has confirmed it on a device; "Implemented" means the code exists and the automated tests pass but nobody has run it yet.
+| Item | Issue | State | Evidence |
+| --- | --- | --- | --- |
+| **R1** Sort blocks / crashes | [#18](https://github.com/mranlett/ViLM/issues/18) | 🟡 Implemented | ✅ DONE — operator-verified: "much more rapidly and without locking the UI". 478 tests incl. equivalence with the replaced computation |
+| **R2** Filter panel + age modes | [#19](https://github.com/mranlett/ViLM/issues/19) | ⚪ Not started |  |
+| **R3** Missing-photo badge | [#20](https://github.com/mranlett/ViLM/issues/20) | ⚪ Not started |  |
+| **R4** Starred photo | [#21](https://github.com/mranlett/ViLM/issues/21) | ✅ **Done** | Operator-verified. Three stacked bugs — see below |
+| **R5** Tag card truncation | [#22](https://github.com/mranlett/ViLM/issues/22) | ⚪ Not started | Blocked on measuring the tag vocabulary |
+| **R6** Tag page Actors tab | [#23](https://github.com/mranlett/ViLM/issues/23) | 🟡 Implemented | ✅ DONE — operator-verified. Derivation shared across entity types; only the tag case changed |
+| **R7** Enrichment state (v18) | [#24](https://github.com/mranlett/ViLM/issues/24) | ⚪ Not started |  |
+| *Gallery off-by-one* | [#13](https://github.com/mranlett/ViLM/issues/13) | ✅ **Done** | Operator-verified. Pre-existing issue, folded into this effort |
+| *AppleDouble forks* | [#16](https://github.com/mranlett/ViLM/issues/16) | ✅ **Closed — not a defect** | 2,101 videos scanned, 0 leaked |
+### New, surfaced during implementation
+[**#25**](https://github.com/mranlett/ViLM/issues/25)** — the Actors tab is emptied by a video-only filter.** `matchingActors` derives from the displayed videos, so any filter narrowing the video list also narrows the actor list, including filters that say nothing about actors (review status). On a tag page that is arguably wrong: which actors carry a tag is a property of the actors.
+The harm was not the semantics but the **invisibility** — an empty page was indistinguishable from a broken one, and cost hours of misdiagnosis on R6 including a fix written, blamed and reverted before the active filter was found. Needs a decision: decouple for tag pages, or keep the coupling and explain the empty state. Overlaps R2's filter-panel work.
+### What the completed items actually taught us
+**R4 was three bugs, not one**, each invisible until the previous was fixed: the file never changed (fixed-name cache guard), then the decoded bitmap was stale (path-only cache key), then the file changed too late (a network fetch racing the view). The operator's observation that *previously-used* photos worked while *brand-new* ones did not is what isolated the third — that one was won by `URLCache` luck, not correctness, and was not findable by reading code.
+**R1 was wider than reported.** The expensive computation was also called from the video-count filter and from every card render, so the cost was paid on filtering and scrolling, not only sorting.
+**R6's derivation is shared across every entity type**, as the spec anticipated. For studios, series and actors, deriving actors from videos is genuinely correct — only the tag case was wrong, so the fix is deliberately narrow.
+**#16 was not a defect.** Recorded because a first probe run against a detached volume returned "0 files" and looked like confirmation; the real verification required the volume mounted.
 > ⚠️ **Status: In Review — awaiting Human Operator approval. No code may be written until Status = Approved** (Constitution Art. II).
 Six operator-reported problems in the actor and tag browsing surfaces. Three are **defects** (R1, R4, R6), three are **design work** (R2, R3, R5). They are grouped into one spec because they share two screens and would otherwise be six overlapping edits to the same files.
 ## Intention

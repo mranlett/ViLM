@@ -280,6 +280,19 @@ public class LibraryStore {
             }
         }
 
+        // v18: enrichment state. Additive only, three nullable columns.
+        //
+        // Generic by construction — records that a lookup ran and what it
+        // concluded, never which provider ran it. A second provider reuses
+        // these columns with no migration.
+        migrator.registerMigration("v18") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "enrichment_state", .text)
+                t.add(column: "enrichment_source", .text)
+                t.add(column: "enrichment_checked_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

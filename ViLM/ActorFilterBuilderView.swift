@@ -49,6 +49,23 @@ struct ActorFilterBuilderView: View {
                     Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
                 }
 
+                Section {
+                    Picker("Lookup Result", selection: $criteria.enrichment) {
+                        ForEach(ActorFilterCriteria.EnrichmentFilter.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                } header: {
+                    Text("External Lookup")
+                } footer: {
+                    // A separate axis from the completeness filters above: an
+                    // actor can be fully filled in with an unresolved lookup, or
+                    // sparse and never checked. "Not yet checked" is not a
+                    // failure, which is why it is its own option.
+                    Text("Find actors an external lookup could not resolve. "
+                         + "“Needs attention” covers everything waiting on you.")
+                }
+
                 Section("Minimum Rating") {
                     HStack(spacing: 6) {
                         ForEach(1...5, id: \.self) { star in

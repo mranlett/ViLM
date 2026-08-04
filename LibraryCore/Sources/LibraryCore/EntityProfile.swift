@@ -6,6 +6,38 @@
 import Foundation
 import GRDB
 
+/// What an external metadata lookup concluded about an entity.
+///
+/// Deliberately names NO source. This is core schema and lands in the public
+/// repository; a field or value naming a specific provider would be preserved
+/// forever in migrations and in every backup archive. A second provider must
+/// reuse this type with no schema change — if it cannot, the plugin
+/// abstraction has failed.
+public enum EnrichmentState: String, Codable, Equatable, Sendable, CaseIterable {
+    /// A record was found and its values were applied or offered.
+    case matched
+    /// The source has no record under this name. An alias may still match by hand.
+    case noMatch
+    /// Several equally plausible records. Identity was deliberately not guessed.
+    case ambiguous
+    /// Matched, but something disagreed and a human must settle it.
+    case needsReview
+
+    /// Whether this outcome is waiting on a person.
+    public var needsAttention: Bool {
+        self != .matched
+    }
+
+    public var displayName: String {
+        switch self {
+        case .matched: return "Matched"
+        case .noMatch: return "No match"
+        case .ambiguous: return "Ambiguous"
+        case .needsReview: return "Needs review"
+        }
+    }
+}
+
 public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, PersistableRecord, Sendable {
     public let id: String
     public var bio: String?
@@ -54,6 +86,29 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     /// directly, and because it is a fixed historical fact that cannot go stale.
     /// Prefer `careerStartAge`, which falls back to deriving it.
     public var ageAtCareerStart: Int?
+
+    // MARK: - Enrichment state (schema v18)
+    //
+    // Records THAT an external lookup ran and WHAT it concluded — never which
+    // provider concluded it. See EnrichmentState.
+
+    public var enrichmentState: EnrichmentState?
+
+    /// The provider's display name, supplied at RUNTIME by whichever plugin ran.
+    /// Data, not code: storing a name a plugin handed us is not the repository
+    /// naming a source.
+    public var enrichmentSource: String?
+
+    /// When the lookup ran. `nil` means NEVER ATTEMPTED, which is not the same
+    /// as `noMatch` — conflating them would make every un-enriched entity look
+    /// like a failure.
+    public var enrichmentCheckedAt: Date?
+
+    /// True only when a lookup has run and concluded something needing a person.
+    /// An entity never checked is not "needing attention"; it is unknown.
+    public var needsEnrichmentAttention: Bool {
+        enrichmentState?.needsAttention ?? false
+    }
 
     // MARK: - Derived, never stored
     //
@@ -135,7 +190,10 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentCheckedAt: Date? = nil) {
+        self.enrichmentState = enrichmentState
+        self.enrichmentSource = enrichmentSource
+        self.enrichmentCheckedAt = enrichmentCheckedAt
         self.birthDate = birthDate
         self.careerSpanRaw = careerSpanRaw
         self.careerStartYear = careerStartYear
@@ -175,6 +233,9 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case careerStartYear = "career_start_year"
         case careerEndYear = "career_end_year"
         case ageAtCareerStart = "age_at_career_start"
+        case enrichmentState = "enrichment_state"
+        case enrichmentSource = "enrichment_source"
+        case enrichmentCheckedAt = "enrichment_checked_at"
     }
     
     public init(from decoder: Decoder) throws {
@@ -194,6 +255,12 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.careerStartYear = try container.decodeIfPresent(Int.self, forKey: .careerStartYear)
         self.careerEndYear = try container.decodeIfPresent(Int.self, forKey: .careerEndYear)
         self.ageAtCareerStart = try container.decodeIfPresent(Int.self, forKey: .ageAtCareerStart)
+        // Tolerant: a value written by a newer build must not fail the whole
+        // decode on an older one, and archives predate the column entirely.
+        self.enrichmentState = (try? container.decodeIfPresent(String.self, forKey: .enrichmentState))
+            .flatMap { $0.flatMap(EnrichmentState.init(rawValue:)) }
+        self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
+        self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         
         var decodedTags: [String] = []
         if let tagsArray = try? container.decode([String].self, forKey: .tags) {
@@ -242,6 +309,9 @@ extension EntityProfile {
         container["career_start_year"] = careerStartYear
         container["career_end_year"] = careerEndYear
         container["age_at_career_start"] = ageAtCareerStart
+        container["enrichment_state"] = enrichmentState?.rawValue
+        container["enrichment_source"] = enrichmentSource
+        container["enrichment_checked_at"] = enrichmentCheckedAt
         
         if let data = try? JSONEncoder().encode(tags),
            let string = String(data: data, encoding: .utf8) {

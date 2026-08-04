@@ -26,6 +26,9 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
     // Career span (v17). Without these, syncing two libraries would leave
     // career data behind in whichever one happened to have it.
     case birthDate, careerSpanRaw, careerStartYear, careerEndYear, ageAtCareerStart
+    // Enrichment state (v18). Without these, one library's lookup results never
+    // reach another and the same actors get re-checked.
+    case enrichmentState, enrichmentSource
 
     /// Comma-separated multi-value fields: the data model (and the filter
     /// engine, which splits on commas) already treats these as sets, so a
@@ -48,6 +51,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .careerStartYear: return "Career Start"
         case .careerEndYear: return "Career End"
         case .ageAtCareerStart: return "Age at Career Start"
+        case .enrichmentState: return "Enrichment Result"
+        case .enrichmentSource: return "Enrichment Source"
         }
     }
 
@@ -66,6 +71,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .careerStartYear: raw = profile.careerStartYear.map(String.init)
         case .careerEndYear: raw = profile.careerEndYear.map(String.init)
         case .ageAtCareerStart: raw = profile.ageAtCareerStart.map(String.init)
+        case .enrichmentState: raw = profile.enrichmentState?.rawValue
+        case .enrichmentSource: raw = profile.enrichmentSource
         }
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
@@ -86,6 +93,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .careerStartYear: profile.careerStartYear = value.flatMap(Int.init)
         case .careerEndYear: profile.careerEndYear = value.flatMap(Int.init)
         case .ageAtCareerStart: profile.ageAtCareerStart = value.flatMap(Int.init)
+        case .enrichmentState: profile.enrichmentState = value.flatMap(EnrichmentState.init(rawValue:))
+        case .enrichmentSource: profile.enrichmentSource = value
         }
     }
 }

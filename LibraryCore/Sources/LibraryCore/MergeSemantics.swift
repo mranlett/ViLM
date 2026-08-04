@@ -72,8 +72,24 @@ public enum MergeSemantics {
             careerSpanRaw: coalesce(higher.careerSpanRaw, lower.careerSpanRaw),
             careerStartYear: higher.careerStartYear ?? lower.careerStartYear,
             careerEndYear: higher.careerEndYear ?? lower.careerEndYear,
-            ageAtCareerStart: higher.ageAtCareerStart ?? lower.ageAtCareerStart
+            ageAtCareerStart: higher.ageAtCareerStart ?? lower.ageAtCareerStart,
+            // Enrichment state (v18): the more recent check wins, so the merged
+            // view reflects the latest lookup rather than library precedence.
+            enrichmentState: newerChecked(higher, lower).enrichmentState,
+            enrichmentSource: newerChecked(higher, lower).enrichmentSource,
+            enrichmentCheckedAt: newerChecked(higher, lower).enrichmentCheckedAt
         )
+    }
+
+    /// Whichever profile was enrichment-checked most recently. Falls back to
+    /// `higher` so precedence still decides when neither has been checked.
+    static func newerChecked(_ higher: EntityProfile, _ lower: EntityProfile) -> EntityProfile {
+        switch (higher.enrichmentCheckedAt, lower.enrichmentCheckedAt) {
+        case (nil, nil): return higher
+        case (nil, _): return lower
+        case (_, nil): return higher
+        case let (h?, l?): return h >= l ? higher : lower
+        }
     }
 
     /// Merges a video record from a backup archive (`source`) into the current

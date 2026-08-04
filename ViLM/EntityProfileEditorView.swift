@@ -79,6 +79,13 @@ struct EntityProfileEditorView: View {
     @State private var careerStartYear: Int?
     @State private var careerEndYear: Int?
     @State private var ageAtCareerStart: Int?
+
+    // Enrichment state (v18). No UI — carried so that opening the editor and
+    // pressing Save cannot erase it. This is the site that silently destroyed
+    // v17's career fields for exactly this reason.
+    @State private var enrichmentState: EnrichmentState?
+    @State private var enrichmentSource: String?
+    @State private var enrichmentCheckedAt: Date?
     
     private var filteredTagSuggestions: [String] {
         if newTagValue.isEmpty { return [] }
@@ -121,6 +128,9 @@ struct EntityProfileEditorView: View {
         _careerStartYear = State(initialValue: profile?.careerStartYear)
         _careerEndYear = State(initialValue: profile?.careerEndYear)
         _ageAtCareerStart = State(initialValue: profile?.ageAtCareerStart)
+        _enrichmentState = State(initialValue: profile?.enrichmentState)
+        _enrichmentSource = State(initialValue: profile?.enrichmentSource)
+        _enrichmentCheckedAt = State(initialValue: profile?.enrichmentCheckedAt)
         _tags = State(initialValue: profile?.tags ?? [])
         _akas = State(initialValue: profile?.akas ?? [])
         
@@ -497,7 +507,10 @@ struct EntityProfileEditorView: View {
                             careerSpanRaw: careerSpanRaw,
                             careerStartYear: careerStartYear,
                             careerEndYear: careerEndYear,
-                            ageAtCareerStart: ageAtCareerStart
+                            ageAtCareerStart: ageAtCareerStart,
+                            enrichmentState: enrichmentState,
+                            enrichmentSource: enrichmentSource,
+                            enrichmentCheckedAt: enrichmentCheckedAt
                         )
                         
                         if !finalPhotoUrl.isEmpty {
@@ -619,7 +632,10 @@ struct EntityProfileEditorView: View {
             careerSpanRaw: careerSpanRaw,
             careerStartYear: careerStartYear,
             careerEndYear: careerEndYear,
-            ageAtCareerStart: ageAtCareerStart
+            ageAtCareerStart: ageAtCareerStart,
+            enrichmentState: enrichmentState,
+            enrichmentSource: enrichmentSource,
+            enrichmentCheckedAt: enrichmentCheckedAt
         )
     }
 
@@ -641,6 +657,9 @@ struct EntityProfileEditorView: View {
         careerStartYear = merged.careerStartYear ?? careerStartYear
         careerEndYear = merged.careerEndYear ?? careerEndYear
         ageAtCareerStart = merged.ageAtCareerStart ?? ageAtCareerStart
+        enrichmentState = merged.enrichmentState ?? enrichmentState
+        enrichmentSource = merged.enrichmentSource ?? enrichmentSource
+        enrichmentCheckedAt = merged.enrichmentCheckedAt ?? enrichmentCheckedAt
     }
 
     private func saveTag() {

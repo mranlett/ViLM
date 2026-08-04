@@ -245,6 +245,11 @@ extension LibraryStore {
             // otherwise merging a sparsely-filled actor from one library wipes
             // richer bio data in the other. Tags/AKAs are unioned so neither
             // side loses any; photos are already additive above.
+            // One rule for "which side's enrichment result is current", shared
+            // with the federated merge so the two cannot disagree. With no
+            // existing row both sides are the import, which returns the import.
+            let newerEnrichment = MergeSemantics.newerChecked(imported, existing ?? imported)
+
             let merged = EntityProfile(
                 id: imported.id,
                 bio: MergeSemantics.coalesce(imported.bio, existing?.bio),
@@ -267,7 +272,13 @@ extension LibraryStore {
                 careerSpanRaw: MergeSemantics.coalesce(imported.careerSpanRaw, existing?.careerSpanRaw),
                 careerStartYear: imported.careerStartYear ?? existing?.careerStartYear,
                 careerEndYear: imported.careerEndYear ?? existing?.careerEndYear,
-                ageAtCareerStart: imported.ageAtCareerStart ?? existing?.ageAtCareerStart
+                ageAtCareerStart: imported.ageAtCareerStart ?? existing?.ageAtCareerStart,
+                // Enrichment state (v18). The MORE RECENT check wins rather
+                // than the usual coalesce: this records when a lookup last ran,
+                // so an older result must not mask a newer one.
+                enrichmentState: newerEnrichment.enrichmentState,
+                enrichmentSource: newerEnrichment.enrichmentSource,
+                enrichmentCheckedAt: newerEnrichment.enrichmentCheckedAt
             )
             try saveEntityProfile(merged, in: db)
 

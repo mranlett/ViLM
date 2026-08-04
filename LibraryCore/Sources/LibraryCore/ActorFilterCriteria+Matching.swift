@@ -56,6 +56,10 @@ public extension ActorFilterCriteria {
             guard !hasPhoto || !hasBio || !hasTags else { return false }
         }
 
+        // Enrichment outcome (v18). Separate axis from the completeness filters
+        // above: an actor can be fully filled in with an unresolved lookup.
+        guard enrichment.accepts(profile?.enrichmentState) else { return false }
+
         if !selectedGenders.isEmpty {
             // Case-insensitive on both sides: stored values are lowercased here,
             // so the selected values must be too, or "Male" never equals "male".
