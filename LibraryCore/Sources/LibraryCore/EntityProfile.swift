@@ -237,6 +237,41 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.createdAt = createdAt
     }
     
+    /// The same profile under a new id.
+    ///
+    /// Exists so that renaming enumerates the fields in exactly ONE place. Every
+    /// rename bug this model has had was a second copy of that list drifting
+    /// behind it: first dropped AKAs, then the whole of the career span, then
+    /// enrichment state and links. A caller that writes the list itself will
+    /// eventually be wrong again, and the compiler cannot warn about it because
+    /// every added field has a default.
+    public func renamed(to newId: String) -> EntityProfile {
+        EntityProfile(
+            id: newId,
+            bio: bio,
+            photoUrl: photoUrl,
+            homePage: homePage,
+            gender: gender,
+            hairColor: hairColor,
+            birthYear: birthYear,
+            countryOfOrigin: countryOfOrigin,
+            rating: rating,
+            tags: tags,
+            galleryUrls: galleryUrls,
+            akas: akas,
+            createdAt: createdAt,
+            birthDate: birthDate,
+            careerSpanRaw: careerSpanRaw,
+            careerStartYear: careerStartYear,
+            careerEndYear: careerEndYear,
+            ageAtCareerStart: ageAtCareerStart,
+            enrichmentState: enrichmentState,
+            enrichmentSource: enrichmentSource,
+            enrichmentCheckedAt: enrichmentCheckedAt,
+            links: links
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case bio

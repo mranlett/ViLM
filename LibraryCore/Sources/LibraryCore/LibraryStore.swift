@@ -305,7 +305,42 @@ public class LibraryStore {
             }
         }
 
+        // v20 — deletions recorded as facts.
+        //
+        // Sync unions what each library holds, so an absence is indistinguishable
+        // from a deliberate removal and deleted actors come back on the next
+        // pass. Renames are the usual source: accepting a canonical name is a
+        // delete plus a create, and only the create was ever visible.
+        migrator.registerMigration("v20") { db in
+            try db.create(table: "deleted_entities") { t in
+                t.column("entity_id", .text).primaryKey()
+                t.column("deleted_at", .datetime).notNull()
+                t.column("replaced_by", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
+    }
+
+    // MARK: - Tombstones
+
+    public func fetchTombstones() throws -> [EntityTombstone] {
+        try dbQueue.read { db in try EntityTombstone.fetchAll(db) }
+    }
+
+    func recordTombstone(_ tombstone: EntityTombstone, in db: Database) throws {
+        // A repeated deletion refreshes the timestamp rather than erroring: the
+        // most recent removal is the one that should win against a stale copy.
+        try tombstone.save(db)
+    }
+
+    public func recordTombstone(_ tombstone: EntityTombstone) throws {
+        try dbQueue.write { db in try recordTombstone(tombstone, in: db) }
+    }
+
+    /// Clears a tombstone, for when an entity is deliberately re-created.
+    func clearTombstone(for entityId: String, in db: Database) throws {
+        _ = try EntityTombstone.deleteOne(db, key: entityId)
     }
 
     /// Merges the write-ahead log back into the main database file and truncates
@@ -617,6 +652,9 @@ public class LibraryStore {
     public func deleteEntityProfile(for id: String) throws {
         try dbQueue.write { db in
             _ = try EntityProfile.deleteOne(db, key: id)
+            // Recorded so the removal survives a sync. Without this the other
+            // library simply copies the profile back.
+            try recordTombstone(EntityTombstone(entityId: id), in: db)
         }
     }
 
@@ -762,31 +800,40 @@ public class LibraryStore {
                     dest.tags = (dest.tags + oldProfile.tags.filter { !dest.tags.contains($0) })
                     dest.galleryUrls = (dest.galleryUrls + oldProfile.galleryUrls.filter { !dest.galleryUrls.contains($0) })
                     dest.akas = (dest.akas + oldProfile.akas.filter { !dest.akas.contains($0) })
+                    // Career span (v17), enrichment result (v18) and links
+                    // (v19). Omitting these discarded every enriched field the
+                    // moment two actors were merged by a rename.
+                    dest.birthDate = dest.birthDate ?? oldProfile.birthDate
+                    dest.careerSpanRaw = dest.careerSpanRaw ?? oldProfile.careerSpanRaw
+                    dest.careerStartYear = dest.careerStartYear ?? oldProfile.careerStartYear
+                    dest.careerEndYear = dest.careerEndYear ?? oldProfile.careerEndYear
+                    dest.ageAtCareerStart = dest.ageAtCareerStart ?? oldProfile.ageAtCareerStart
+                    dest.enrichmentState = dest.enrichmentState ?? oldProfile.enrichmentState
+                    dest.enrichmentSource = dest.enrichmentSource ?? oldProfile.enrichmentSource
+                    dest.enrichmentCheckedAt = dest.enrichmentCheckedAt ?? oldProfile.enrichmentCheckedAt
+                    dest.links = EntityLink.merged(dest.links, adding: oldProfile.links)
                     try dest.save(db)
                 } else {
-                    // Safe to rename the profile. Carry every field —
-                    // omitting akas here used to silently drop all of an
-                    // actor's aliases on rename.
-                    let newProfile = EntityProfile(
-                        id: normalizedNew,
-                        bio: oldProfile.bio,
-                        photoUrl: oldProfile.photoUrl,
-                        homePage: oldProfile.homePage,
-                        gender: oldProfile.gender,
-                        hairColor: oldProfile.hairColor,
-                        birthYear: oldProfile.birthYear,
-                        countryOfOrigin: oldProfile.countryOfOrigin,
-                        rating: oldProfile.rating,
-                        tags: oldProfile.tags,
-                        galleryUrls: oldProfile.galleryUrls,
-                        akas: oldProfile.akas,
-                        createdAt: oldProfile.createdAt
-                    )
-                    try newProfile.save(db)
+                    // Safe to rename the profile. `renamed(to:)` owns the field
+                    // list so this site cannot fall behind the model again —
+                    // spelling it out here is what dropped AKAs, then career
+                    // span, then enrichment state and links.
+                    try oldProfile.renamed(to: normalizedNew).save(db)
                 }
 
                 // Old profile must be deleted since the tag is gone
                 _ = try oldProfile.delete(db)
+
+                // A rename is a removal as far as every other library is
+                // concerned. Without this, accepting a canonical name from a
+                // lookup leaves the OLD name alive elsewhere, and the next sync
+                // copies it back — the renamed actor reappears under both names.
+                try recordTombstone(EntityTombstone(entityId: normalizedOld,
+                                                    replacedBy: normalizedNew), in: db)
+                // The destination id is deliberately live now, so any stale
+                // tombstone naming it must go or the sync would delete what was
+                // just created.
+                try clearTombstone(for: normalizedNew, in: db)
             }
         }
     }

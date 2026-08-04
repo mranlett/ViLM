@@ -18,6 +18,7 @@ struct SettingsView: View {
     var onFindDuplicates: (() -> Void)?
     var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
+    var onActorPhotoCleanup: (() -> Void)?
     var onMoveVideos: (() -> Void)?
     var onBackupRestore: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
@@ -121,6 +122,9 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down", action: onImportActorLibrary)
                         .disabled(session.isFederated)
+                    // Photo dedup reads and writes one library's own files, so
+                    // unlike the merge tools it is safe while federated.
+                    toolButton("Remove Duplicate Photos", icon: "photo.stack", action: onActorPhotoCleanup)
                 }
             }
             .navigationTitle("Settings")

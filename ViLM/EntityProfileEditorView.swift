@@ -46,6 +46,9 @@ struct EntityProfileEditorView: View {
     
     @State private var tags: [String] = []
     @State private var akas: [String] = []
+    @State private var links: [EntityLink] = []
+    @State private var newLinkUrl: String = ""
+    @State private var newLinkLabel: String = ""
     @State private var galleryUrls: [String] = []
     @State private var newGalleryUrl: String = ""
     
@@ -106,6 +109,7 @@ struct EntityProfileEditorView: View {
     
     enum Field: Hashable {
         case newGalleryUrl, homePage, gender, hairColor, birthYear, country, bio
+        case newLinkUrl
     }
     @FocusState private var focusedField: Field?
     
@@ -140,6 +144,7 @@ struct EntityProfileEditorView: View {
         _enrichmentCheckedAt = State(initialValue: profile?.enrichmentCheckedAt)
         _tags = State(initialValue: profile?.tags ?? [])
         _akas = State(initialValue: profile?.akas ?? [])
+        _links = State(initialValue: profile?.links ?? [])
         
         var initialGallery = profile?.galleryUrls ?? []
         if let photo = profile?.photoUrl, !photo.isEmpty, !initialGallery.contains(photo) {
@@ -421,6 +426,49 @@ struct EntityProfileEditorView: View {
                     }
                 }
                 
+                Section(header: Text("Links").font(.headline)) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // URL and label are separate fields because the label is
+                        // the part worth reading and the URL is the part that
+                        // has to be exact. An importer fills both; a person
+                        // typing one by hand can leave the label off and get the
+                        // host as a fallback.
+                        // Deliberately the same shape as the Photo Gallery
+                        // adder above: a labelled default-style button plus
+                        // onSubmit. An icon-only .plain button between two
+                        // text fields had no reliable hit area here — the URL
+                        // field expands and starves it.
+                        HStack {
+                            TextField("https://...", text: $newLinkUrl)
+                                .autocorrectionDisabled()
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                #endif
+                                .focused($focusedField, equals: .newLinkUrl)
+                                .submitLabel(.done)
+                                .onSubmit { addLink(); focusedField = .newLinkUrl }
+                            TextField("Label (optional)", text: $newLinkLabel)
+                                .autocorrectionDisabled()
+                                .frame(maxWidth: 160)
+                                .onSubmit { addLink(); focusedField = .newLinkUrl }
+                            Button("Add") { addLink() }
+                                // A bad address stored is worse than one
+                                // refused: it renders as a dead chip with no
+                                // way to tell why.
+                                .disabled(!canAddLink)
+                        }
+
+                        if links.isEmpty {
+                            Text("No links").font(.caption).foregroundColor(.secondary)
+                        } else {
+                            EntityLinksView(links: links, title: nil) { link in
+                                links.removeAll { $0.url == link.url }
+                            }
+                        }
+                    }
+                }
+
                 Section(header: Text("Tags").font(.headline)) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -539,7 +587,8 @@ struct EntityProfileEditorView: View {
                             ageAtCareerStart: ageAtCareerStart,
                             enrichmentState: enrichmentState,
                             enrichmentSource: enrichmentSource,
-                            enrichmentCheckedAt: enrichmentCheckedAt
+                            enrichmentCheckedAt: enrichmentCheckedAt,
+                            links: links
                         )
 
                         // An unresolved lookup verdict is only as good as the
@@ -657,6 +706,42 @@ struct EntityProfileEditorView: View {
             .first
     }
 
+    /// A candidate link built from the two entry fields, or nil when the URL
+    /// is blank or unusable.
+    ///
+    /// Bare hosts are accepted and given a scheme: someone typing an address
+    /// from memory writes `example.com`, and refusing that would be pedantry.
+    private var pendingLink: EntityLink? {
+        var raw = newLinkUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if !raw.lowercased().hasPrefix("http://") && !raw.lowercased().hasPrefix("https://") {
+            raw = "https://" + raw
+        }
+        let link = EntityLink(
+            url: raw,
+            label: newLinkLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        return link.isValid ? link : nil
+    }
+
+    private var canAddLink: Bool { pendingLink != nil }
+
+    private func addLink() {
+        guard let link = pendingLink else { return }
+        // Same URL twice is a no-op rather than a duplicate row. Re-adding an
+        // address with a better label updates the label, which is the only
+        // reason someone would do it deliberately.
+        if let existing = links.firstIndex(where: {
+            $0.url.caseInsensitiveCompare(link.url) == .orderedSame
+        }) {
+            if !link.label.isEmpty { links[existing].label = link.label }
+        } else {
+            links.append(link)
+        }
+        newLinkUrl = ""
+        newLinkLabel = ""
+    }
+
     /// The profile as it stands in the form right now.
     private var editedProfile: EntityProfile {
         EntityProfile(
@@ -680,7 +765,8 @@ struct EntityProfileEditorView: View {
             ageAtCareerStart: ageAtCareerStart,
             enrichmentState: enrichmentState,
             enrichmentSource: enrichmentSource,
-            enrichmentCheckedAt: enrichmentCheckedAt
+            enrichmentCheckedAt: enrichmentCheckedAt,
+            links: links
         )
     }
 
@@ -696,6 +782,10 @@ struct EntityProfileEditorView: View {
         countryOfOrigin = merged.countryOfOrigin ?? countryOfOrigin
         tags = merged.tags
         akas = merged.akas
+        // The merge already unioned these against what the form holds, so
+        // assigning the result is what keeps an accepted "Links" row from
+        // being silently discarded on the way back into the editor.
+        links = merged.links
         galleryUrls = merged.galleryUrls
         birthDate = merged.birthDate ?? birthDate
         careerSpanRaw = merged.careerSpanRaw ?? careerSpanRaw

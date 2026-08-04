@@ -220,14 +220,18 @@ struct ProfileGraphHeaderView: View {
                                 .accessibilityLabel("Career: \(career)")
                         }
 
-                        if let homePage = profile.homePage, let url = URL(string: homePage) {
-                            Link("Visit Website", destination: url)
-                                .font(.callout)
-                        }
                     }
                 }
             }
-            
+
+            // Links get a full-width section of their own rather than a line in
+            // the identity block: a record can carry a dozen of them, and they
+            // need room to wrap. The home page joins them instead of keeping a
+            // separate "Visit Website" line, so there is one place to look.
+            if let profile = entityProfile {
+                EntityLinksView(links: displayLinks(for: profile))
+            }
+
             if let profile = entityProfile, !profile.tags.isEmpty {
                 tagSection(title: "Profile Tags", items: profile.tags, color: .accentColor) { item in
                     .tag(item)
@@ -537,7 +541,38 @@ struct ProfileGraphHeaderView: View {
                 .frame(width: w, height: geo.size.height)
                 .clipped()
                 .contentShape(Rectangle())
+                // Kindle-style edge taps, in addition to swiping.
+                //
+                // Each zone is a quarter of the width, which leaves the middle
+                // half clear. That gap is deliberate: the photo under this
+                // overlay takes a double-tap to reset zoom, and people pinch
+                // and double-tap toward the centre. Full-width zones would
+                // turn every stray double-tap into two page turns.
+                //
+                // Reuses settle(), so a tap and a swipe animate identically.
+                .overlay {
+                    if count > 1 {
+                        HStack(spacing: 0) {
+                            tapZone(step: -1, width: w, label: "Previous photo")
+                            Spacer(minLength: 0)
+                            tapZone(step: 1, width: w, label: "Next photo")
+                        }
+                    }
+                }
             }
+        }
+
+        private func tapZone(step: Int, width w: CGFloat, label: String) -> some View {
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .frame(width: w * 0.25)
+                .onTapGesture {
+                    guard !isSettling else { return }
+                    settle(step: step, width: w)
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(label)
         }
 
         private func wrapped(_ i: Int) -> Int {
@@ -698,6 +733,21 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
+    /// The home page ahead of imported links.
+    ///
+    /// The home page is the one the operator typed, so it leads. It carries an
+    /// explicit label because `displayLabel` would otherwise fall back to the
+    /// bare host, which reads as an accident next to named links.
+    ///
+    /// `EntityLinksView` de-duplicates by URL, so a home page that an importer
+    /// also supplied appears once, under this label.
+    private func displayLinks(for profile: EntityProfile) -> [EntityLink] {
+        let trimmed = profile.homePage?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return profile.links }
+        return [EntityLink(url: trimmed, label: "Home Page")] + profile.links
+    }
+
     private func tagSection(title: String, items: [String], color: Color, isAdditive: Bool = false, itemType: @escaping (String) -> SidebarItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)

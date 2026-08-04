@@ -49,12 +49,29 @@ public struct ActorLibraryExport: Codable, Sendable {
     public let exportedAt: Date
     public let profiles: [EntityProfile]
     public let photos: [ExportedPhoto]
+    /// Entities this library deliberately removed.
+    ///
+    /// Defaulted rather than required so an export written before v20 decodes
+    /// as "no deletions known" instead of failing — and, more importantly, so
+    /// an old file is never read as "everything was deleted".
+    public var tombstones: [EntityTombstone] = []
 
-    public init(formatVersion: Int, exportedAt: Date, profiles: [EntityProfile], photos: [ExportedPhoto]) {
+    public init(formatVersion: Int, exportedAt: Date, profiles: [EntityProfile],
+                photos: [ExportedPhoto], tombstones: [EntityTombstone] = []) {
         self.formatVersion = formatVersion
         self.exportedAt = exportedAt
         self.profiles = profiles
         self.photos = photos
+        self.tombstones = tombstones
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try c.decode(Int.self, forKey: .formatVersion)
+        exportedAt = try c.decode(Date.self, forKey: .exportedAt)
+        profiles = try c.decode([EntityProfile].self, forKey: .profiles)
+        photos = try c.decode([ExportedPhoto].self, forKey: .photos)
+        tombstones = (try? c.decode([EntityTombstone].self, forKey: .tombstones)) ?? []
     }
 }
 
@@ -93,7 +110,18 @@ extension LibraryStore {
     ///
     /// Pass `onlyActorIds` to export just a subset (e.g. the actors a single
     /// moved video references); nil exports every actor.
-    public func exportActorLibrary(onlyActorIds: Set<String>? = nil) throws -> ActorLibraryExport {
+    /// - Parameter includingPhotoData: when false, photo entries carry their
+    ///   content hash but NOT their bytes.
+    ///
+    ///   Planning a sync compares photos by hash and never reads `data`, but a
+    ///   full export materialises every JPEG in the library into memory at
+    ///   once — measured at 2.3 GB across 7,761 files on one real library, and
+    ///   a plan snapshots EVERY library, so two of those were resident
+    ///   simultaneously before the converged export built a third array. That
+    ///   is what crashed the sync screen. Metadata-only snapshots read each
+    ///   file to hash it and then let it go.
+    public func exportActorLibrary(onlyActorIds: Set<String>? = nil,
+                                   includingPhotoData: Bool = true) throws -> ActorLibraryExport {
         var actorProfiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
         if let onlyActorIds {
             actorProfiles = actorProfiles.filter { onlyActorIds.contains($0.id) }
@@ -106,29 +134,56 @@ extension LibraryStore {
 
             let primaryFileName = ProfileImageNaming.primaryFileName(for: profile.id)
             let primaryURL = profilesDir.appendingPathComponent(primaryFileName)
+            var primaryExported = false
             if let data = try? Data(contentsOf: primaryURL) {
                 exportedFileNames.insert(primaryFileName)
+                primaryExported = true
                 photos.append(ExportedPhoto(
                     actorId: profile.id, isPrimary: true, sourceToken: profile.photoUrl,
-                    contentHash: ProfileImageNaming.sha256Hex(data), fileExtension: "jpg", data: data
+                    contentHash: ProfileImageNaming.sha256Hex(data), fileExtension: "jpg",
+                    data: includingPhotoData ? data : Data()
                 ))
             }
 
             for token in profile.galleryUrls {
-                guard Self.isGalleryToken(token, photoUrl: profile.photoUrl) else { continue }
+                // The local sentinel is never portable.
+                guard token != ProfileImageNaming.localPrimaryToken else { continue }
+
+                // The photoUrl token is normally skipped here because the
+                // primary FILE already carried it. When that file is absent it
+                // must NOT be skipped: the image still exists on disk under its
+                // gallery name, and skipping it made the photo invisible to
+                // this library's exports while every other library could see
+                // it. The plan then reported the gap on every pass, the merge
+                // wrote the file again under the same unexportable name, and
+                // the actor could never converge — with no error anywhere.
+                if primaryExported, token == profile.photoUrl { continue }
+
                 let fileName = ProfileImageNaming.galleryFileName(for: profile.id, token: token)
                 guard !exportedFileNames.contains(fileName) else { continue }
                 let fileURL = profilesDir.appendingPathComponent(fileName)
                 guard let data = try? Data(contentsOf: fileURL) else { continue }
                 exportedFileNames.insert(fileName)
                 photos.append(ExportedPhoto(
-                    actorId: profile.id, isPrimary: false, sourceToken: token,
-                    contentHash: ProfileImageNaming.sha256Hex(data), fileExtension: "jpg", data: data
+                    actorId: profile.id,
+                    // Standing in for a missing primary file, so the
+                    // destination can adopt it as one.
+                    isPrimary: !primaryExported && token == profile.photoUrl,
+                    sourceToken: token,
+                    contentHash: ProfileImageNaming.sha256Hex(data), fileExtension: "jpg",
+                    data: includingPhotoData ? data : Data()
                 ))
             }
         }
 
-        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion, exportedAt: Date(), profiles: actorProfiles, photos: photos)
+        // Tombstones are NOT filtered by `onlyActorIds`: a deletion the caller
+        // did not think to ask about is still a deletion, and dropping it here
+        // would let a scoped sync resurrect what a full one removed.
+        let tombstones = (try? fetchTombstones()) ?? []
+
+        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion,
+                                  exportedAt: Date(), profiles: actorProfiles,
+                                  photos: photos, tombstones: tombstones)
     }
 
     /// Computes what an import would do without writing anything.
@@ -186,7 +241,31 @@ extension LibraryStore {
 
         var newActorCount = 0, updatedActorCount = 0, newPhotoCount = 0, duplicatePhotoCount = 0
 
-        for imported in export.profiles {
+        // Deletions the source recorded, applied BEFORE the profile loop so an
+        // incoming record cannot re-create what the same export says was
+        // removed.
+        var deletedByTombstone = Set<String>()
+        for tombstone in export.tombstones {
+            let existing = try EntityProfile.fetchOne(db, key: tombstone.entityId)
+            if TombstoneRules.shouldPropagate(tombstone: tombstone, to: existing) {
+                _ = try EntityProfile.deleteOne(db, key: tombstone.entityId)
+            }
+            // Carried forward whether or not this library held a copy: a third
+            // library must learn of the deletion from this one too.
+            try recordTombstone(tombstone, in: db)
+
+            // Refusing the incoming copy is a SEPARATE question from deleting a
+            // local one. A library that already removed the entity has nothing
+            // to delete, but the converged export still carries the record from
+            // whichever library has yet to catch up — and importing it would
+            // undo the deletion using the very sync meant to carry it.
+            let incoming = export.profiles.first { $0.id == tombstone.entityId }
+            if TombstoneRules.suppressesImport(tombstone: tombstone, incoming: incoming) {
+                deletedByTombstone.insert(tombstone.entityId)
+            }
+        }
+
+        for imported in export.profiles where !deletedByTombstone.contains(imported.id) {
             let existing = existingProfiles[imported.id]
             let existingHashes = existing.map { Self.existingPhotoHashes(for: $0, profilesDir: profilesDir) } ?? []
             let incomingPhotos = photosByActor[imported.id] ?? []
@@ -195,6 +274,10 @@ extension LibraryStore {
             var mergedPhotoUrl = existing?.photoUrl
 
             for photo in incomingPhotos {
+                // A metadata-only export (see `includingPhotoData`) carries
+                // hashes without bytes. Writing one would replace a real photo
+                // with a zero-byte file, so such entries are never applied.
+                guard !photo.data.isEmpty else { continue }
                 if existingHashes.contains(photo.contentHash) {
                     duplicatePhotoCount += 1
                     continue
@@ -208,7 +291,9 @@ extension LibraryStore {
                     try photo.data.write(to: fileURL)
                     mergedPhotoUrl = primaryToken
                     if !mergedGalleryUrls.contains(primaryToken) { mergedGalleryUrls.append(primaryToken) }
-                } else if photo.isPrimary, mergedPhotoUrl == primaryToken {
+                } else if photo.isPrimary, mergedPhotoUrl == primaryToken,
+                          !FileManager.default.fileExists(atPath: profilesDir
+                            .appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id)).path) {
                     // Destination already REFERENCES this photo as its
                     // primary, but the file is missing on disk (token lists
                     // can sync ahead of files — a metadata-only merge, or a
@@ -229,8 +314,45 @@ extension LibraryStore {
                     // file — this exact gap silently skipped every photo copy
                     // when actor records were already identical across
                     // libraries.
-                    let token = photo.sourceToken ?? "imported-photo://\(photo.contentHash)"
-                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                    // `local://primary` names THIS library's own primary slot.
+                    // It is not a portable identity, and storing it as a
+                    // GALLERY token in another library is a trap: the export
+                    // filter deliberately skips that token, so the photo would
+                    // never appear in this library's exports, every future plan
+                    // would see the same gap, and the sync would offer the same
+                    // actors forever without ever converging. Content-address
+                    // it instead, exactly as an untokened photo is handled.
+                    //
+                    // The same applies to a token that collides with THIS
+                    // library's primary: reaching here with such a token means
+                    // the primary file already exists holding different bytes
+                    // (two libraries used one token for two images). Storing
+                    // this photo under that token would make the export skip it
+                    // as "already covered by the primary", and the two hashes
+                    // would never converge in either direction.
+                    var token = photo.sourceToken ?? "imported-photo://\(photo.contentHash)"
+                    if token == ProfileImageNaming.localPrimaryToken || token == mergedPhotoUrl {
+                        token = "imported-photo://\(photo.contentHash)"
+                    }
+                    var fileURL = profilesDir.appendingPathComponent(
+                        ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+
+                    // The gallery filename is derived from the token, so a
+                    // token already holding DIFFERENT bytes here means two
+                    // libraries used one URL for two images. The write below is
+                    // guarded on the file's absence, so without this the
+                    // incoming photo is silently dropped — and since it is
+                    // genuinely absent from this library (checked against
+                    // existingHashes above), the plan asks for it again on
+                    // every pass and never converges.
+                    if FileManager.default.fileExists(atPath: fileURL.path),
+                       let occupying = try? Data(contentsOf: fileURL),
+                       ProfileImageNaming.sha256Hex(occupying) != photo.contentHash {
+                        token = "imported-photo://\(photo.contentHash)"
+                        fileURL = profilesDir.appendingPathComponent(
+                            ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                    }
+
                     if !FileManager.default.fileExists(atPath: fileURL.path) {
                         try photo.data.write(to: fileURL)
                     }
@@ -248,6 +370,14 @@ extension LibraryStore {
             // One rule for "which side's enrichment result is current", shared
             // with the federated merge so the two cannot disagree. With no
             // existing row both sides are the import, which returns the import.
+            // Repair for libraries already carrying the bad token from earlier
+            // merges: a gallery entry of `local://primary` is only meaningful
+            // when this profile's primary IS the local one. Otherwise it is
+            // unresolvable — the export skips it and the gallery shows a hole.
+            if mergedPhotoUrl != ProfileImageNaming.localPrimaryToken {
+                mergedGalleryUrls.removeAll { $0 == ProfileImageNaming.localPrimaryToken }
+            }
+
             let newerEnrichment = MergeSemantics.newerChecked(imported, existing ?? imported)
 
             let merged = EntityProfile(
@@ -294,9 +424,11 @@ extension LibraryStore {
         )
     }
 
-    private static func isGalleryToken(_ token: String, photoUrl: String?) -> Bool {
-        token != photoUrl && token != ProfileImageNaming.localPrimaryToken
-    }
+    // isGalleryToken was removed. Its rule — "skip the token that equals
+    // photoUrl" — was correct only when a primary FILE existed to carry that
+    // token's image, and it was applied unconditionally. Where the file was
+    // absent the photo became unexportable, and the sync could never converge.
+    // Both call sites now decide with the file's presence in hand.
 
     // coalesce/union moved to the shared `MergeSemantics` (reused by the
     // full-library restore-over-existing merge).
@@ -307,12 +439,19 @@ extension LibraryStore {
         var hashes = Set<String>()
 
         let primaryURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: profile.id))
+        var primaryFound = false
         if let data = try? Data(contentsOf: primaryURL) {
             hashes.insert(ProfileImageNaming.sha256Hex(data))
+            primaryFound = true
         }
 
         for token in profile.galleryUrls {
-            guard isGalleryToken(token, photoUrl: profile.photoUrl) else { continue }
+            guard token != ProfileImageNaming.localPrimaryToken else { continue }
+            // Mirrors the export rule: with no primary file, the photoUrl
+            // token's image lives under its gallery name and is a real file
+            // this library holds. Missing it here would make an import treat an
+            // already-present photo as new.
+            if primaryFound, token == profile.photoUrl { continue }
             let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.galleryFileName(for: profile.id, token: token))
             if let data = try? Data(contentsOf: fileURL) {
                 hashes.insert(ProfileImageNaming.sha256Hex(data))

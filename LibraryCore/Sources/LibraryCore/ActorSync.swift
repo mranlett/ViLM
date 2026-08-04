@@ -12,7 +12,10 @@
 // conflict the user chose to skip is encoded as nil in the converged record —
 // which `applyActorMerge` already treats as "keep the destination's value".
 //
-// Sync is additive and convergent only: deletions never propagate.
+// Deletions DO propagate, via tombstones (v20). Sync otherwise compares what
+// each library holds, which cannot distinguish "never had it" from "deleted
+// it" — so a union silently resurrects removed actors, and renames (a delete
+// plus a create) bring the old name back from the other side.
 // See plans/actor-sync.md.
 
 import Foundation
@@ -130,6 +133,36 @@ public struct ActorSyncConflict: Sendable, Equatable {
 
 /// Everything that would change for one actor, across the open libraries.
 public struct ActorSyncPlan: Sendable, Identifiable, Equatable {
+    /// One line naming exactly why this actor is still listed.
+    ///
+    /// Exists because a non-converging sync reports nothing: no error, no
+    /// failure, just the same names returning after every apply. Without this
+    /// the only way to tell a photo gap from a field gap is to read the code
+    /// and guess — which is how two wrong diagnoses got shipped.
+    public func diagnosis(libraryNames: [URL: String] = [:]) -> String {
+        func name(_ url: URL) -> String { libraryNames[url] ?? url.lastPathComponent }
+        var parts: [String] = []
+        if !deletionFrom.isEmpty {
+            return "will be DELETED from [\(deletionFrom.map(name).joined(separator: ", "))]"
+        }
+        if !missingFrom.isEmpty {
+            parts.append("missing from [\(missingFrom.map(name).joined(separator: ", "))]")
+        }
+        if !conflicts.isEmpty {
+            parts.append("conflicts: \(conflicts.map { "\($0.field)" }.joined(separator: ","))")
+        }
+        for (url, n) in blankFills.sorted(by: { name($0.key) < name($1.key) }) where n > 0 {
+            parts.append("\(name(url)) needs \(n) field fill\(n == 1 ? "" : "s")")
+        }
+        for (url, n) in listAdds.sorted(by: { name($0.key) < name($1.key) }) where n > 0 {
+            parts.append("\(name(url)) needs \(n) tag/AKA add\(n == 1 ? "" : "s")")
+        }
+        for (url, n) in photoAdds.sorted(by: { name($0.key) < name($1.key) }) where n > 0 {
+            parts.append("\(name(url)) needs \(n) photo\(n == 1 ? "" : "s")")
+        }
+        return parts.isEmpty ? "no differences" : parts.joined(separator: "; ")
+    }
+
     public var id: String { actorId }
     public let actorId: String
     public var displayName: String {
@@ -138,6 +171,9 @@ public struct ActorSyncPlan: Sendable, Identifiable, Equatable {
 
     /// Libraries that don't have this actor at all (full record + photos copy).
     public let missingFrom: [URL]
+    /// Libraries the actor will be REMOVED from, because some library recorded
+    /// a deliberate deletion that outranks the copy they still hold.
+    public var deletionFrom: [URL] = []
     /// Per existing library: how many blank/subset fields sync would fill.
     public let blankFills: [URL: Int]
     /// Per existing library: how many photos sync would add.
@@ -148,7 +184,8 @@ public struct ActorSyncPlan: Sendable, Identifiable, Equatable {
     public let conflicts: [ActorSyncConflict]
 
     public var needsSync: Bool {
-        !missingFrom.isEmpty || !conflicts.isEmpty
+        !deletionFrom.isEmpty
+            || !missingFrom.isEmpty || !conflicts.isEmpty
             || blankFills.values.contains { $0 > 0 }
             || photoAdds.values.contains { $0 > 0 }
             || listAdds.values.contains { $0 > 0 }
@@ -183,9 +220,58 @@ public enum ActorSync {
 
     /// Gathers a snapshot from disk. Order of snapshots passed to `plan` is
     /// the precedence order (primary first).
+    /// Everything about one actor that a plan compares, per library.
+    ///
+    /// Printed for actors that survive an apply. A stuck actor means some value
+    /// differs that the merge is not writing, and the fastest way to find it is
+    /// to see both sides side by side rather than to reason about the merge.
+    public static func diagnosticDump(actorId: String, snapshots: [LibrarySnapshot]) -> String {
+        var out = "  ── \(actorId)\n"
+        for snap in snapshots {
+            let label = snap.url.lastPathComponent
+            guard let profile = snap.export.profiles.first(where: { $0.id == actorId }) else {
+                out += "     [\(label)] ABSENT\n"
+                continue
+            }
+            out += "     [\(label)] primary=\(profile.photoUrl ?? "nil")\n"
+            out += "     [\(label)] gallery=\(profile.galleryUrls)\n"
+            out += "     [\(label)] state=\(profile.enrichmentState?.rawValue ?? "nil")"
+                + " checked=\(profile.enrichmentCheckedAt.map { "\($0.timeIntervalSince1970)" } ?? "nil")\n"
+            out += "     [\(label)] tags=\(profile.tags.count) akas=\(profile.akas.count)"
+                + " links=\(profile.links.count)\n"
+            let photos = snap.export.photos.filter { $0.actorId == actorId }
+            if photos.isEmpty {
+                out += "     [\(label)] photos: none exported\n"
+            }
+            for photo in photos {
+                out += "     [\(label)] photo hash=\(photo.contentHash.prefix(10))"
+                    + " primary=\(photo.isPrimary) token=\(photo.sourceToken ?? "nil")\n"
+            }
+        }
+        return out
+    }
+
+    /// Metadata plus photo HASHES — deliberately not photo bytes.
+    ///
+    /// Planning compares photos by content hash and never reads `data`. Loading
+    /// the bytes made a snapshot cost as much as the library's entire photo
+    /// store, and a plan holds one snapshot per library for as long as the
+    /// screen is open.
     public static func snapshot(of libraryURL: URL) throws -> LibrarySnapshot {
         LibrarySnapshot(url: libraryURL,
-                        export: try LibraryStore(at: libraryURL).exportActorLibrary())
+                        export: try LibraryStore(at: libraryURL)
+                            .exportActorLibrary(includingPhotoData: false))
+    }
+
+    /// A snapshot carrying real photo bytes for a bounded set of actors.
+    ///
+    /// Used at apply time, one batch at a time, so peak memory follows the
+    /// batch size rather than the size of the library.
+    public static func photoBearingSnapshot(of libraryURL: URL,
+                                            actorIds: Set<String>) throws -> LibrarySnapshot {
+        LibrarySnapshot(url: libraryURL,
+                        export: try LibraryStore(at: libraryURL)
+                            .exportActorLibrary(onlyActorIds: actorIds, includingPhotoData: true))
     }
 
     // MARK: Planning (pure)
@@ -213,6 +299,16 @@ public enum ActorSync {
             }
         }
 
+        // Newest deletion per entity across every library. A deletion recorded
+        // anywhere is a fact about the entity, not about that one library.
+        var newestTombstone: [String: EntityTombstone] = [:]
+        for snap in snapshots {
+            for stone in snap.export.tombstones {
+                if let held = newestTombstone[stone.entityId], held.deletedAt >= stone.deletedAt { continue }
+                newestTombstone[stone.entityId] = stone
+            }
+        }
+
         var plans: [ActorSyncPlan] = []
         for actorId in allActorIds {
             // (library index, profile) for libraries that have the actor.
@@ -221,6 +317,23 @@ public enum ActorSync {
             let missingFrom = snapshots.indices
                 .filter { index in !holders.contains { $0.index == index } }
                 .map { snapshots[$0].url }
+
+            // A recorded deletion supersedes copying: there is no point
+            // reconciling fields on a record that is going away, and computing
+            // "needs 1 photo" for it would be actively misleading.
+            if let stone = newestTombstone[actorId] {
+                let removeFrom = holders
+                    .filter { TombstoneRules.shouldPropagate(tombstone: stone, to: $0.profile) }
+                    .map { snapshots[$0.index].url }
+                if !removeFrom.isEmpty {
+                    plans.append(ActorSyncPlan(actorId: actorId,
+                                               missingFrom: [],
+                                               deletionFrom: removeFrom,
+                                               blankFills: [:], photoAdds: [:],
+                                               listAdds: [:], conflicts: []))
+                    continue
+                }
+            }
 
             // Field classification across holders.
             var conflicts: [ActorSyncConflict] = []
@@ -320,7 +433,19 @@ public enum ActorSync {
                 tags: orderedUnion(holders.map { $0.profile.tags }),
                 galleryUrls: orderedUnion(holders.map { $0.profile.galleryUrls }),
                 akas: orderedUnion(holders.map { $0.profile.akas }),
-                createdAt: holders.compactMap { $0.profile.createdAt }.min())
+                createdAt: holders.compactMap { $0.profile.createdAt }.min(),
+                // enrichmentCheckedAt is set AFTER the field loop, once the
+                // enrichment result is known — it has to agree with the state
+                // it timestamps. See the note below.
+                //
+                // Not an ActorSyncField: a timestamp has no meaningful "keep
+                // both", and asking a person to resolve one would be noise.
+                // Links union like tags and AKAs rather than conflicting: two
+                // libraries holding different links for one actor both hold
+                // true facts, and the union is what the user wants.
+                links: holders.reduce(into: [EntityLink]()) { union, holder in
+                    union = EntityLink.merged(union, adding: holder.profile.links)
+                })
 
             let conflictFields = Set(conflictedFields(holders: holders))
             for field in ActorSyncField.allCases {
@@ -344,6 +469,27 @@ public enum ActorSync {
                                 to: &converged)
                 }
             }
+
+            // The check timestamp must travel WITH the enrichment result it
+            // describes, never independently.
+            //
+            // `MergeSemantics.newerChecked` treats this timestamp as authority
+            // over the whole enrichment triple: the side holding the newer one
+            // supplies state, source AND timestamp wholesale. A converged
+            // profile carrying the newest timestamp but a nil state — which is
+            // what a skipped conflict produces — therefore ERASES a populated
+            // result in every destination, and the next plan sees the same gap
+            // and does it again. That is a sync that never converges.
+            //
+            // So: no result, no timestamp. With a result, take the most recent
+            // check that actually produced that result.
+            converged.enrichmentCheckedAt = converged.enrichmentState.flatMap { state in
+                holders
+                    .filter { $0.profile.enrichmentState == state }
+                    .compactMap { $0.profile.enrichmentCheckedAt }
+                    .max()
+            }
+
             profiles.append(converged)
         }
 
@@ -359,7 +505,19 @@ public enum ActorSync {
             }
         }
 
-        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion, exportedAt: Date(), profiles: profiles, photos: photos)
+        // Every library's deletions travel with the converged record. Without
+        // this the plan can SHOW a deletion but applying would never perform it.
+        var tombstones: [String: EntityTombstone] = [:]
+        for snap in snapshots {
+            for stone in snap.export.tombstones {
+                if let held = tombstones[stone.entityId], held.deletedAt >= stone.deletedAt { continue }
+                tombstones[stone.entityId] = stone
+            }
+        }
+
+        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion,
+                                  exportedAt: Date(), profiles: profiles, photos: photos,
+                                  tombstones: Array(tombstones.values))
     }
 
     /// Applies the converged export to one library — the existing merge

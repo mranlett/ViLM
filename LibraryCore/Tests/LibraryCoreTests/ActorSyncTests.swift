@@ -212,8 +212,17 @@ final class ActorSyncTests: XCTestCase {
         XCTAssertEqual(plans[0].photoAdds[libB], 1)
 
         // …and applying actually lands the FILES on both sides.
+        //
+        // Photo BYTES come from a photo-bearing snapshot scoped to the actors
+        // being synced, mirroring what the sync screen does. Planning
+        // snapshots deliberately carry hashes only — loading every photo in
+        // the library was what exhausted memory and killed the app mid-sync.
+        let photoSnapshots = [
+            try ActorSync.photoBearingSnapshot(of: libA, actorIds: ["actor:jane"]),
+            try ActorSync.photoBearingSnapshot(of: libB, actorIds: ["actor:jane"]),
+        ]
         let export = ActorSync.convergedExport(
-            actorIds: ["actor:jane"], resolutions: [:], snapshots: snapshots)
+            actorIds: ["actor:jane"], resolutions: [:], snapshots: photoSnapshots)
         try ActorSync.apply(export, to: libA)
         try ActorSync.apply(export, to: libB)
 
@@ -267,10 +276,17 @@ final class ActorSyncTests: XCTestCase {
         XCTAssertEqual(Set(plans.map(\.actorId)), ["actor:jane", "actor:bailey"])
         XCTAssertEqual(plans.first { $0.actorId == "actor:jane" }?.conflicts.map(\.field), [.hairColor])
 
+        // Photo bytes are re-read for just these actors; see the note in
+        // testPhotosCopyEvenWhenTokenListsAlreadyMatch.
+        let ids: Set<String> = ["actor:jane", "actor:bailey"]
+        let photoSnapshots = [
+            try ActorSync.photoBearingSnapshot(of: libA, actorIds: ids),
+            try ActorSync.photoBearingSnapshot(of: libB, actorIds: ids),
+        ]
         let export = ActorSync.convergedExport(
-            actorIds: ["actor:jane", "actor:bailey"],
+            actorIds: ids,
             resolutions: ["actor:jane": [.hairColor: .keepBoth]],
-            snapshots: snapshots)
+            snapshots: photoSnapshots)
         try ActorSync.apply(export, to: libA)
         try ActorSync.apply(export, to: libB)
 

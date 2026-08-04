@@ -84,6 +84,7 @@ struct ContentView: View {
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
+    @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingDuplicateDetection = false
     @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
@@ -217,6 +218,7 @@ struct ContentView: View {
                     onFindDuplicates: { isShowingDuplicateDetection = true },
                     onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                     onTagCleanup: { isShowingTagCleanup = true },
+                    onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
                     onBackupRestore: { isShowingLibraryBackup = true },
                     onExportActorLibrary: { isShowingActorLibraryExport = true },
@@ -276,6 +278,13 @@ struct ContentView: View {
                         // scans it (Check for Changes) and flags any missing files.
                         processFolder(at: restoredURL)
                     })
+                }
+            }
+            .sheet(isPresented: $isShowingActorPhotoCleanup) {
+                if let url = selectedLibraryURL {
+                    ActorPhotoCleanupView(libraryURL: url) {
+                        loadEntityProfiles(from: url)
+                    }
                 }
             }
             .sheet(isPresented: $isShowingTagCleanup) {

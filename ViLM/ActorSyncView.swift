@@ -386,8 +386,17 @@ struct ActorSyncView: View {
                                 pickByActor[photo.actorId] = photo
                             }
                         }
+                        let profilesDir = snap.url.appendingPathComponent(".catalog/profiles")
                         for (actorId, photo) in pickByActor {
-                            if let image = Self.decodeThumbnail(photo.data) {
+                            // Decoded straight from the file rather than from
+                            // `photo.data`: planning snapshots carry hashes
+                            // without bytes, so the array is empty here. Going
+                            // via the URL also means only a 160px thumbnail is
+                            // ever resident, never the full JPEG.
+                            let fileName = ProfileImageNaming.fileName(
+                                for: actorId, token: photo.sourceToken, isGallery: !photo.isPrimary)
+                            let fileURL = profilesDir.appendingPathComponent(fileName)
+                            if let image = Self.decodeThumbnail(at: fileURL) {
                                 thumbs[Self.thumbnailKey(actorId, snap.url)] = image
                             }
                         }
@@ -395,6 +404,7 @@ struct ActorSyncView: View {
                     return (snaps, planned, thumbs)
                 }.value
             }
+            Self.logPlan(planned, snapshots: snaps)
             snapshots = snaps
             plans = planned
             sourceThumbnails = thumbs
@@ -407,8 +417,29 @@ struct ActorSyncView: View {
         }
     }
 
-    private nonisolated static func decodeThumbnail(_ data: Data) -> PlatformImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+    /// Prints why each listed actor is listed.
+    ///
+    /// A sync that will not converge reports no error — the same names simply
+    /// come back after every apply. This is the only signal that distinguishes
+    /// a photo gap from a field gap without reading the merge code.
+    nonisolated static func logPlan(_ plans: [ActorSyncPlan],
+                                    snapshots: [ActorSync.LibrarySnapshot],
+                                    phase: String = "PLAN") {
+        print("╔══ SYNC \(phase): \(plans.count) actor(s) differ ══")
+        for plan in plans.prefix(40) {
+            print("║ \(plan.displayName): \(plan.diagnosis())")
+        }
+        if plans.count > 40 { print("║ … \(plans.count - 40) more") }
+        // Full side-by-side for the first few — enough to spot the pattern
+        // without flooding the console on a first-ever sync.
+        for plan in plans.prefix(5) {
+            print(ActorSync.diagnosticDump(actorId: plan.actorId, snapshots: snapshots))
+        }
+        print("╚══════════════════════════════════════")
+    }
+
+    private nonisolated static func decodeThumbnail(at url: URL) -> PlatformImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
@@ -432,10 +463,26 @@ struct ActorSyncView: View {
         do {
             try await ScopedOperation.run(holding: urls) {
                 try await Task.detached(priority: .userInitiated) {
-                    let export = ActorSync.convergedExport(
-                        actorIds: actorIds, resolutions: chosenResolutions, snapshots: snaps)
-                    for url in urls {
-                        try ActorSync.apply(export, to: url)
+                    // Applied in batches, re-reading photo bytes for only the
+                    // actors in each batch.
+                    //
+                    // `snaps` carries hashes but no photo data, so the bytes
+                    // have to be fetched here. Fetching them for every selected
+                    // actor at once is what exhausted memory and killed the app
+                    // mid-sync: one real library holds 2.3 GB of profile
+                    // photos. A batch keeps peak usage flat no matter how many
+                    // actors are selected.
+                    let ordered = Array(actorIds)
+                    for start in stride(from: 0, to: ordered.count, by: 50) {
+                        let ids = Set(ordered[start..<min(start + 50, ordered.count)])
+                        let dataSnaps = try urls.map {
+                            try ActorSync.photoBearingSnapshot(of: $0, actorIds: ids)
+                        }
+                        let export = ActorSync.convergedExport(
+                            actorIds: ids, resolutions: chosenResolutions, snapshots: dataSnaps)
+                        for url in urls {
+                            try ActorSync.apply(export, to: url)
+                        }
                     }
                 }.value
             }
@@ -448,7 +495,11 @@ struct ActorSyncView: View {
             }
             isApplying = false
             summary = lines.joined(separator: " ")
-            // Re-plan so "Review Remaining Differences" shows live state.
+            // Re-plan so "Review Remaining Differences" shows live state. The
+            // PLAN block that follows this line is the one that matters when
+            // actors will not clear: anything still listed here was just
+            // synced and came back.
+            print("══ SYNC APPLIED \(actorIds.count) actor(s) across \(urls.count) libraries — re-planning ══")
             await load()
             isLoading = false
         } catch {

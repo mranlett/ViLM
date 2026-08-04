@@ -59,7 +59,12 @@ public struct EntityLink: Codable, Equatable, Sendable, Identifiable, Hashable {
     /// but must never remove one the operator curated.
     public static func merged(_ existing: [EntityLink], adding incoming: [EntityLink]) -> [EntityLink] {
         var out = existing
-        var index = Dictionary(uniqueKeysWithValues: existing.enumerated().map { ($1.url, $0) })
+        // `uniqueKeysWithValues` would TRAP here: these keys come from stored
+        // data, and a list that reached the database by some other path may
+        // hold the same URL twice. Keeping the first occurrence matches the
+        // de-duplication this function performs anyway.
+        var index = Dictionary(existing.enumerated().map { ($1.url, $0) },
+                               uniquingKeysWith: { first, _ in first })
         for link in incoming where link.isValid {
             if let at = index[link.url] {
                 if out[at].label.isEmpty && !link.label.isEmpty { out[at].label = link.label }
