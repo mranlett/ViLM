@@ -225,6 +225,40 @@ public enum ActorCSV {
     /// creates a NEW actor rather than updating the existing one.
     public static func entityId(forName name: String) -> String { "actor:\(name)" }
 
+    // MARK: - Enrichment cells
+
+    /// Column positions for the v18 enrichment cells. Kept here, beside the
+    /// `merge` that reads them, so a producer and the reader cannot drift.
+    public enum EnrichmentColumn {
+        public static let state = 16
+        public static let source = 17
+        public static let checkedAt = 18
+        static let width = 19
+    }
+
+    /// Returns `columns` with the enrichment cells set.
+    ///
+    /// Pads a short row first: a file exported before v18 is 16 cells wide, and
+    /// writing past the end would otherwise be impossible without silently
+    /// changing every other row's shape.
+    ///
+    /// Passing a `nil` state leaves the row untouched — a request that FAILED is
+    /// not a verdict, and must not be recorded as one.
+    public static func settingEnrichment(in columns: [String],
+                                         state: EnrichmentState?,
+                                         source: String,
+                                         checkedAt: Date) -> [String] {
+        guard let state else { return columns }
+        var out = columns
+        if out.count < EnrichmentColumn.width {
+            out += Array(repeating: "", count: EnrichmentColumn.width - out.count)
+        }
+        out[EnrichmentColumn.state] = state.rawValue
+        out[EnrichmentColumn.source] = source
+        out[EnrichmentColumn.checkedAt] = timestamp(checkedAt)
+        return out
+    }
+
     // MARK: - Timestamps
 
     /// ISO 8601 with a UTC offset, so a value means the same thing wherever the
