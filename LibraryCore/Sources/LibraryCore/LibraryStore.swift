@@ -342,6 +342,66 @@ public class LibraryStore {
             }
         }
 
+        // v24 — the source's own id for a matched VIDEO, and a link to it.
+        //
+        // v23 did this for people. The video half was never done, so a
+        // validated scene match was thrown away and every later run
+        // re-searched by name and re-guessed which record was meant.
+        //
+        // The url is a separate column rather than derived from the id: core
+        // cannot build a link without knowing the source's address, and core
+        // never names a source. The provider supplies both or neither.
+        //
+        // Additive and nullable, so existing rows migrate without
+        // interpretation. Nothing backfills them — an id is written the next
+        // time a match is confirmed, because rediscovering one by name would
+        // be exactly the re-guessing this column exists to eliminate.
+        migrator.registerMigration("v24") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "enrichment_source_id", .text)
+                t.add(column: "enrichment_url", .text)
+            }
+        }
+
+        // v26 — the tag vocabulary: what each tag DESCRIBES.
+        //
+        // A table of its own rather than columns on `entity_profiles`. That
+        // record is at the Swift type-checker's practical limit at 23 stored
+        // properties — adding one field has already broken three construction
+        // sites with an error naming neither the field nor reliably the file —
+        // and a tag needs exactly three things: identity, display name, kind.
+        // Storing it in an actor-shaped record would give every tag a bio, a
+        // birth date and a career span, which is coupling wearing reuse's coat.
+        //
+        // `kind` is NULL for every promoted tag, which reads as "unclassified":
+        // deliberately unusable, so nothing is ever guessed.
+        //
+        // `identity_key` is the case- and diacritic-folded name, computed in
+        // Swift — never with SQLite's `lower()`, which is ASCII-only and would
+        // still admit duplicates for an accented name. It exists because one
+        // tag was stored under two casings and became two things; folding at
+        // the storage layer makes that impossible rather than merely
+        // detectable.
+        //
+        // ⚠️ The KEY is the folded name alone — kind is an attribute, not part
+        // of identity. An earlier draft keyed on (identity_key, kind) so that a
+        // tag could later split into two nodes sharing a name. That is wrong
+        // for a reason a test caught immediately: identity would then depend on
+        // a MUTABLE attribute, so classifying a tag would change its key and
+        // insert a second row instead of updating the first. A tag ended up
+        // both unclassified and classified at once.
+        //
+        // Splitting one name into two kinds therefore needs two genuinely
+        // distinct identities, which is what the opaque-node-id work provides.
+        // It is not needed by any tag measured in the library today.
+        migrator.registerMigration("v26") { db in
+            try db.create(table: "tags") { t in
+                t.primaryKey("identity_key", .text)
+                t.column("display_name", .text).notNull()
+                t.column("kind", .text)
+            }
+        }
+
         // v20 — deletions recorded as facts.
         //
         // Sync unions what each library holds, so an absence is indistinguishable
@@ -650,6 +710,42 @@ public class LibraryStore {
 
     func insertAsset(_ asset: Asset, in db: Database) throws {
         try asset.insert(db)
+    }
+
+    // MARK: - Tag vocabulary
+
+    public func fetchTagVocabulary() throws -> [TagRecord] {
+        try dbQueue.read { db in try TagRecord.fetchAll(db) }
+    }
+
+    /// Saves a tag's kind, keyed by its folded identity.
+    ///
+    /// An upsert rather than an insert: classifying a tag is something an
+    /// operator will do more than once, and the second attempt must correct the
+    /// first rather than colliding with the unique index.
+    public func saveTagRecord(_ record: TagRecord) throws {
+        try dbQueue.write { db in try record.save(db) }
+    }
+
+    /// Brings the vocabulary up to date with what the library actually uses.
+    ///
+    /// Additive and idempotent: a tag already known keeps the kind it was given,
+    /// and only genuinely new tags arrive — unclassified, on the worklist. A
+    /// re-run after classifying must never undo the classification, which is
+    /// what a blind replace would do.
+    ///
+    /// Returns the tags that were newly discovered, so a caller can say "6 new
+    /// tags need classifying" rather than leaving them to be noticed.
+    @discardableResult
+    public func promoteTagVocabulary() throws -> [TagRecord] {
+        let discovered = TagVocabulary.promoting(try fetchAllAssets())
+        let known = Set(try fetchTagVocabulary().map(\.identityKey))
+        let new = discovered.filter { !known.contains($0.identityKey) }
+
+        try dbQueue.write { db in
+            for record in new { try record.insert(db) }
+        }
+        return new
     }
 
     public func fetchAllAssets() throws -> [Asset] {

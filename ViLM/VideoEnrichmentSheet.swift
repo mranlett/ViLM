@@ -44,9 +44,10 @@ struct VideoEnrichmentSheet: View {
                             // A search that found nothing still happened. Losing
                             // that on dismissal means the video is offered as
                             // unchecked forever.
-                            if let (state, source) = model.outcomeToRecord() {
+                            if let outcome = model.outcomeToRecord() {
                                 onApply(VideoEnrichmentReview.recordingOutcome(
-                                    asset, state: state, source: source))
+                                    asset, state: outcome.state, source: outcome.source,
+                                    sourceId: outcome.sourceId))
                             }
                             dismiss()
                         }

@@ -3,7 +3,7 @@
 
 ---
 spec: "File Naming & Metadata Storage Strategy"
-status: Approved
+status: Draft
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf42881d6a344ebf970d6d0b0
@@ -11,311 +11,127 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 
 # File Naming & Metadata Storage Strategy
 
-> ⚠️ **Status: In Review — awaiting Human Operator approval. No code may be written until Status = Approved** (Constitution Art. II).
-Where video metadata should live once the library carries substantially more of it: performers, studio, series/season/episode, episode title, descriptive tags, and release date.
-## The question
-**Human Operator:** *"How should we contemplate renaming all of our files so that they contain all of this information — and is renaming the file the right place to store this much information?"*
-**Answer: no, but part of it belongs there.** The useful distinction is not *how much* metadata a filename can hold. It is *which kind*.
-## Evidence — measured 2026-08-03
-Against a real attached library of **2,101 video files** (after excluding 1,824 macOS `._` AppleDouble resource forks, which are not videos):
+> ⚠️ **Status: Draft — rewritten 2026-08-05 as a spec DERIVED from *****The Library Graph*****, and awaiting re-approval** (Constitution Art. II). The previous version was Approved; it made model decisions locally that now belong to the Epic. Superseded reasoning is preserved under *History* rather than deleted.
+**Parent:** *The Library Graph* (Epic, P0). That spec owns nodes, edges, tag kinds, match durability, provenance and lexicons. **This spec owns exactly one question: what a file is called and where it sits on disk.**
+## What did not change, and is not re-litigated
+These were settled against measured evidence and carry forward untouched.
+### D1 — The database is the source of truth
+Unchanged. Everything here concerns what is *additionally* written to disk.
+### D2 — Filenames carry IDENTITY; the database carries DESCRIPTION
+| Category | Changes? | Examples | In a filename? |
+| --- | --- | --- | --- |
+| **Identity** | rarely — intrinsic to the work | studio, release date, series/season/episode, episode title, performers | **Yes** |
+| **Description** | constantly — the operator's judgements | tags, rating, review status, notes | **No** |
+⚠️ **Today's filenames have this backwards.** They carry tags — the most mutable field in the model — so re-tagging renames a file: a write to a large external volume, a catalogue update that must stay consistent, and an opportunity to orphan fingerprints and thumbnails. Invisible at 10 videos; expensive at 2,101.
+### D3 — Two reasons filenames cannot be the store, independent of length
+**Separator collapse.** The delimiter is `' - '`, and episode titles routinely contain that exact sequence. Only 2 files collide today *because titles are not yet in filenames*; introducing them makes collision ordinary.
+**Illegal characters.** `/` and `:` are not permitted in macOS path components and both occur in real titles. ⭐ **The Epic's path-sanitisation rules (T18b) now own this**, because paths are generated from node names rather than typed.
+### 🚫 A rejected argument, recorded so it is not re-litigated
+*"The metadata will not fit in a filename."* **Measured and wrong** — the projected convention overflows 2 files out of 2,101. Length is not the constraint.
+### Measured evidence — 2026-08-03, 2,101 video files
 | Measure | Result |
 | --- | --- |
 | Filename length, bytes | median **40**, p90 72, p99 108, max 225 |
 | Limit per path component | 255 bytes |
-| Projected growth adding series + `SxxEyy`  • title + ISO date | **+77 bytes** |
+| Growth from adding series + `SxxEyy`  • title + ISO date | **+77 bytes** |
 | Files that would then exceed 255 bytes | **2 of 2,101 (0%)** |
 | Performers per file | median 1, max 10 |
-### ⚠️ A rejected argument, recorded so it is not re-litigated
-"The metadata will not fit in a filename" was the first objection raised and **it is wrong** — measured, the projected convention overflows 2 files out of 2,101. Length is not the constraint. The real arguments are below, and they are stronger.
-### Current convention
-Files follow `Performers - Tags - Studio`, with `,` separating values inside a field:
-| Segments | Count | Share |
-| --- | --- | --- |
-| 2 | 1,126 | 53% |
-| 3 | 797 | 37% |
-| 4 | 148 | 7% |
-| 1 or 5 | 30 | 1% |
-**No release date is present anywhere:** a 4-digit year appears in **5 of 2,101 files (0%)**; ISO and compact date forms appear in **zero**. Release date cannot be recovered by parsing filenames — see the *Actor & Tag Browsing* spec, R2.
-## D1 — The database remains the source of truth
-Unchanged and not in question. Everything below concerns what is *additionally* written to disk for portability and recovery.
-## D2 — Filenames carry IDENTITY; the database carries DESCRIPTION
-The governing distinction:
-| Category | Changes? | Examples | Belongs in a filename? |
-| --- | --- | --- | --- |
-| **Identity** | Rarely — intrinsic to the work | studio, release date, series / season / episode, episode title, performers | **Yes** |
-| **Description** | Constantly — the operator's judgements | descriptive tags, rating, review status, notes | **No** |
-### ⚠️ The current convention has this backwards
-Today's filenames carry **tags** — the single most mutable category in the model. The consequence is that **re-tagging a video renames a file**:
-- a write to a large external volume,
-- a catalog update that must stay consistent,
-- and an opportunity to orphan fingerprints, thumbnails and profile links.
-Renaming is already the operation most likely to orphan data — it is why a global-rename mechanism exists for entity tags at all. Attaching it to the most frequently edited field is the wrong trade. Invisible at 10 videos; expensive at 2,101.
-## D3 — Two reasons filenames cannot be the store, independent of length
-### Separator collapse
-The delimiter is `' - '`, and **episode titles routinely contain that exact sequence**. Only 2 files collide today — precisely because titles are not yet in filenames. Introducing them makes collision ordinary, and parsing becomes guesswork.
-This is the same class of defect as the lossy actor CSV export: a flat delimited string cannot round-trip structured data. Multi-value fields, and the difference between *empty* and *absent*, do not survive it.
-### Illegal and unsafe characters
-`/` and `:` are not permitted in macOS filename components, and both occur in real titles. Encoding a title into a filename therefore **silently mangles the data being preserved**. Other filesystems add their own restrictions, which matters for a library that moves between volumes and devices.
-## D4 — Sidecar files are the portability layer
-The media-library convention (Kodi, Jellyfin, Plex) is a **sidecar** beside each video — `Some Video.nfo` or `Some Video.json`.
-A sidecar provides everything filename-encoding was meant to provide, without any of its costs:
-| Goal | Filename | Sidecar |
-| --- | --- | --- |
-| Readable outside the app | ✅ | ✅ |
-| Survives catalog loss | ✅ | ✅ |
-| Travels with the file | ✅ | ✅ |
-| Structured / multi-value safe | ❌ | ✅ |
-| No length ceiling | ⚠️ | ✅ |
-| No illegal-character mangling | ❌ | ✅ |
-| Editing a tag is cheap | ❌ rename | ✅ small write |
-The app already writes into `.catalog/`, so this extends an existing pattern rather than introducing a concept.
-✅ **Open — sidecar placement.** Beside the video (portable, but writes into the user's media folders) or inside `.catalog/` (tidy, but does not travel if a single file is copied elsewhere). **Needs a decision.**
-  **Decision - sidecar placement is fine. **The intention of the ViLM system is to augment the file with a much richer metadata payload but if the user chooses to disconnect a file from their metadata management system, the file must still stand on its own, which this proposal ensures. The mutable nature of the sidecar’s data is a valid reason to keep that information (such as tags) out of the source file’s file name.**
-**
-✅  **Open — format.** `.nfo` is XML and interoperates with existing media tools; `.json` is simpler and matches the app's own serialisation. Interoperability is only a benefit if another tool will actually read these.
-  **Decision (superseded, retained for history) — .json.** *"There is no need to interact with other tools. This is a personal library, not an interconnected system."*
-**✅ FINAL DECISION — ****`.nfo`****.** Reversed by the Human Operator on review: *"I was only considering .json vs .xml. I prefer .nfo over all."*
-⚠️ **Clarification — ****`.nfo`**** is not a third format.** It **is** XML, carrying an established schema (Kodi / Jellyfin). Choosing it therefore means adopting an existing schema rather than designing one, which is a larger commitment than picking a file extension. See D8.
-## D5 — Proposed convention (SUPERSEDED by D7)
-> ⚠️ **This section assumed ONE convention for the whole library. That assumption is wrong** — the library will hold at least three content classes whose identity fields differ. Retained for history; read **D7** instead.
-Identity only, tags removed, release date added:
-```javascript
-Performers - Studio - YYYY-MM-DD.ext
-Performers - Studio - Series SxxEyy - Episode Title - YYYY-MM-DD.ext
-```
-*(Illustrative only — field order is an open question. Leading with studio or series would group related files together in a directory listing, which may matter more than matching today's habit.)*
-✅  **Open — field order.** Preserve today's performers-first ordering, or reorder for sortability?
-  **Decision - Reorder for sortability**
-✅  **Open — what if the release date is unknown?** It will be, for most files, until video matching lands or the data is entered by hand. Omitting it changes the segment count and therefore the parse. A placeholder keeps the shape stable but puts noise in every name. **Needs a decision, and it blocks the migration.**
-  **Decision** - I don’t think we need to keep a stable shape in the shape of a file name across thousands of files if the date is the final portion of a sequence. Omitting a missing date is better than introducing noisy placeholders.
-## ⚠️ D6 — The migration is the dangerous part and needs its own gate
-Adopting any new convention means renaming ~2,101 files. This is not a side effect of the naming decision; it is the larger and riskier half.
-- Every rename must keep the catalog consistent, or the file is orphaned from its record — losing fingerprints, thumbnails, tags, rating and review status.
-- It must be **dry-run first**, showing every intended rename before any filesystem write.
-- It must be **resumable**. A batch that writes only at the end and cannot resume loses everything on interruption — a failure mode already observed in this project's batch enricher, where an hour of work produced no output.
-- It should be **reversible**, via a recorded mapping of old to new paths.
-### Sequencing
-**Do not rename before release dates exist.** The date is the field that motivates the change; renaming now and again later doubles the risk for no benefit. The order is: release-date capture → convention ratified → dry-run migration → execute.
-## Test strategy (Constitution Art. III)
-- **T1 — Round-trip.** Every field encoded into a filename parses back identically, including titles containing the delimiter, `/`, `:` and non-ASCII characters. This is the test that would have caught the actor CSV defect.
-- **T2 — No orphaning.** After a rename, the asset retains its catalog record, fingerprint, thumbnail, tags, rating and review status. Asserted, not inspected.
-- **T3 — Dry run writes nothing.** A dry run produces a complete plan and zero filesystem mutations.
-- **T4 — Interruption is safe.** A migration killed midway leaves every file either fully renamed and consistent, or untouched. Never half.
-- **T5 — Reversibility.** The recorded mapping restores the original names exactly.
-- **T6 — Sidecar authority.** A sidecar never overrides the database; on disagreement the database wins and the difference is reported.
-- **T7 — Length ceiling.** A file whose encoded name would exceed 255 bytes is truncated deterministically at a field boundary, and still parses.
-- **T8 — Resource forks ignored.** `._` AppleDouble files are never treated as videos — see below.
-## ⚠️ Incidental finding — AppleDouble resource forks
-The attached volume held **3,925 files matching video extensions, of which 1,824 (46%) were ****`._`**** AppleDouble resource forks** — zero-content stubs macOS creates when writing to a non-native filesystem.
-**It is not currently known whether the library scanner excludes them.** If it does not, the library may be counting, fingerprinting and generating thumbnails for ~1,800 phantom files. Cheap to check, and a real defect if present. **Filed here as an observation, not a diagnosis — it must be verified before being acted on.**
-## Open decisions — Human Operator
-1. **Sidecar placement** — beside the video, or inside `.catalog/`?
-2. **Sidecar format** — `.nfo` (interoperable) or `.json` (simpler)?
-3. **Field order** in the new convention.
-4. **Unknown release date** — omit, or placeholder? Blocks the migration.
-5. **Confirm tags leave filenames.** This is the substantive change to today's habit and deserves an explicit yes.
-## Evidence
-Measured 2026-08-03 against an attached library of 2,101 video files. Related: *Actor & Tag Browsing — UX Corrections* (R2, the age filter and its release-date dependency); the plugin spec's D11 (video matching feasibility).
----
-## D7 — The library holds several content classes, and one convention cannot serve them
-**Human Operator, 2026-08-03:** *"This system is currently targeting our [external metadata] connector but will also need to support movies from major studios and personal videos."*
-This supersedes D5. The identity/description principle (D2) holds unchanged — but **which fields constitute identity is different for each kind of content**, so a single filename grammar cannot be correct for all of them.
-| Content class | Identity is… | Notes |
-| --- | --- | --- |
-| **Scene** *(today)* | performers + studio + release date | Often has no title at all. Performer-led. |
-| **Film** | title + release year | Nobody identifies a film by its cast. Title-led; performers are description, not identity. |
-| **Episodic** | series + season + episode (+ title) | `SxxEyy` is the key. Series-led. |
-| **Personal** | date + event/description (+ people) | No studio, no release date. Date-led. |
-Note that **performers move between categories**: identity for a scene, description for a film. A single grammar that treats them one way is wrong for the other half of the library.
-### Consequence 1 — `Asset` needs a content kind
-A `contentKind` field (scene / film / episodic / personal) becomes a prerequisite, because it selects:
-- which naming grammar applies,
-- which fields the editor should show,
-- which metadata provider can enrich it,
-- and whether it may be sent anywhere at all (see Consequence 3).
-❓ **Open — is kind inferred or declared?** Folder layout and filename shape give strong hints, but a wrong guess mis-files and mis-enriches. A declared kind with an inferred default is likely right. **Needs a decision.**
-### Consequence 2 — adopt the established conventions for film and episodic
-Film and TV naming is long settled by Kodi / Jellyfin / Plex, and there is nothing to gain by inventing a dialect:
-```javascript
-Some Film Title (2019).mkv
-Some Series/Season 01/Some Series - S01E02 - Episode Title.mkv
-```
-Adopting them means other tools can read the library without translation, and that any future film/TV metadata provider matches the input format the whole ecosystem already expects.
-**This also settles the sidecar format question left open in D4.** If the library will hold major-studio content, `.nfo` — the format that ecosystem reads — is the better choice over `.json`. Interoperability stops being hypothetical the moment class 2 exists.
-**Scene content keeps its own grammar** because no established convention covers it. That is fine: the grammar is selected per kind, not globally.
-### ⚠️ Consequence 3 — personal video is a privacy boundary, not just another class
-The plugin privacy notice states that installing a provider *"sends video titles and actor names from your library to an external source."* Acceptable for commercial content, where the title is public information.
-**For personal video it is not.** A home-video filename may carry family names, children's names, a location, or an event — and a batch enrichment run over a mixed library would send all of it to a third party. Worse, it would be **useless**: no external database holds a record of your holiday.
-**Therefore:** personal content must be **structurally excluded from every external lookup**, not merely defaulted off. A provider should never receive it, and a batch run must skip it by kind rather than relying on the operator to notice.
-This deserves its own decision in the plugin architecture epic, because it is a constraint on the provider contract rather than on file naming. **The batch enricher currently has no concept of content kind and would happily send everything.**
-### Consequence 4 — the migration gets harder
-D6 already flagged renaming ~2,101 files as the dangerous half. With several grammars, a migration must first *classify* every file, and a misclassification renames a file into the wrong grammar — losing the very identity the rename was meant to encode.
-**The dry run must therefore report the inferred kind per file and allow correction before any write.** Classification is not a detail of the migration; it is a step that needs its own review.
-### Revised open decisions
-1. **Content kind — inferred, declared, or both?**
-2. **Scene grammar** — field order, and what an unknown release date looks like (from D5, still open).
-3. **Confirm ****`.nfo`**** over ****`.json`** now that interoperability is real rather than hypothetical.
-4. **Personal-content exclusion** — settle in the plugin epic: excluded by kind at the provider boundary.
----
-## D8 — Consequences of choosing `.nfo`
-`.nfo` is XML using the Kodi / Jellyfin schema. The choice is therefore not "which extension" but **"conform to someone else's schema, or extend it."** Three consequences follow.
-### 1 — Interoperability returns as a free benefit, not as the justification
-The `.json` decision was made on the reasoning that *"there is no need to interact with other tools."* That reasoning is still sound — nothing here depends on another tool reading the library.
-But conforming to an existing schema means **any tool that reads ****`.nfo`**** can read this library anyway**, at no additional cost. Interoperability is a side effect to be enjoyed, never a constraint the design must satisfy. If a future requirement ever conflicts with Kodi compatibility, ViLM's needs win.
-### 2 — ⚠️ Scene content does not map to any Kodi type
-Kodi defines a small set of root elements: `<movie>`, `<tvshow>`, `<episodedetails>`, `<musicvideo>`. Mapping the library's four content classes:
-| Content class | Kodi type | Fit |
-| --- | --- | --- |
-| Film | `<movie>` | ✅ exact |
-| Episodic | `<tvshow>` / `<episodedetails>` | ✅ exact |
-| Personal | `<movie>` | ⚠️ workable but semantically wrong |
-| **Scene** | *(none)* | ❌ **no type fits** |
-A scene is performer-and-studio-led, frequently has **no title**, and has no counterpart in a schema built for films and television. `<movie>` is the least-bad host, but `<title>` is effectively mandatory there and a scene often has nothing to put in it.
-**Kodi ignores unknown elements**, so custom fields can be added inside a standard root without breaking other readers. That is the escape hatch, and it should be used deliberately rather than by accident.
-❓ **Open — how is scene content represented?** Options: `<movie>` with a synthesised title; `<movie>` with custom child elements; or a ViLM-specific root accepting that other tools will skip it. **Needs a decision.**
-### 3 — ⚠️ The schema cannot represent everything, so the sidecar is a partial record
-Fields ViLM holds with no Kodi equivalent include **review status, video fingerprints, AKA lists, career-span data, gallery photo tokens, and enrichment state**. They can be carried as custom elements, but that is a decision to make explicitly.
-This directly qualifies **D4's claim that a sidecar "survives catalog loss."** It survives *partially*. Restoring from sidecars alone would recover descriptive metadata and lose operational state — fingerprints would need regenerating, review progress would be gone.
-❓ **Open — what is the sidecar actually for?** Two coherent answers, and they imply different work:
-- **Portability** — enough for another tool, or a future ViLM, to understand the file. Standard fields only. Small, simple.
-- **Recovery** — enough to rebuild the catalog. Requires custom elements for everything above, and a corresponding restore path.
-**These are not the same feature.** The spec currently implies both. **Needs a decision.**
-### Revised test
-- **T6 (amended) — Sidecar authority is directional.** When *reconciling* an existing record, the database wins and the difference is reported. On **first import** of a file with a sidecar and no catalog record, the sidecar is the only data and must be accepted. One rule cannot cover both directions.
-- **T9 — Schema conformance.** A generated `.nfo` validates against the Kodi schema for its declared type, and custom elements are ignorable without breaking a standard reader.
-- **T10 — Lossless custom fields.** Every ViLM field with no Kodi equivalent round-trips through a sidecar unchanged, or is explicitly documented as not carried.
----
-## D9 — Field order: group, do not sequence
-**Human Operator, 2026-08-03, clarifying "reorder for sortability":**
-> *Studio → film name (or series / season / episode / episode title) → performers → year. This groups like videos, rather than like time segments from completely different studios.*
-**The intent is GROUPING, not chronological ordering.** An earlier reading of "sortable" as "sorts by date" was wrong and produced a false conflict with the missing-date decision.
-### ✅ This resolves the date question
-The year sits **last**, so omitting it when unknown truncates the name rather than leaving a hole mid-string. No placeholder is needed, and the parse stays unambiguous because every preceding field is present. **D5's date decision and this ordering are consistent.**
-### ⚠️ But it conflicts with D7's adoption of Kodi conventions
-D7 Consequence 2 proposed adopting the established film and TV filename conventions:
-```javascript
-Some Film Title (2019).mkv
-Some Series/Season 01/Some Series - S01E02 - Episode Title.mkv
-```
-Neither is studio-first. A universal `Studio - …` prefix **breaks both**. The two decisions cannot both apply to films and episodes.
-❓ **Open — is studio-first universal, or scene-only?** Grouping by studio is exactly right for scene content, where studio *is* the organising principle. It is unusual for films, which the world groups by title or franchise. **Since D7 already establishes that grammar is chosen per content class, field order should be too.** Needs confirmation.
-### ⚠️ "Performers" in a film filename is unstable
-The proposed order includes performers for every class. For a scene, with a median of 1 performer, that is identity. **A film has a cast of dozens** — including "the actor" means choosing one, and any rule for choosing (first billed? alphabetical?) is arbitrary and changes as cast data is enriched, which would trigger a rename.
-D7 already established that **performers are identity for scenes and description for films.** Field order should respect that: performers belong in a scene filename and in a film's *sidecar*, not in a film's name.
-### 💡 Grouping is a directory concern, not a filename concern
-A filename prefix groups items only in a flat listing, and only while the sort is by name. **Directories group robustly** — in every tool, under every sort, at every level:
-```javascript
-Studio Name/
-  Studio Name - Performers - 2019-04-12.mp4
-Series Name/
-  Season 01/
-    Series Name - S01E02 - Episode Title.mkv
-```
-This is why Kodi and Plex use folder hierarchy rather than long prefixed names. It also **shortens filenames**, which eases the 255-byte ceiling and improves readability in the app's own UI — where the *Tag & Actor Browsing* spec's R5 already documents long text overflowing its container.
-❓ **Open — should grouping move to directory structure instead of filename prefixes?** This would substantially change the migration: it moves files between folders as well as renaming them, which is a larger and riskier operation, but produces grouping that actually survives contact with other tools. **Needs a decision, and it materially affects D6's migration design.**
----
-## D10 — The sidecar is for PORTABILITY, not recovery
-**Human Operator, 2026-08-03:** *"Sidecar is for portability, not for recovery. I assume we have all of the information in the database and backup and restore is from the database itself, not from 10,000 files."*
-**✅ The assumption is correct, verified in code.** `LibraryBackupService` snapshots `catalog.sqlite` into a compressed `.vilmbackup` archive together with the rest of `.catalog` (profile and marker images), excluding only the WAL and shm sidecars, and `restoreIntoEmpty(archiveURL:targetLibraryURL:)` restores it. Recovery is already solved, from one file rather than ten thousand.
-### What this settles
-| Question | Answer |
+| Files carrying a 4-digit year | **5 of 2,101** — release date is unrecoverable from filenames |
+| Files with a series name / season+episode | **5% / 4%** |
+*(AppleDouble note: 1,824 **`._`** resource forks were excluded. The scanner already skips them — **`LibraryScanner`** passes **`.skipsHiddenFiles`** and every such name begins with **`.`** — so the spec's original open question is answered, and T8 is satisfied by existing behaviour.)*
+### D14 — Delimiters, measured on the actual volume
+The library volume is **ExFAT**, chosen so it reads on macOS and Windows. `/` is rejected by macOS itself; Windows forbids `| < > : " / \ ? *`. A pipe would be created happily by macOS and become inaccessible the moment the drive moved — silent until it matters.
+| Role | Character |
 | --- | --- |
-| Custom `.nfo` elements for fingerprints, review status, AKAs, enrichment state | **Not required.** Standard schema fields only. |
-| **T10** (lossless custom-field round-trip) | **Withdrawn.** Replaced by documenting what a sidecar deliberately does not carry. |
-| **D4's "survives catalog loss ✅"** for sidecars | ⚠️ **Corrected — no longer a goal.** That row overstated the sidecar's job; `.vilmbackup` owns recovery. |
-| Scope of the sidecar | Small, standard, and cheap to write. |
-### Embedded container metadata — rejected
-Writing metadata inside the MP4/MKV container was raised as an alternative that travels with a bare file copy. **Rejected:** it requires rewriting video files to change a field, risks corrupting large media for a metadata edit, and its only advantage over a sidecar — surviving a copy that omits the sidecar — matters little once recovery is owned by `.vilmbackup`. Recorded so it is not revisited.
-### 💡 Consequence — the sidecar is now off the critical path
-Following the chain honestly:
-- Recovery is handled by `.vilmbackup`.
-- Interoperability was explicitly rejected as a driver (*"this is a personal library, not an interconnected system"*).
-- No tool in the operator's workflow reads `.nfo` today.
-**So the sidecar currently has no consumer.** That does not make it wrong — it is cheap insurance, and a future ViLM or a future tool may read it. But it does mean **nothing else depends on it**, and it should therefore be sequenced last.
-The valuable, urgent work in this spec is the **naming convention and the migration**. Those unblock release-date capture and the age-at-filming filter. The sidecar can ship afterwards without holding anything up.
-❓ **Open — should the sidecar be deferred to a follow-up spec entirely?** Keeping it here risks its open questions (scene representation, schema conformance) blocking a naming decision that does not depend on them. **Recommended: yes, split it out.**
-### ⚠️ Still unresolved — plaintext sidecars beside personal video
-Portability-only does **not** dissolve the privacy concern raised in D7 Consequence 3. An `.nfo` beside a home video places names, locations and event descriptions **in plaintext, outside the app, on removable media** — readable by anything that mounts the volume.
-The app's own privacy posture treats personal content as a boundary. Writing a sidecar for it works against that, and the sidecar's benefit for personal content is minimal anyway: no external tool is going to enrich a family video.
-❓ **Open — suppress sidecars for ****`contentKind == personal`****?** **Recommended: yes.** Needs a decision.
----
-## D11 — Open standards win where they exist; ViLM defines a grammar only where none does
-**Human Operator, 2026-08-03:** *"D7's adoption of existing Kodi conventions trumps my plan to put studio first. Adopt the open standards."*
-This resolves the conflict recorded in **D9**. Studio-first is **superseded for film and episodic content** and **retained for scenes**, where no competing standard exists.
-### The convention, per content class
+| Field separator | `' - '` |
+| Multi-value joiner (performers) | `', '` |
+💡 **No delimiter migration is needed.** What changes is field *content* and *directory structure*, so a partially-migrated library stays parseable under both old and new rules.
+## D11 / D12 — The conventions, per content class
+Open standards win where they exist; ViLM defines a grammar only where none does. The on-disk layout is a **machine-facing contract**, not a browsing surface — discovery and filtering are the app's job.
 | Class | Convention | Source |
 | --- | --- | --- |
 | **Film** | `Film Title (2019)/Film Title (2019).mkv` | Kodi / Plex |
 | **Episodic** | `Series Name/Season 01/Series Name - S01E02 - Episode Title.mkv` | Kodi / Plex |
-| **Personal** | `Event or Description (2019).mkv` | Kodi `<movie>` shape, least-bad fit |
-| **Scene** | `Studio/Studio - Performers - YYYY-MM-DD.ext` | **ViLM-defined** — no standard exists |
-Studio-first survives exactly where it was strongest and nothing competes with it.
-### ✅ This also answers the directory question from D9
-D9 asked whether grouping should move from filename prefixes to directory structure. **The standards already answer it:** Kodi's TV convention *is* directory-based (`Series/Season NN/`), and its film convention commonly uses a per-film folder. Adopting the standards adopts the hierarchy.
-Applying the same shape to scenes gives `Studio/` as the grouping folder, which delivers the operator's stated goal — *"groups like videos, rather than like time segments from completely different studios"* — more robustly than a filename prefix, because a folder groups under **every** sort in **every** tool, not only when sorting by name.
-It also **shortens filenames**, easing both the 255-byte ceiling and the text-overflow problem the *Actor & Tag Browsing* spec documents at R5.
-### ✅ Performers resolved as a side effect
-D9 flagged that including performers in a film filename is unstable — a cast of dozens, no principled way to choose one, and any choice would shift as enrichment fills in cast data, triggering renames.
-**The standards do not include performers for film or episodic content.** They appear only in the scene grammar, where a median of one performer genuinely is the identity. This matches D7's principle exactly: performers are identity for scenes, description for films.
-### ⚠️ Consequence — the migration now moves files, not just names
-D6 was written assuming renames in place. Adopting directory-based conventions means the migration **relocates files between folders as well as renaming them**. That is materially riskier:
-- a partially-completed move leaves files split across two layouts,
-- moves across filesystem boundaries are copy-then-delete rather than atomic,
-- and the catalog must track the new path for every asset.
-**D6's requirements — dry-run, resumable, reversible — become mandatory rather than advisable.** The reversibility mapping must record both the old and new *full paths*, not just the names.
-### Remaining question
-❓ **Scene grammar details.** The Kodi conventions are fully specified; ViLM's scene grammar is not. Still to settle: the delimiter (given D3's separator-collapse problem), how multiple performers are joined, and whether the studio is repeated in the filename when it is already the folder name. **Needs a decision, but it is small and blocks nothing else.**
----
-## D12 — On-disk layout serves machines; the UI serves the human
-**Human Operator, 2026-08-03:** *"Leverage our rich metadata to actually implement the directory structures recommended by Kodi and Plex. The user experience is not the file list in Finder, it's in the rich UI we're building in ViLM."*
-**✅ Decided.** The on-disk layout is a machine-facing contract, not a browsing surface. It is optimised for standards conformance and unambiguous parsing; discovery, filtering and grouping happen in the app. This removes any obligation to make the folder tree pleasant to navigate by hand and settles D9's directory question in favour of full Kodi/Plex hierarchy.
-**Note the reinforcing consequence:** because the layout is machine-facing, the app's own metadata is what *generates* it. The directory structure becomes an output of the database rather than a thing maintained by hand — which is only possible because D1 keeps the database authoritative.
-## D13 — Sidecars are suppressed for personal content
-**✅ Decided.** No `.nfo` is written for `contentKind == personal`.
-Consistent with D7 Consequence 3: a plaintext sidecar beside a home video would place names, locations and event descriptions outside the app on removable media, readable by anything that mounts the volume. The benefit was minimal anyway — no external tool is going to enrich a family video, and per D10 recovery is owned by `.vilmbackup` regardless.
-## D14 — ⚠️ Scene delimiter: the pipe does not survive the drive it lives on
-**Human Operator:** *"Pipe delimiter has already been adopted."*
-True for the **actor CSV**, where `|` joins multi-value fields inside a cell. **That choice does not transfer to filenames, and adopting it would break this library.**
-### Measured, on the actual volume
-| Check | Result |  |
-| --- | --- | --- |
-| Library volume filesystem | **ExFAT** |  |
-| `\ | ` accepted by macOS on that volume | ✅ yes |
-| `\ | ` legal on Windows / NTFS / SMB | ❌ **no** |
-ExFAT is the filesystem chosen precisely *because* it is readable by both macOS and Windows. Using a character Windows forbids on a volume formatted for Windows compatibility defeats the reason the volume is ExFAT.
-The failure mode is the bad kind: macOS's ExFAT driver does not enforce Windows' naming rules, so the files are created happily and only become inaccessible **when the drive is moved** — silent until it matters.
-Windows forbids: `| < > : " / \ ? *`
-### This contradicts the spec's own reasoning
-**D3** rejected filename encoding partly because illegal characters *"silently mangle the data being preserved."* Adopting `|` reintroduces exactly that defect, in a spec that already argued against it.
-### Why the pipe was right for CSV and is unnecessary here
-In the CSV, the comma is the **column** delimiter, so it cannot also join values inside a cell — the pipe solves a real conflict. **Filenames have no column delimiter, so that conflict does not exist.**
-The existing convention already joins performers with `, ` and separates fields with ` - `, and both are legal on every filesystem in play. D3's separator-collapse objection to ` - ` applies to **episode titles**, which scenes do not have — so within the scene grammar it is safe.
-### Recommendation
+| **Personal** | `Event or Description (2019).mkv` | Kodi `<movie>` shape |
+| **Scene** | `Studio/Studio - Performers - YYYY-MM-DD.ext` | **ViLM-defined** |
+**Performers appear only in the scene grammar.** The standards exclude them from film and episodic, which matches the principle that performers are identity for a scene and description for a film — and settles the instability worry, since a film's cast of dozens has no principled way to pick one.
+### Missing fields omit their delimiter too
+A missing field removes **the segment and its adjacent separator**. A generated name never contains `' -  - '`, never begins or ends with `' - '`, and never carries a dangling `', '` from an empty performer list. Stated because the naive join produces exactly those, and they then fail to parse back — the round-trip F1 exists to catch.
 ```javascript
-Studio/Studio - Performer One, Performer Two - 2019-04-12.ext
+Studio - Alice Example, Bob Example - 2019-04-12.mp4   all present
+Studio - Alice Example, Bob Example.mp4                no date
+Studio - 2019-04-12.mp4                                no performers
 ```
-Keeps today's habit, portable everywhere, and needs no migration of the delimiter itself.
-### ✅ RESOLVED — dash and comma, i.e. no change at all
-**Human Operator:** *"I don't require consistency with the CSV — let's use the right character, and if that character is a dash or a slash, use it."*
-**Slash is not available.** Tested on the library volume: `/` is **rejected by macOS itself**, because it is the path separator and can never appear in a filename component. It is forbidden on Windows too.
-Character legality, measured on the ExFAT library volume:
-| Character | macOS | Windows / SMB |
-| --- | --- | --- |
-| `-` dash | ✅ | ✅ |
-| `,` comma | ✅ | ✅ |
-| `_` underscore | ✅ | ✅ |
-| `\ | ` pipe | ✅ |
-| `/` slash | ❌ **rejected** | ❌ |
-**Decision — the existing delimiters were already correct:**
-| Role | Character |
+**A missing release date truncates the name** rather than leaving a placeholder, because the date is the final segment.
+### Truncation hierarchy when a component exceeds 255 bytes
+Drop order is least-identifying first, and is fixed per class so the result is deterministic:
+| Class | Dropped first | Then | Never dropped |
+| --- | --- | --- | --- |
+| **Scene** | the **studio** — it is already the folder name, so repeating it is the only redundant segment | performers, from the end of the ordering, whole names only | the date |
+| **Episodic** | the episode title | — | series name, `SxxEyy` |
+| **Film** | — | the title truncates at a word boundary | the year |
+| **Personal** | — | the description truncates at a word boundary | the year |
+⚠️ **Performers are dropped whole, never mid-name.** Half a name is a different person, and the parser would read it as one. If a single performer's name alone exceeds the ceiling, the file is **skipped and reported** rather than truncated into something false.
+## What the Epic changes here
+### N1 — Folders come from the verified studio lexicon, not from a string
+A `Studio/` folder is created for a studio **matched to an external source id**. Three dispositions, and a file's location states its processing status:
+| Studio state | On disk |
 | --- | --- |
-| Field separator | `' - '` (space-hyphen-space) |
-| Multi-value joiner (performers) | `', '` (comma-space) |
-```javascript
-Studio/Studio - Performer One, Performer Two - 2019-04-12.ext
-```
-### 💡 Consequence — no delimiter migration is needed
-The delimiters do not change. What changes is **field content** (tags removed, release date added) and **directory structure** (D11/D12). That is a smaller migration than the spec previously implied, and it removes an entire class of risk: no existing filename needs its separators rewritten, so a partially-migrated library remains parseable under both the old and new rules.
----
-*(Superseded question, retained for history:)*
-❓ ~~**Open — confirm the delimiter reversal.**~~ If a pipe is still wanted for consistency with the CSV, that is a defensible choice, but it must be made knowing the drive is ExFAT and the names will not survive a move to Windows. **Needs a decision.**
+| Matched to an external id | its own `Studio Name/` folder |
+| Ruled out (`unmatchable`) | a shared unfiled folder |
+| `contentKind == personal` | a **separate** folder |
+| Not yet processed | stays in the library root |
+⚠️ **`contentKind == personal`**** overrides every studio rule, unconditionally.** A personal video may carry a studio — mis-tagged, inherited from a filename, or matched in error — and none of that may file it under a studio. Kind is evaluated first.
+### N2 — ⭐ Relocation rides matching; the bulk migration is a backstop
+Per the Epic's D8, a video is moved when its match is confirmed — the moment its metadata is best and an operator is present. **This is the single largest change to this spec**, and it retires most of its risk:
+- resumability is free — each video is its own unit
+- a partially-migrated library is the **normal** state, already modelled by the dispositions above
+- the blast radius of a bug is one file, not the library
+The match is committed **before** anything touches the filesystem, and a failed move never costs a match.
+**What remains of D6's migration** is a catch-up pass over videos matched before this existed. Its requirements — dry run, resumable, reversible, old→new **full paths** — still hold, and are far cheaper over a small set.
+### N3 — Names are sanitised before they become path components
+Generating paths from node display names reintroduces exactly the defect D3 rejected filename-encoding over. The Epic's rules (T18b) apply: deterministic substitution, Windows reserved names handled, 255-byte truncation at a character boundary, and two names that sanitise alike treated as a **collision** — reported, never silently merged.
+### N4 — `contentKind` is declared, never inferred
+The column does not exist yet. `nil` means undeclared, an undeclared asset **stays in the root and is fully usable**, and bulk declaration lets the operator settle thousands in one action. The UI may sort and filter to help; it may never pre-select. A guessed `personal` is a privacy failure.
+## The sidecar
+Per D10, the sidecar is for **portability, not recovery** — `LibraryBackupService` already snapshots `catalog.sqlite` into a `.vilmbackup` archive, verified in code. Format is `.nfo` (Kodi/Jellyfin XML). **No sidecar is written for ****`contentKind == personal`** (D13): a plaintext file beside a home video puts names and locations on removable media in clear text.
+💡 **It has no consumer today, so it is sequenced last** and blocks nothing.
+❓ **Open — sidecar placement contradicts itself and must be settled before it ships.** D4's prose decided *"if the user chooses to disconnect a file from their metadata management system, the file must still stand on its own"* — which means **beside the video**. The numbered answer below it says **inside ****`.catalog/`**, which does not travel with a copied file. These are opposite. **Recommended: beside the video**, since that is the stated intent and the only placement that delivers portability. Needs a decision.
+❓ **Open — how is a scene represented in ****`.nfo`****?** Kodi defines `<movie>`, `<tvshow>`, `<episodedetails>`, `<musicvideo>`; a scene is performer-and-studio-led and frequently has no title, so none fits. Kodi ignores unknown elements, which is the escape hatch. **Does not block anything** while the sidecar is last.
+💡 **Recommended: split the sidecar into its own spec**, taking both open questions above and **F8** with it. It has no consumer, blocks nothing, and its unresolved placement currently makes F8 impossible to write deterministic filesystem assertions for. Keeping it here is the only reason this spec has unresolved questions that its own work does not depend on.
+## Open — the scene grammar's last detail
+❓ **How many performers go in a scene filename, and chosen how?** The revised decision reads *"studio | video name | headliner performers | date of release"*, but "headliner" is undefined. Median is 1 performer and maximum is 10; listing all ten is legal but unwieldy, and any rule for choosing a subset must be stable, or enriching cast data triggers a rename — the instability that removed performers from film names in the first place. Blocks the scene name generator, and makes F1 and F6 unverifiable.
+**Recommended: every credited performer, in the source's billing order, with no fixed cap.**
+|  |  |
+| --- | --- |
+| Ordering | the order the source lists them (billing order); **alphabetical** when there is no source order, so a hand-entered record is still deterministic |
+| Cap | none — the 255-byte ceiling is the only limit, and it drops whole names from the end |
+| Why no fixed N | any N is arbitrary, and a name built from "the top 3" changes meaning the moment billing is corrected |
+**Why this is stable in practice:** cast arrives with a match, matches are settled (Epic D4), and relocation happens *at* match time (N2) — so the cast is final when the name is generated. At median 1 and maximum 10 performers, ten names plus a studio and a date still fits 255 bytes in the overwhelming majority of cases, and the truncation hierarchy handles the rest.
+**If "headliner" was meant literally** — a top-billed subset — the rule needs an explicit N and a documented tie-break, and it accepts that correcting billing order renames files. **Needs a decision either way.**
+## Test strategy (Constitution Art. III)
+The Epic owns T18 (a generated path matches the grammar, and personal content never reaches a studio folder), T18b (sanitisation), T23 (a failed move never costs a match) and T24 (per-move reversibility). This spec adds:
+- **F1 — Round-trip.** Every field encoded into a name parses back identically, including titles containing the delimiter and non-ASCII characters.
+- **F2 — No orphaning.** After a move the asset keeps its record, fingerprint, thumbnail, tags, rating and review status. Asserted, not inspected.
+- **F3 — Dry run writes nothing.** The catch-up migration produces a complete plan and zero filesystem mutations.
+- **F4 — Interruption is safe.** A catch-up run killed midway leaves every file either fully relocated and consistent, or untouched. Never half.
+- **F5 — Reversibility.** The recorded old→new full-path mapping restores the original layout exactly.
+- **F6 — Length ceiling.** A name that would exceed 255 bytes truncates deterministically at a field boundary and still parses.
+- **F7 — Grammar selection.** Each content kind selects its own grammar, and an undeclared kind selects none — the file is skipped, not guessed at.
+- **F9 — Personal content never routes to a studio folder.** A `personal` asset carrying a studio — matched, mis-tagged, or read from a filename — is placed in the personal folder. Asserted for each of those three origins separately, because each is a different way the studio got there and only the last is obviously suspect.
+- **F10 — An undeclared asset stays in the root and stays usable.** With `contentKind == nil` the relocation produces no move, no error and no partial path; the asset remains playable, browsable and enrichable. Asserted so that "skipped" can never quietly become "broken".
+- **F11 — A ruled-out studio routes to the unfiled folder, not to a folder of its own.** A studio in `unmatchable` state produces no `Studio Name/` directory, which is what keeps the verified lexicon and the folder tree in agreement.
+- **F8 — Sidecar authority is directional.** Reconciling an existing record, the database wins and the difference is reported. On **first import** of a file with a sidecar and no catalogue record, the sidecar is the only data and is accepted.
+## History — superseded reasoning, retained
+| Decision | Fate |
+| --- | --- |
+| **D5** — one convention for the whole library (`Performers - Studio - Date`) | **Superseded by D7/D11.** Assumed a single content class. |
+| **D9** — universal studio-first ordering | **Superseded by D11.** Broke the Kodi film and TV conventions; studio-first is retained for scenes only. |
+| **D4** — sidecar "survives catalog loss ✅" | **Corrected by D10.** `.vilmbackup` owns recovery; the sidecar is portability only. |
+| **T10** — lossless custom-field round-trip | **Withdrawn by D10.** Replaced by documenting what a sidecar deliberately does not carry. |
+| Sidecar format `.json` | **Reversed to ****`.nfo`** on review. |
+| Pipe as a delimiter | **Rejected** — legal on macOS, forbidden on Windows, and the volume is ExFAT precisely for cross-platform use. |
+| Embedded container metadata | **Rejected** — requires rewriting video files to change a field. |
+| **D6** — "do not rename before release dates exist" | **Reversed 2026-08-04**: release date is unobtainable from filenames, so waiting is cancelling. Superseded again by N2, where relocation rides matching and the date is present by construction. |
+## Evidence
+Measured 2026-08-03 against an attached library of 2,101 video files; character legality measured on the ExFAT volume itself. Related: *The Library Graph* (D5, D8, T18, T18b, T23, T24), *Filename Parsing & Bulk Rename Utility*, and *Actor & Tag Browsing* (R2, the age filter's release-date dependency).

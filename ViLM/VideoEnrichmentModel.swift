@@ -388,11 +388,31 @@ final class VideoEnrichmentModel: ObservableObject {
     /// found nothing has been checked, and leaving it blank would offer it
     /// again forever. `.unmatchable` is never set here — that stays a human
     /// judgement, the same rule the actor side follows.
-    func outcomeToRecord() -> (EnrichmentState, String?)? {
+    /// The id travels with the outcome so that dismissing the sheet after
+    /// choosing a candidate still records WHICH record matched. Without it the
+    /// state says "matched" and nothing says what to — which is the same
+    /// re-guessing on the next run that v24 exists to end.
+    /// What DISMISSING the sheet should record — never what applying it should.
+    ///
+    /// ⚠️ `.reviewing` and `.nothingToApply` deliberately record NOTHING.
+    /// Reaching them means a candidate is on screen being looked at, not that
+    /// it was accepted; confirming is the primary action ("Apply" / "Confirm
+    /// Match"), which goes through `apply()`. Recording `.matched` here meant
+    /// that opening a video, failing to find the right record and giving up
+    /// marked it as matched — and because `.matched` is a settled state, the
+    /// video was then skipped by every future run.
+    ///
+    /// That behaviour predates the persistence fix and was invisible while
+    /// `enrichmentState` was being discarded at save. Making the state durable
+    /// is what turned it into a real defect.
+    ///
+    /// The other two are genuine conclusions and are still recorded: a search
+    /// that returned nothing, and several candidates none of which was chosen.
+    /// Both leave the video needing attention, so neither strands it.
+    func outcomeToRecord() -> (state: EnrichmentState, source: String?, sourceId: String?)? {
         switch phase {
-        case .reviewing, .nothingToApply: return (.matched, providerName)
-        case .noMatches: return (.noMatch, providerName)
-        case .choosing: return (.ambiguous, providerName)
+        case .noMatches: return (.noMatch, providerName, nil)
+        case .choosing: return (.ambiguous, providerName, nil)
         default: return nil
         }
     }
@@ -422,9 +442,12 @@ final class VideoEnrichmentModel: ObservableObject {
         // came back in "needs your attention" on the next run — having already
         // been dealt with.
         guard let proposal else { return nil }
+        // The chosen candidate's id IS the match. Keeping it turns every later
+        // lookup from a re-search by name into a fetch — see schema v24.
         guard hasAnythingToApply else {
             return VideoEnrichmentReview.recordingOutcome(asset, state: .matched,
-                                                          source: providerName)
+                                                          source: providerName,
+                                                          sourceId: chosenCandidate?.id)
         }
         // `offeredTags` scopes removal to what was actually shown, so an
         // unticked tag is removed and an untouched one is never affected.
@@ -432,7 +455,8 @@ final class VideoEnrichmentModel: ObservableObject {
                                                   accepting: accepted, acceptedTags: acceptedTags,
                                                   offeredTags: tagOptions.map(\.name))
         return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,
-                                                      source: providerName)
+                                                      source: providerName,
+                                                      sourceId: chosenCandidate?.id)
     }
 
     private func friendly(_ error: Error) -> String {

@@ -80,4 +80,24 @@ public struct TagNormalizer {
     public static func isSameTag(_ a: String, _ b: String) -> Bool {
         a.compare(b, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
     }
+
+    /// A stable key for a name's IDENTITY, as opposed to its display spelling.
+    ///
+    /// Two names that `isSameTag` considers one thing produce one key, which is
+    /// what lets a database index enforce what the comparison already believed.
+    /// `SCUBA` and `Scuba` were two rows in a real library precisely because
+    /// nothing at the storage layer knew they were the same.
+    ///
+    /// ⚠️ MUST agree with `isSameTag` exactly. If the two ever disagree, the
+    /// index and the code that reads it hold different opinions about identity,
+    /// which is a worse defect than the one this fixes —
+    /// `TagKindTests.testIdentityKeyAgreesWithIsSameTag` pins them together.
+    ///
+    /// ⚠️ Folded in Swift, never with SQLite's `lower()`, which is ASCII-only:
+    /// an index built on it would still admit duplicates for any name carrying
+    /// an accent or a non-Latin script.
+    public static func identityKey(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
 }

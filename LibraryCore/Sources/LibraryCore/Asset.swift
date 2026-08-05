@@ -33,6 +33,25 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     // there" — has to be recordable so it can leave the queue.
     public var enrichmentState: EnrichmentState?
     public var enrichmentSource: String?
+
+    /// The source's own id for the matched record (v24).
+    ///
+    /// The mirror of `EntityProfile.enrichmentSourceId`, and it exists for the
+    /// same reason: without it a validated match is thrown away, and every
+    /// later lookup re-searches by name and re-guesses which record was meant.
+    /// A stored id means later lookups FETCH BY ID — a re-search after a
+    /// confirmed match is a defect, not a refresh.
+    public var enrichmentSourceId: String?
+
+    /// A human-openable link to the matched record, supplied by the provider.
+    ///
+    /// Separate from the id because core cannot build one from the other: that
+    /// would require core to know the source's address, and core never names a
+    /// source. A provider supplies both or neither — an id with no link leaves
+    /// the operator an opaque string and no way to check a match before
+    /// undoing it.
+    public var enrichmentUrl: String?
+
     public var enrichmentCheckedAt: Date?
     public var playCount: Int              // Number of distinct viewing sessions
     public var lastPlayedAt: Date?         // When the video was last played
@@ -60,6 +79,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 releaseDate: String? = nil,
                 enrichmentState: EnrichmentState? = nil,
                 enrichmentSource: String? = nil,
+                enrichmentSourceId: String? = nil,
+                enrichmentUrl: String? = nil,
                 enrichmentCheckedAt: Date? = nil,
                 playCount: Int = 0,
                 lastPlayedAt: Date? = nil) {
@@ -79,6 +100,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.releaseDate = releaseDate
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
+        self.enrichmentSourceId = enrichmentSourceId
+        self.enrichmentUrl = enrichmentUrl
         self.enrichmentCheckedAt = enrichmentCheckedAt
         self.playCount = playCount
         self.lastPlayedAt = lastPlayedAt
@@ -105,6 +128,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.releaseDate = try container.decodeIfPresent(String.self, forKey: .releaseDate)
         self.enrichmentState = try container.decodeIfPresent(EnrichmentState.self, forKey: .enrichmentState)
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
+        self.enrichmentSourceId = try container.decodeIfPresent(String.self, forKey: .enrichmentSourceId)
+        self.enrichmentUrl = try container.decodeIfPresent(String.self, forKey: .enrichmentUrl)
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
         self.lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
@@ -138,6 +163,8 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case releaseDate = "release_date"
         case enrichmentState = "enrichment_state"
         case enrichmentSource = "enrichment_source"
+        case enrichmentSourceId = "enrichment_source_id"
+        case enrichmentUrl = "enrichment_url"
         case enrichmentCheckedAt = "enrichment_checked_at"
         case playCount = "play_count"
         case lastPlayedAt = "last_played_at"
@@ -146,6 +173,17 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
 
 // MARK: - GRDB Persistence
 extension Asset {
+    /// ⚠️ EVERY stored property must appear here.
+    ///
+    /// GRDB builds its UPDATE from exactly the keys set on this container, so a
+    /// column omitted below is never written by any update — silently, with no
+    /// error and no failing test unless one asserts the round-trip. Four
+    /// columns were missing here (`release_date` and the three enrichment
+    /// fields), which meant every accepted video match was discarded at save
+    /// and `VideoBatchPolicy.skipReason` could never skip anything.
+    ///
+    /// `AssetPreservationTests.testFieldCountIsPinned` fails when a property is
+    /// added; adding it here is part of what that guard is asking for.
     public func encode(to container: inout PersistenceContainer) throws {
         container["id"] = id.uuidString
         container["relative_path"] = relativePath
@@ -159,6 +197,12 @@ extension Asset {
         container["season_number"] = seasonNumber
         container["episode_number"] = episodeNumber
         container["episode"] = episode
+        container["release_date"] = releaseDate
+        container["enrichment_state"] = enrichmentState?.rawValue
+        container["enrichment_source"] = enrichmentSource
+        container["enrichment_source_id"] = enrichmentSourceId
+        container["enrichment_url"] = enrichmentUrl
+        container["enrichment_checked_at"] = enrichmentCheckedAt
         container["play_count"] = playCount
         container["last_played_at"] = lastPlayedAt
 

@@ -233,14 +233,52 @@ public enum VideoEnrichmentReview {
     /// for the operator to choose what to accept. A video that matched but
     /// whose proposals were all declined has still been looked up, and must not
     /// be offered again as unchecked.
+    /// - Parameters:
+    ///   - sourceId: the source's own id for the matched record, from
+    ///     `PluginCandidate.id`. **This is the match**, and keeping it is what
+    ///     turns a later lookup from a re-search into a fetch. Without it every
+    ///     run re-guesses which of several same-named records was meant — the
+    ///     defect v23 fixed for people and this fixes for videos.
+    ///   - sourceUrl: a human-openable link to that record, supplied by the
+    ///     provider. Core cannot build one from the id: that would require
+    ///     knowing the source's address, and core never names a source.
+    ///
+    ///   Both are cleared when the state is not a match, so an id can never
+    ///   outlive the match it belongs to and be read as evidence of one.
     public static func recordingOutcome(_ asset: Asset,
                                         state: EnrichmentState,
                                         source: String?,
+                                        sourceId: String? = nil,
+                                        sourceUrl: String? = nil,
                                         checkedAt: Date = Date()) -> Asset {
         var updated = asset
         updated.enrichmentState = state
         updated.enrichmentSource = source
         updated.enrichmentCheckedAt = checkedAt
+
+        if state == .matched {
+            if let sourceId {
+                // A CHANGED id invalidates the stored link, which described the
+                // record we are no longer matched to. Carrying it over would
+                // leave the provenance label pointing somewhere plausible and
+                // wrong — worse than showing no link at all.
+                if sourceId != updated.enrichmentSourceId {
+                    updated.enrichmentUrl = sourceUrl
+                } else if let sourceUrl {
+                    updated.enrichmentUrl = sourceUrl
+                }
+                updated.enrichmentSourceId = sourceId
+            }
+            // With no id supplied, BOTH are left as they were. A URL without an
+            // id is deliberately ignored rather than stored: a link is not an
+            // identity, and recording one would leave a match that can never be
+            // fetched by id — the defect this whole change exists to close.
+            // A re-confirmation from a provider that returns no id must also
+            // not erase an identity already established.
+        } else {
+            updated.enrichmentSourceId = nil
+            updated.enrichmentUrl = nil
+        }
         return updated
     }
 

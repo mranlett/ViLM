@@ -854,10 +854,25 @@ struct SingleInspectorView: View {
                     Toggle(isOn: Binding(
                         get: { asset.enrichmentState == .unmatchable },
                         set: { on in
+                            // Routed through recordingOutcome rather than
+                            // assigning the fields here, so ruling a video out
+                            // also clears any source id from a previous match.
+                            // Set directly, the id survived — leaving a video
+                            // marked "not findable" while still carrying the
+                            // identity of a record it was matched to, which a
+                            // later run would read as evidence of a match.
                             var updated = asset
-                            updated.enrichmentState = on ? .unmatchable : nil
-                            updated.enrichmentSource = on ? asset.enrichmentSource : nil
-                            updated.enrichmentCheckedAt = on ? Date() : nil
+                            if on {
+                                updated = VideoEnrichmentReview.recordingOutcome(
+                                    updated, state: .unmatchable,
+                                    source: asset.enrichmentSource)
+                            } else {
+                                updated.enrichmentState = nil
+                                updated.enrichmentSource = nil
+                                updated.enrichmentCheckedAt = nil
+                                updated.enrichmentSourceId = nil
+                                updated.enrichmentUrl = nil
+                            }
                             if let url = libraryURL { updateAsset(updated, at: url) }
                         }
                     )) {

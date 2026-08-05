@@ -21,7 +21,7 @@ Traceability: Notion spec → GitHub issue → code → device verification. A r
 | **R4** Starred photo | [#21](https://github.com/mranlett/ViLM/issues/21) | ✅ **Done** | Operator-verified. Three stacked bugs — see below |
 | **R5** Tag card truncation | [#22](https://github.com/mranlett/ViLM/issues/22) | ⚪ Not started | Blocked on measuring the tag vocabulary |
 | **R6** Tag page Actors tab | [#23](https://github.com/mranlett/ViLM/issues/23) | 🟡 Implemented | ✅ DONE — operator-verified. Derivation shared across entity types; only the tag case changed |
-| **R7** Enrichment state (v18) | [#24](https://github.com/mranlett/ViLM/issues/24) | ⚪ Not started |  |
+| **R7** Enrichment state (v18) — ✅ **DONE**, operator-verified incl. migration on a live library, 497 tests. Population of the backlog deferred to [#26](https://github.com/mranlett/ViLM/issues/26) | [#24](https://github.com/mranlett/ViLM/issues/24) | ⚪ Not started |  |
 | *Gallery off-by-one* | [#13](https://github.com/mranlett/ViLM/issues/13) | ✅ **Done** | Operator-verified. Pre-existing issue, folded into this effort |
 | *AppleDouble forks* | [#16](https://github.com/mranlett/ViLM/issues/16) | ✅ **Closed — not a defect** | 2,101 videos scanned, 0 leaked |
 ### New, surfaced during implementation
@@ -241,3 +241,44 @@ Schema v17 added five columns and was silently dropped in **four** separate plac
 - The filter finds all 210 of the current backlog and empties as they are resolved.
 - Nothing in `LibraryCore` or the app target names an external source — asserted by the existing repository-hygiene check, not by review.
 - A second provider populates the same field with no migration.
+---
+## R8 — AMENDMENT: browse becomes a graph query
+> ⚠️ **Added 2026-08-05, after approval.** *The Library Graph* changes what this surface can ask and what it can trust. Needs confirmation into the approved baseline (Art. II).
+### R8.1 — ⚠️ The tag filter currently mixes two different things
+Tags are flat `tag:` strings with no kind, so a tag filter today offers **action tags and attribute tags in one undifferentiated list**. `FilterBuilderView` builds its list by taking every `tag:`-prefixed value — nothing separates "what happens in this video" from "what this performer is."
+**Under the Epic's D3 these become different node kinds on different edges:**
+| Filtering by | Means | Answered from |
+| --- | --- | --- |
+| an **action** tag | videos where this happens | Video → Tag edges |
+| an **attribute** tag | videos featuring a performer who *is* this | Video → Performer → Tag, **two hops** |
+⭐ **The second is a genuinely new capability, and it is what the operator has always meant.** "Show me videos with a redhead" is not a property of any video — it is a property of someone in it. Today that question is either unanswerable or answered by a mis-tagged video, which is the defect the taxonomy removes.
+❓ **Open — does one filter surface offer both, or two?** One list is simpler but silently changes the meaning of a selection depending on which kind was picked. Two lists are honest but add a control to a panel R2 already found overcrowded. **Recommended: one list, with kind shown per entry**, since the operator thinks in terms of what they want to find rather than which edge answers it. Needs a decision.
+  **✅ decision - one list with kind shown per entry**
+### R8.2 — ⭐ R6 is resolved by the model, not by a query fix
+R6 recorded that a tag page's Actors tab *lists the wrong actors*, with root cause **not established**, and settled on "actors matching this tag."
+**The model now answers it.** A tag node has real edges, so the tab is unambiguous:
+| Tag kind | The Actors tab shows |
+| --- | --- |
+| **attribute** | performers with this attribute — a direct Performer → Tag edge |
+| **action** | performers appearing in videos with this tag — Video → Performer, one hop |
+The previous ambiguity existed *because* both were string matches over the same undifferentiated list, so there was no way to state which was meant. **This does not need a root-cause investigation any more; it needs the edges.**
+### R8.3 — Counts and filters stop being in-memory scans
+`ActorVideoCounts.build` loads every asset and string-matches names, reconciling AKAs by hand. With edges, a count is a query and an alias is not a special case — the edge already points at the node.
+⚠️ **Behaviour must not change when the implementation does.** Per the personal standards, characterization tests come before refactoring legacy code: the existing counting tests are the contract, and the graph-backed implementation must reproduce them exactly — including the rule that an asset crediting both a canonical name and one of its aliases counts **once**.
+### R8.4 — ⚠️ Filters must respect the studio hierarchy
+Recorded as an open defect: a parent-studio filter excludes videos released under that studio's sub-labels, because a studio is a bare string with no parent.
+With `studio_parent` edges, a filter on a parent studio includes its children (Epic T11). ⚠️ **This changes existing filter results** — a saved smart collection filtering on a parent studio will start returning more videos. That is the correction, but it is a visible behaviour change and should be stated in the UI rather than discovered.
+### R8.5 — Enrichment state and the match provenance label
+R7 added enrichment state so actors needing a human can be found. The Epic's D4 extends the same idea to videos and adds a **provenance label** — *matched to id  / url  on date ___* — with an explicit undo returning the node to pending.
+⚠️ **`matched`**** and ****`unmatchable`**** are both settled states and must not sit in a "needs attention" queue.** `EnrichmentState.needsAttention` already encodes this. The undo action is what makes a settled state safe to trust: a wrong match is correctable without re-running everything.
+### R8.6 — Undeclared content needs a browse surface
+Per the Epic's D9 and the fail-closed rule, an undeclared asset is local-only: not relocated, and **not sent to any provider**. With 2,101 rows starting undeclared, "declare kinds" becomes the first real operator task.
+**This surface needs to exist and does not today:** a way to see undeclared assets, select many, and declare a kind for all of them. The UI may sort, group and filter to help; ⚠️ **it may never pre-select a kind** — a pre-filled default is inference wearing a declaration's clothes, and a wrong `personal` is unrecoverable.
+### Test strategy (Constitution Art. III)
+- **B1 — An attribute filter traverses two hops.** Filtering on an attribute tag returns videos whose *performers* carry it, and returns nothing for a video merely tagged with the same word. Asserted against a fixture containing both.
+- **B2 — An action filter does not traverse.** Filtering on an action tag returns videos carrying it and does not pull in videos by performer attribute.
+- **B3 — Counts are unchanged by the refactor.** The graph-backed count reproduces `ActorVideoCounts.build` exactly over the existing fixtures, including the count-once-per-asset rule for canonical-plus-alias credits.
+- **B4 — A parent studio filter includes its children**, transitively, and terminates on a cyclic hierarchy rather than recursing (Epic T13).
+- **B5 — Settled states stay out of the attention queue.** Neither `matched` nor `unmatchable` appears in a needs-attention count.
+- **B6 — Undo returns a node to pending and keeps operator edits.** After an undo the match is cleared and every field with `operator` provenance is unchanged (Epic T15).
+- **B7 — Bulk declaration never pre-selects.** The declaration surface offers no default kind, and an empty selection declares nothing.

@@ -127,12 +127,17 @@ final class VideoBatchMatchModel: ObservableObject {
                     if case .applied(_, _, _) = outcome {
                         updated = appliedAsset ?? asset
                     }
-                    updated.enrichmentState = state
-                    updated.enrichmentSource = provider.displayName
-                    updated.enrichmentCheckedAt = Date()
+                    // Routed through recordingOutcome rather than assigning the
+                    // fields here, so the batch path gets the same rules the
+                    // per-video path is tested against: the matched id is kept,
+                    // and a non-match clears any id left from a previous run.
+                    updated = VideoEnrichmentReview.recordingOutcome(
+                        updated, state: state, source: provider.displayName,
+                        sourceId: matchedSourceId)
                     try? store.updateAsset(updated)
                 }
                 appliedAsset = nil
+                matchedSourceId = nil
                 try? await Task.sleep(nanoseconds: delay)
             }
             if cancelled { break }
@@ -147,6 +152,11 @@ final class VideoBatchMatchModel: ObservableObject {
     /// Carries the merged record out of `examine` without widening the outcome
     /// type, which only the report needs to understand.
     private var appliedAsset: Asset?
+
+    /// The source's id for the record `examine` matched, carried out the same
+    /// way `appliedAsset` is. Without it a batch run records "matched" and not
+    /// WHAT it matched, so the next run re-fingerprints and re-guesses.
+    private var matchedSourceId: String?
 
     private func examine(_ asset: Asset, in libraryURL: URL,
                          provider: any VideoMetadataProvider,
@@ -172,6 +182,10 @@ final class VideoBatchMatchModel: ObservableObject {
             // file again — half a second each, over the whole library, for a
             // question already answered. This is what made a re-run look like
             // it was starting from scratch.
+            // The fingerprint route is exact, so this id IS the match — keep it
+            // whether or not the proposal had anything left to write.
+            matchedSourceId = hit.id
+
             guard !fields.isEmpty else {
                 appliedAsset = asset
                 return .applied(route: .fingerprint, fields: [], tags: [])

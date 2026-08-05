@@ -137,6 +137,78 @@ An installed plugin adds an **Enrich** action to Video Details and to Edit Actor
 Golden fixtures use recorded responses. No live network in tests.
 ## Open decisions — Human Operator
 - ❓ **Tags from plugins.** May a plugin propose tags? Proposal: yes, treated as any other proposed field in the review sheet, never applied silently.
+  - **✅ decision - ** yes
 - ❓ **Batch enrichment.** In-app *enrich all* or per-item only? Proposal: per-item for v1. Bulk stays with the external CSV path, which already has a dry-run change matrix.
+  - **✅ decision - **for now, in app is one at a time for actors and batch AND one at a time for videos. support both. We will eventually move the batch for actors into the app
 - ❓ **Conflict default.** When target and source disagree and the user takes no action — skip, or keep prompting? Proposal: skip and log.
+  - **✅ decision - ** skip and log
 - ❓ **Provider precedence.** With two plugins enriching the same entity type, is there an ordering, or is it always an explicit per-action choice? Proposal: explicit choice, no precedence, until a reason to add one appears.
+  - **✅ decision - **explicit choice each time
+---
+## D10 — AMENDMENT: the provider contract under *The Library Graph*
+> ⚠️ **Added 2026-08-05, after approval.** The Epic changed what core needs back from a provider. Needs confirmation into the approved baseline (Art. II).
+### D10.1 — A provider must return the source's own id for VIDEOS, not only for people
+`PluginCandidate.id` already carries *"the source's own identifier, opaque to core and passed back to **`fetch`**."* The **actor** path persists it (schema v23, added because *"a validated match was being thrown away"*). The **video** path records only `enrichmentSource` — the provider's name — and discards the id.
+**Consequence today:** every run re-searches by name and re-guesses which record was meant. The Epic's D4 requires that a stored id means later lookups **fetch by id, never re-search**. A re-search after a confirmed match is a defect, not a refresh.
+**Required of the contract:** the id a provider returns on a video candidate must be stable across runs and accepted by `fetch` on a later session. A provider whose ids are session-scoped cannot satisfy D4.
+### D10.2 — A provider must supply a provenance URL alongside the id
+The Epic's D4 shows a match as *"matched to id  or url  on date ___"*, with an explicit operator undo.
+⚠️ **Core cannot construct that URL.** Building a link from an id requires knowing the source's address, and **core may not name a source** — D7's naming convention and the public-repository constraint both forbid it. The URL therefore comes **from the provider or not at all**, in the shape `EntityLink` already defines.
+**A provider supplies both the id and the URL, or neither.** An id with no URL leaves the operator with an opaque string and no way to check the match, which makes the undo a guess.
+### D10.3 — ⚠️ Personal content is excluded structurally, at the boundary
+The privacy notice states that installing a provider *"sends video titles and actor names from your library to an external source."* Acceptable for commercial content, where the title is public.
+**For personal video it is not.** A home-video filename may carry family names, children's names, a location or an event, and a batch run over a mixed library would send all of it to a third party. It would also be **useless** — no external database holds a record of a family holiday.
+|  |  |
+| --- | --- |
+| Where | at the **provider boundary**, before a request is constructed |
+| How | by `contentKind`, never by an operator remembering to deselect |
+| Test | a provider double that **fails if it is called at all** for personal content (Epic T16) |
+⚠️ **A skipped iteration is not an exclusion.** "The batch loop doesn't select it" is a property of one caller; the boundary must refuse regardless of who calls it.
+### 🚨 D10.3a — An undeclared kind is treated as personal: FAIL CLOSED
+> ⚠️ **This section failed to save on 2026-08-05 and was absent while the rest of D10 was reviewed. It has NOT been seen by the Human Operator. Needs review.**
+`nil` is the state **all 2,101 rows begin in**. If `nil` were treated as "not personal", the boundary would be open for the entire library on the day it shipped, and the first batch run would send every home video in it.
+| `contentKind` | Reaches a provider? |
+| --- | --- |
+| `scene`, `film`, `episodic` | yes |
+| `personal` | **never** |
+| **`nil`**** — undeclared** | **never** |
+**The asymmetry decides it.** Fail-open is irreversible — once a family name reaches a third party it cannot be recalled. Fail-closed costs a delay, and bulk declaration makes that delay one action: select the library, declare `scene`, pick out the exceptions. **Declaration is already a prerequisite for relocation**, so this asks for nothing the pipeline did not already need.
+⚠️ **This contradicts a line in the Epic's D9** — *"an undeclared asset … is never blocked from … enrichment"* — which has been corrected there. It also means **enforcement must not ship before the bulk-declaration surface**: with every row `nil`, fail-closed alone would halt all enrichment.
+❓ **Open — may a single, explicitly-invoked lookup override it?** An operator looking at one video and choosing to look it up has seen what they are sending; the harm case is the *unattended* run over thousands. Allowing a per-video override with a visible warning preserves throughput while keeping the batch closed. **Recommended: yes for a single explicit action, never for a batch.** Needs a decision.
+⚠️ **`contentKind`**** does not exist yet**, so this cannot be enforced today and the batch enricher would happily send everything. The column arrives with the Epic's v24.
+### D10.4 — Fetch everything the graph needs, in the exchange that matched
+The Epic's D4 corollary: when a match succeeds, retrieve cast, studio, date, tags, artwork references and external links **in that exchange**. A second call to fill a field the first could have returned is the same waste D4 exists to remove, in a different disguise.
+💡 **This is a contract expectation, not merely an optimisation.** A provider that requires a follow-up call per field makes "matched once, stays matched" unachievable — the second call is a re-fetch by another name.
+### D10.5 — Tags a provider returns carry their kind from the edge
+Per the Epic's D3, a tag a provider attaches to a **performer** is an `attribute`; one attached to a **video** is an `action`. The kind is read off the assertion, not inferred, so provider tags never enter the `unclassified` holding state.
+⚠️ **Unattended runs still write no tags at all.** `VideoBatchPolicy.autoApplicableFields` excludes them, recorded because *"a source tags far more finely than a person does — one real record carried seventy."* D10.5 governs tags accepted through **review**, which is the only path that creates them.
+### D10.6 — What core requires of a candidate, and what it does when that is not met
+A video candidate must carry a **stable** source id and a provenance URL. Core validates the pair:
+| Provider returns | Core behaviour |
+| --- | --- |
+| id + URL | accepted; both persisted |
+| id, no URL | **accepted, match recorded, URL absent.** The provenance label degrades to id-and-date. Logged once per provider, not per video |
+| URL, no id | **rejected as a match.** A URL is not an identity — accepting it would record a match that D4 cannot later fetch by id, which is the defect this amendment exists to close |
+| neither | not a candidate |
+### D10.7 — A failed fetch never downgrades a settled match
+| Failure | Behaviour |
+| --- | --- |
+| id not found at the source (deleted upstream) | match **retained**, flagged for review. Never auto-cleared — an upstream deletion is not evidence the local match was wrong |
+| rate limited | retryable; the run backs off and reports. No state change |
+| network failure | retryable; no state change |
+| malformed payload | non-retryable; reported with the provider named. No state change |
+⚠️ **No failure path writes.** A lookup that cannot complete leaves the graph exactly as it was — the rule that keeps a flaky network from eroding a library.
+### Test strategy (Constitution Art. III)
+- **PA1 — A video match round-trips.** Source id, provenance URL, state and timestamp are all readable from a freshly-opened store.
+- **PA2 — A settled match is fetched, never searched.** A second pass issues no name search; asserted against a double that **fails the test if search is called**.
+- **PA3 — Failure states are exercised.** The double injects each row of D10.7 and the stored match survives every one unchanged.
+- **PA4 — Personal and undeclared content reach no provider.** Asserted against a double that **fails if called at all**, for both `personal` and `nil`, from the batch path and the per-video path.
+- **PA5 — Candidate validation holds.** A URL-without-id candidate is rejected as a match; an id-without-URL candidate is accepted with the label degraded.
+- **PA6 — Provider tags carry the edge's kind.** A tag accepted onto a performer is `attribute`, onto a video `action`, and neither is `unclassified`.
+- **PA7 — An unattended run writes no tags.** Asserted directly against `VideoBatchPolicy.autoApplicableFields`.
+### Acceptance criteria
+- A video match persists the source id, the provenance URL, the state and the timestamp, all readable from a freshly-opened store.
+- A second enrichment pass over a matched video issues **no name search** — asserted against a double that fails if search is called.
+- The double also exercises: the id no longer existing, a network failure, a rate limit, and a malformed payload. In every case the stored match survives unchanged.
+- A `personal` asset reaches no provider, from any caller.
+- A provider tag accepted onto a performer is an `attribute`; onto a video, an `action`. Neither is `unclassified`.

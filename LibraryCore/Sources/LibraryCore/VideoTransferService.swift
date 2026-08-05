@@ -246,6 +246,13 @@ public final class VideoTransferService {
             }
 
             // Full metadata into the destination under a fresh id.
+            //
+            // ⚠️ EVERY field, including the match. This rebuild previously
+            // omitted the release date and the whole enrichment group, so
+            // moving a video between libraries silently discarded a confirmed
+            // match — the destination then re-searched by name and re-guessed.
+            // See AssetPreservationTests.testFieldCountIsPinned, which lists
+            // this as a copy site.
             let newAsset = Asset(
                 id: newAssetId,
                 relativePath: destinationRelativePath,
@@ -260,6 +267,12 @@ public final class VideoTransferService {
                 seasonNumber: asset.seasonNumber,
                 episodeNumber: asset.episodeNumber,
                 episode: asset.episode,
+                releaseDate: asset.releaseDate,
+                enrichmentState: asset.enrichmentState,
+                enrichmentSource: asset.enrichmentSource,
+                enrichmentSourceId: asset.enrichmentSourceId,
+                enrichmentUrl: asset.enrichmentUrl,
+                enrichmentCheckedAt: asset.enrichmentCheckedAt,
                 playCount: asset.playCount,
                 lastPlayedAt: asset.lastPlayedAt
             )
