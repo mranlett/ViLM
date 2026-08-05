@@ -67,6 +67,9 @@ struct SingleInspectorView: View {
 
     @State private var isShowingTagEntry = false
     @State private var newTagValue = ""
+    /// Why a tag was refused. Surfaced, never swallowed: a tag that silently
+    /// failed to save reads as the app losing the edit.
+    @State private var tagRejectionMessage: String?
     @State private var activeCategory = "tag"
     @State private var editingTagValue: String? = nil
     @State private var isShowingRenameDialog = false
@@ -1023,6 +1026,13 @@ struct SingleInspectorView: View {
             .popover(isPresented: $isShowingTagEntry) {
                 tagEntryPopover
             }
+            .alert("That tag describes a performer",
+                   isPresented: Binding(get: { tagRejectionMessage != nil },
+                                        set: { if !$0 { tagRejectionMessage = nil } })) {
+                Button("OK", role: .cancel) { tagRejectionMessage = nil }
+            } message: {
+                Text(tagRejectionMessage ?? "")
+            }
         }
         #if os(macOS)
         .frame(minWidth: 440, minHeight: 560)
@@ -1494,7 +1504,22 @@ struct SingleInspectorView: View {
         if !updated.tags.contains(tagToSave) {
             updated.tags.append(tagToSave)
         }
-        
+
+        // The write boundary. A tag the vocabulary says describes a PERFORMER
+        // cannot be added to a video — "a video isn't a redhead, an actor is."
+        // A tag with no kind yet is allowed through: refusing it would mean no
+        // new tag could ever be created, and there is nowhere yet to stage the
+        // link. It surfaces in Settings → Classify Tags instead.
+        if activeCategory == "tag" {
+            let vocabulary = (try? LibraryStore(at: url).fetchTagVocabulary()) ?? []
+            let check = TagVocabulary.check(adding: updated, against: asset,
+                                            vocabulary: vocabulary)
+            guard check.isAllowed else {
+                tagRejectionMessage = "\"\(check.refused.joined(separator: ", "))\" describes a performer, not a video. Add it to the performer instead."
+                return
+            }
+        }
+
         updateAsset(updated, at: url)
         newTagValue = ""
         isShowingTagEntry = false

@@ -113,6 +113,33 @@ final class AssetFilterCriteriaTests: XCTestCase {
         XCTAssertFalse(matches(criteria, asset(tags: ["tag:Comedy"])))
     }
 
+    /// The gallery and the filter builder now collapse two casings of a tag
+    /// into one option. If matching stayed case-sensitive, that single option
+    /// would silently miss every video spelled the other way — a filter that
+    /// looks unified and behaves partially.
+    func testTagFilterMatchesRegardlessOfCasing() {
+        var criteria = AssetFilterCriteria()
+        criteria.tagsLogic = .or
+        criteria.selectedTags = ["GROUP"]
+
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])))
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])),
+                      "the same tag, spelled differently")
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])))
+        XCTAssertFalse(matches(criteria, asset(tags: ["tag:Drama"])))
+    }
+
+    /// AND must not be satisfiable twice by one tag under two spellings.
+    func testCaseVariantsDoNotSatisfyAnAndFilterTwice() {
+        var criteria = AssetFilterCriteria()
+        criteria.tagsLogic = .and
+        criteria.selectedTags = ["GROUP", "Drama"]
+
+        XCTAssertFalse(matches(criteria, asset(tags: ["tag:GROUP", "tag:GROUP"])),
+                       "two spellings of one tag are still only one tag")
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP", "tag:Drama"])))
+    }
+
     func testSelectedStudiosAndOr() {
         var criteria = AssetFilterCriteria()
         criteria.studiosLogic = .or

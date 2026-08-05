@@ -18,6 +18,7 @@ struct SettingsView: View {
     var onFindDuplicates: (() -> Void)?
     var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
+    var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
@@ -94,6 +95,8 @@ struct SettingsView: View {
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
                     toolButton("Merge Tags & Actors", icon: "paintbrush", action: onTagCleanup)
+                        .disabled(session.isFederated)
+                    toolButton("Classify Tags", icon: "tag.circle", action: onClassifyTags)
                         .disabled(session.isFederated)
                 }
 

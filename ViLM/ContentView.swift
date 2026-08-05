@@ -84,6 +84,7 @@ struct ContentView: View {
     // Feature Sheets
     @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
+    @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingTagCaseCleanup = false
     @State private var isShowingReadFilenames = false
@@ -222,6 +223,7 @@ struct ContentView: View {
                     onFindDuplicates: { isShowingDuplicateDetection = true },
                     onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                     onTagCleanup: { isShowingTagCleanup = true },
+                    onClassifyTags: { isShowingTagClassification = true },
                     onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                     onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                     onReadFilenames: { isShowingReadFilenames = true },
@@ -321,6 +323,18 @@ struct ContentView: View {
                     ActorPhotoCleanupView(libraryURL: url) {
                         loadEntityProfiles(from: url)
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingTagClassification) {
+                if let url = selectedLibraryURL {
+                    TagClassificationView(
+                        libraryURL: url,
+                        assets: assets,
+                        onRefresh: {
+                            reloadUnionAssets()
+                            loadEntityProfiles(from: url)
+                        }
+                    )
                 }
             }
             .sheet(isPresented: $isShowingTagCleanup) {

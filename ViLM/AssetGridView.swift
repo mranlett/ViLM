@@ -168,8 +168,20 @@ struct AssetsGridView: View {
                     // A tag can apply directly to a video, or only exist on
                     // an actor's own profile (e.g. "Blonde") — match either,
                     // since Tag Gallery surfaces both kinds under one name.
-                    if asset.tags.contains("tag:\(name)") { return true }
-                    return mappedActors(for: asset).contains { entityProfiles["actor:\($0)"]?.tags.contains(name) ?? false }
+                    //
+                    // Matched on FOLDED identity, not raw spelling. The gallery
+                    // collapses two casings into one card, so an exact match
+                    // here would open that card onto only the videos spelled
+                    // the way its label happened to be — the rest silently
+                    // missing, and the count short.
+                    let wanted = TagNormalizer.identityKey(name)
+                    if asset.actions.contains(where: { TagNormalizer.identityKey($0) == wanted }) {
+                        return true
+                    }
+                    return mappedActors(for: asset).contains { actor in
+                        entityProfiles["actor:\(actor)"]?.tags
+                            .contains { TagNormalizer.identityKey($0) == wanted } ?? false
+                    }
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
                 case .series(let name): return asset.videoName == name
                 }
@@ -714,8 +726,14 @@ struct AssetsGridView: View {
         //
         // Actor-side filtering is a separate axis and belongs to the actor
         // filter model, not to this one.
+        // Folded, matching the asset filter above — the comment there promises
+        // "exactly the notion the ASSET filter uses", and an exact match here
+        // would break that promise the moment two casings exist.
+        let wanted = TagNormalizer.identityKey(name)
         return entityProfiles.compactMap { key, profile -> String? in
-            guard key.hasPrefix("actor:"), profile.tags.contains(name) else { return nil }
+            guard key.hasPrefix("actor:"),
+                  profile.tags.contains(where: { TagNormalizer.identityKey($0) == wanted })
+            else { return nil }
             return String(key.dropFirst(6))
         }.sorted()
     }

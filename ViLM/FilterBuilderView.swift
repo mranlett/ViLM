@@ -58,7 +58,11 @@ struct FilterBuilderView: View {
     var allUniqueTags: [String] {
         let allTags = assets.flatMap { $0.tags }
         let actionTags = allTags.filter { $0.hasPrefix("tag:") }.map { String($0.dropFirst(4)) }
-        return Array(Set(actionTags)).sorted()
+        // Folded for the same reason the gallery is: two spellings of one tag
+        // are one tag, and offering both as separate filter options means a
+        // filter silently misses half the videos it should match.
+        let canonical = TagVocabulary.canonicalSpellings(actionTags)
+        return Array(Set(actionTags.map { canonical[$0] ?? $0 })).sorted()
     }
     
     var allUniqueStudios: [String] {

@@ -13,6 +13,7 @@ struct ProfileGraphHeaderView: View {
     let libraryURL: URL?
     
     @State private var entityProfile: EntityProfile?
+    @State private var tagVocabulary: [TagRecord] = []
     @State private var isShowingEditor = false
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
@@ -51,6 +52,55 @@ struct ProfileGraphHeaderView: View {
         return uniqueEntities(from: series, excluding: currentSelectionName(for: "series"))
     }
     
+    /// Best-effort, and only needed when the page is a tag. An empty vocabulary
+    /// simply means the tag reads as "Not yet classified", which is true.
+    private func fetchTagVocabulary() {
+        guard case .tag = currentSelection, let libraryURL else {
+            tagVocabulary = []
+            return
+        }
+        tagVocabulary = (try? LibraryStore(at: libraryURL).fetchTagVocabulary()) ?? []
+    }
+
+    /// What this page should say about a tag, when the page IS a tag.
+    ///
+    /// Read from the vocabulary rather than recomputed here, so the profile
+    /// page, the gallery card and the classification worklist cannot disagree
+    /// about what a tag is called or what it describes.
+    struct TagDetail {
+        let kindLabel: String
+        let isClassified: Bool
+        let uses: Int
+        let otherSpellings: [String]
+    }
+
+    private var tagDetail: TagDetail? {
+        guard case .tag(let name) = currentSelection else { return nil }
+
+        let key = TagNormalizer.identityKey(name)
+        let record = tagVocabulary.first { $0.identityKey == key }
+
+        let spellings = Set(filteredAssets.flatMap { $0.actions }
+            .filter { TagNormalizer.identityKey($0) == key })
+
+        let label: String
+        switch record?.resolvedKind() {
+        case .some(let kind) where kind == .action:             label = "Action in a video"
+        case .some(let kind) where kind == .videoAttribute:     label = "About the video"
+        case .some(let kind) where kind == .performerAttribute: label = "About a performer"
+        case .some(let kind):                                   label = kind.name
+        case .none:                                             label = "Not yet classified"
+        }
+
+        return TagDetail(
+            kindLabel: label,
+            isClassified: record?.kind != nil,
+            uses: filteredAssets.count,
+            otherSpellings: spellings
+                .filter { $0 != (record?.displayName ?? name) }
+                .sorted())
+    }
+
     private func currentSelectionName(for type: String) -> String? {
         switch currentSelection {
         case .studio(let name) where type == "studio": return name
@@ -140,6 +190,35 @@ struct ProfileGraphHeaderView: View {
             }
 
             if isExpanded {
+            // A tag has no EntityProfile — no bio, no photo — so its page had
+            // nothing but related links. It does have a vocabulary record, and
+            // what a tag DESCRIBES is the most important thing about it.
+            if let tagDetail {
+                HStack(spacing: 8) {
+                    Text(tagDetail.kindLabel)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(tagDetail.isClassified
+                                    ? Color.accentColor.opacity(0.18)
+                                    : Color.orange.opacity(0.18),
+                                    in: Capsule())
+                        .foregroundStyle(tagDetail.isClassified ? Color.accentColor : .orange)
+
+                    Text("\(tagDetail.uses) video\(tagDetail.uses == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if !tagDetail.otherSpellings.isEmpty {
+                        Text("also spelled \(tagDetail.otherSpellings.joined(separator: ", "))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
             if let profile = entityProfile, !profile.akas.isEmpty {
                 Text("AKA: \(profile.akas.joined(separator: ", "))")
                     .font(.subheadline)
@@ -621,6 +700,7 @@ struct ProfileGraphHeaderView: View {
     }
     
     private func fetchProfile() {
+        fetchTagVocabulary()
         guard libraryURL != nil, let id = currentEntityId else { return }
         do {
             // DISPLAY is the merged view across every open library that has

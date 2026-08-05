@@ -39,27 +39,57 @@ struct TagGalleryView: View {
 
     // Cached once per assets/profiles change instead of re-derived (and
     // re-counted per tag) on every render.
+    /// The operator's chosen spelling for each tag, when one has been recorded.
+    /// Empty is fine — canonical spellings then fall back to the most-used one.
+    @State private var tagVocabulary: [TagRecord] = []
     @State private var allUniqueTags: [String] = []
     @State private var tagCounts: [String: Int] = [:]
     @State private var tagScopes: [String: TagScope] = [:]
+
+    /// Best-effort: the gallery still folds spellings without a vocabulary, it
+    /// just falls back to the most-used one rather than the operator's choice.
+    /// A federated view has no single library to read, which is also fine.
+    private func loadTagVocabulary() {
+        guard let libraryURL else { return }
+        tagVocabulary = (try? LibraryStore(at: libraryURL).fetchTagVocabulary()) ?? []
+    }
 
     private func recomputeTags() {
         let tagProfiles = entityProfiles.filter { $0.key.hasPrefix("tag:") }
         let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
 
+        // Two spellings of one tag are one tag. Without this the gallery
+        // renders them as separate cards with separate counts, which is what
+        // the operator sees even after the vocabulary has folded them —
+        // identity is folded in one place and display was not.
+        //
+        // Every raw occurrence is collected, repeats included: repetition is
+        // what decides which spelling is the common one.
+        var occurrences: [String] = []
+        for asset in assets {
+            for tag in asset.tags where tag.hasPrefix("tag:") {
+                occurrences.append(String(tag.dropFirst(4)))
+            }
+        }
+        for profile in actorProfiles.values { occurrences.append(contentsOf: profile.tags) }
+        for key in tagProfiles.keys { occurrences.append(String(key.dropFirst(4))) }
+
+        let canonical = TagVocabulary.canonicalSpellings(occurrences, preferring: tagVocabulary)
+        func display(_ name: String) -> String { canonical[name] ?? name }
+
         var filmTagSet = Set<String>()
         for asset in assets {
             for tag in asset.tags where tag.hasPrefix("tag:") {
-                filmTagSet.insert(String(tag.dropFirst(4)))
+                filmTagSet.insert(display(String(tag.dropFirst(4))))
             }
         }
         for key in tagProfiles.keys {
-            filmTagSet.insert(String(key.dropFirst(4)))
+            filmTagSet.insert(display(String(key.dropFirst(4))))
         }
 
         var actorTagSet = Set<String>()
         for profile in actorProfiles.values {
-            actorTagSet.formUnion(profile.tags)
+            actorTagSet.formUnion(profile.tags.map(display))
         }
 
         let allNames = filmTagSet.union(actorTagSet)
@@ -78,11 +108,11 @@ struct TagGalleryView: View {
         for asset in assets {
             var matchedNames = Set<String>()
             for tag in asset.tags where tag.hasPrefix("tag:") {
-                matchedNames.insert(String(tag.dropFirst(4)))
+                matchedNames.insert(display(String(tag.dropFirst(4))))
             }
             for actor in asset.actors {
                 if let profile = actorProfiles["actor:\(actor)"] {
-                    matchedNames.formUnion(profile.tags)
+                    matchedNames.formUnion(profile.tags.map(display))
                 }
             }
             for name in matchedNames {
@@ -124,7 +154,12 @@ struct TagGalleryView: View {
                         .padding(.top, 80)
                     }
                 } else {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                    // Adaptive rather than two fixed columns: at two columns a
+                    // phone cell is ~170pt, which is what squeezed the tag name
+                    // to about seven characters. Adaptive gives each cell a
+                    // real minimum width and lets the column count follow the
+                    // window — one or two on a phone, more on a Mac.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                         ForEach(filteredTags, id: \.self) { tag in
                             let isSelected = sidebarSelection.contains(.tag(tag))
                             Button(action: {
@@ -197,6 +232,7 @@ struct TagGalleryView: View {
             }
         }
         .onAppear {
+            loadTagVocabulary()
             recomputeTags()
         }
         .onChange(of: assets) { _, _ in
@@ -231,14 +267,6 @@ struct TagGalleryItemView: View {
         }
     }
 
-    private var scopeIcon: String {
-        switch scope {
-        case .filmOnly: return "tag.fill"
-        case .actorOnly: return "person.fill"
-        case .shared: return "link"
-        }
-    }
-
     private var scopeLabel: String {
         switch scope {
         case .filmOnly: return "Film"
@@ -247,34 +275,53 @@ struct TagGalleryItemView: View {
         }
     }
 
+    // Text-first. The name is the content; everything else is metadata about
+    // it, so the name gets the full width of the cell and nothing competes
+    // with it horizontally.
+    //
+    // Measured against the real vocabulary: 13 of 30 tags exceed 7 characters
+    // and the longest is 18, so the previous layout truncated 43% of them. The
+    // recorded decision is to be ready for a provider vocabulary "ten thousand
+    // long", which rules out tuning for today's shortest names.
+    //
+    // Three things were removed rather than shrunk:
+    //   • the leading icon — it duplicated the scope the label already states
+    //   • the scope WORD beside the count — same duplication, second copy
+    //   • the chevron — the whole cell is the tap target in a grid
+    // Each cost horizontal space the name needed and told the reader nothing
+    // the card did not already say.
     var body: some View {
-        HStack {
-            Image(systemName: scopeIcon)
-                .foregroundColor(scopeColor)
-                .font(.title3)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(tag)
+                .font(.callout.weight(.semibold))
+                .lineLimit(2)
+                // Shrinks before it truncates: a long tag rendered small is
+                // still readable, a truncated one is a different tag.
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tag)
-                    .font(.headline)
+            HStack(spacing: 6) {
+                Text("\(assetsCount) video\(assetsCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                HStack(spacing: 4) {
-                    Text("\(assetsCount) Video\(assetsCount == 1 ? "" : "s")")
-                    Text("·")
-                    Text(scopeLabel)
-                        .foregroundColor(scopeColor)
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
+                Spacer(minLength: 4)
+
+                // The scope, stated ONCE, as a word. A colour alone is not
+                // readable for everyone and an icon needs a legend.
+                Text(scopeLabel)
+                    .font(.caption2.weight(.medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(scopeColor.opacity(0.18), in: Capsule())
+                    .foregroundStyle(scopeColor)
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .foregroundColor(.secondary)
-                .imageScale(.small)
         }
-        .padding()
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isSelected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1))
         .overlay(

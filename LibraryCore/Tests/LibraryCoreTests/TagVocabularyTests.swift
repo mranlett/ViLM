@@ -216,6 +216,194 @@ final class TagVocabularyTests: XCTestCase {
         XCTAssertFalse(TagVocabulary.canAttach(nil, to: .performer))
     }
 
+    // MARK: - The worklist
+
+    func testUnclassifiedTagsComeFirst() {
+        let assets = [asset(["tag:Climbing", "tag:Unsorted"])]
+        let vocab = [TagRecord(displayName: "Climbing", kind: .action),
+                     TagRecord(displayName: "Unsorted")]
+
+        let items = TagVocabulary.worklist(assets: assets, vocabulary: vocab)
+
+        XCTAssertEqual(items.map(\.record.displayName), ["Unsorted", "Climbing"],
+                       "the work comes first")
+    }
+
+    func testWithinAGroupTheMostUsedComesFirst() {
+        var assets = Array(repeating: asset(["tag:Common"]), count: 5)
+        assets.append(asset(["tag:Rare"]))
+        let vocab = [TagRecord(displayName: "Rare"), TagRecord(displayName: "Common")]
+
+        let items = TagVocabulary.worklist(assets: assets, vocabulary: vocab)
+
+        XCTAssertEqual(items.map(\.record.displayName), ["Common", "Rare"])
+        XCTAssertEqual(items.first?.uses, 5)
+    }
+
+    /// Merged spellings are surfaced so the operator can pick a different
+    /// display name rather than discovering the merge later.
+    func testMergedSpellingsAreReported() {
+        let assets = [asset(["tag:SCUBA"]), asset(["tag:Scuba"])]
+        let vocab = [TagRecord(displayName: "SCUBA")]
+
+        let item = try? XCTUnwrap(
+            TagVocabulary.worklist(assets: assets, vocabulary: vocab).first)
+
+        XCTAssertEqual(item?.spellings, ["SCUBA", "Scuba"])
+        XCTAssertEqual(item?.uses, 2, "both spellings count toward the same tag")
+    }
+
+    /// `uses` means videos, not tag strings. One asset carrying two casings of
+    /// the same tag is one video using it, not two.
+    func testUsesCountsVideosNotStrings() {
+        let doubled = asset(["tag:SCUBA", "tag:Scuba"])
+        let vocab = [TagRecord(displayName: "SCUBA")]
+
+        let item = TagVocabulary.worklist(assets: [doubled], vocabulary: vocab).first
+
+        XCTAssertEqual(item?.uses, 1, "one video, however many spellings it carries")
+        XCTAssertEqual(item?.spellings, ["SCUBA", "Scuba"], "but both spellings are reported")
+    }
+
+    /// ⚠️ The worklist must not pre-select. Ordering helps; choosing does not.
+    func testTheWorklistNeverPreSelectsAKind() {
+        let vocab = [TagRecord(displayName: "Unsorted")]
+
+        let items = TagVocabulary.worklist(assets: [asset(["tag:Unsorted"])],
+                                           vocabulary: vocab)
+
+        XCTAssertNil(items.first?.record.kind)
+        XCTAssertFalse(items.first?.isClassified ?? true)
+    }
+
+    func testATagNoLongerUsedIsReportedNotRemoved() {
+        let vocab = [TagRecord(displayName: "Gone", kind: .action)]
+
+        let items = TagVocabulary.worklist(assets: [], vocabulary: vocab)
+
+        XCTAssertEqual(TagVocabulary.unused(in: items).map(\.record.displayName), ["Gone"])
+        XCTAssertEqual(items.first?.record.resolvedKind(), TagKind.action,
+                       "a tag falling to zero uses keeps its classification")
+    }
+
+    // MARK: - Canonical spellings for display
+
+    /// The defect the operator found: two casings rendered as two tags in the
+    /// gallery, because every listing surface derives its own set from raw
+    /// strings and never asks the vocabulary.
+    func testTwoCasingsCollapseToOneDisplayName() {
+        let map = TagVocabulary.canonicalSpellings(["GROUP", "GROUP", "GROUP"])
+
+        XCTAssertEqual(map["GROUP"], "GROUP")
+        XCTAssertEqual(map["GROUP"], "GROUP", "the rarer casing displays as the common one")
+        XCTAssertEqual(Set(map.values).count, 1, "one tag, one display name")
+    }
+
+    func testASingleSpellingMapsToItself() {
+        let map = TagVocabulary.canonicalSpellings(["Outdoors", "Climbing"])
+
+        XCTAssertEqual(map["Outdoors"], "Outdoors")
+        XCTAssertEqual(map["Climbing"], "Climbing")
+    }
+
+    /// The operator's stored choice outranks a head-count.
+    func testTheVocabularysDisplayNameWinsOverUsage() {
+        let map = TagVocabulary.canonicalSpellings(
+            ["GROUP", "GROUP", "GROUP", "GROUP"],
+            preferring: [TagRecord(displayName: "GROUP")])
+
+        XCTAssertEqual(map["GROUP"], "GROUP")
+        XCTAssertEqual(map["GROUP"], "GROUP")
+    }
+
+    func testCanonicalSpellingsAreStableAcrossOrderings() {
+        let a = TagVocabulary.canonicalSpellings(["GROUP", "GROUP"])
+        let b = TagVocabulary.canonicalSpellings(["GROUP", "GROUP"])
+
+        XCTAssertEqual(a["GROUP"], b["GROUP"])
+        XCTAssertEqual(a["GROUP"], b["GROUP"])
+    }
+
+    func testUnrelatedTagsAreNotMerged() {
+        let map = TagVocabulary.canonicalSpellings(["Climbing", "Climbdown"])
+
+        XCTAssertEqual(Set(map.values), ["Climbing", "Climbdown"])
+    }
+
+    // MARK: - The write check (what actually gates a save)
+
+    /// ⚠️ The deadlock the check exists to avoid: refusing unclassified tags
+    /// would mean no new tag could ever be created — it cannot be classified
+    /// until it exists, and cannot exist until it is classified.
+    func testANewUnknownTagIsAllowedAndReported() {
+        let check = TagVocabulary.check(adding: asset(["tag:BrandNew"]),
+                                        against: asset([]),
+                                        vocabulary: vocabulary)
+
+        XCTAssertTrue(check.isAllowed, "a new tag must be creatable")
+        XCTAssertEqual(check.unclassified, ["BrandNew"], "and must reach the worklist")
+    }
+
+    func testAKnownButUnclassifiedTagIsAllowedAndReported() {
+        let check = TagVocabulary.check(adding: asset(["tag:Unsorted"]),
+                                        against: asset([]),
+                                        vocabulary: vocabulary)
+
+        XCTAssertTrue(check.isAllowed)
+        XCTAssertEqual(check.unclassified, ["Unsorted"])
+    }
+
+    /// The rule that actually protects the graph.
+    func testAPerformerAttributeIsRefusedOnAVideo() {
+        let check = TagVocabulary.check(adding: asset(["tag:Redhead"]),
+                                        against: asset([]),
+                                        vocabulary: vocabulary)
+
+        XCTAssertFalse(check.isAllowed)
+        XCTAssertEqual(check.refused, ["Redhead"])
+    }
+
+    func testActionAndVideoAttributeAreAllowedOnAVideo() {
+        let check = TagVocabulary.check(adding: asset(["tag:Climbing", "tag:Compilation"]),
+                                        against: asset([]),
+                                        vocabulary: vocabulary)
+
+        XCTAssertTrue(check.isAllowed)
+        XCTAssertTrue(check.unclassified.isEmpty)
+    }
+
+    /// The 31 videos already carrying an attribute tag stay editable.
+    func testAPreExistingAttributeTagDoesNotBlockAnEdit() {
+        let before = asset(["tag:Redhead"])
+        let after = asset(["tag:Redhead", "tag:Climbing"])
+
+        let check = TagVocabulary.check(adding: after, against: before,
+                                        vocabulary: vocabulary)
+
+        XCTAssertTrue(check.isAllowed, "what is already there is not re-judged")
+        XCTAssertTrue(check.refused.isEmpty)
+    }
+
+    func testAnActionIsRefusedOnAPerformer() {
+        let before = EntityProfile(id: "actor:Alice Example")
+        var after = before
+        after.tags = ["Climbing"]
+
+        let check = TagVocabulary.check(adding: after, against: before,
+                                        vocabulary: vocabulary)
+
+        XCTAssertEqual(check.refused, ["Climbing"])
+    }
+
+    func testAnAttributeIsAllowedOnAPerformer() {
+        let before = EntityProfile(id: "actor:Alice Example")
+        var after = before
+        after.tags = ["Redhead"]
+
+        XCTAssertTrue(TagVocabulary.check(adding: after, against: before,
+                                          vocabulary: vocabulary).isAllowed)
+    }
+
     // MARK: - The write boundary
 
     private var vocabulary: [TagRecord] {

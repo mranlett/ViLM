@@ -112,13 +112,20 @@ extension AssetFilterCriteria {
             }
         }
 
-        // Tags (the video's own action tags)
+        // Tags (the video's own action tags).
+        //
+        // Matched on FOLDED identity, not raw spelling. The surfaces that offer
+        // these filters now collapse two casings of a tag into one option, so
+        // comparing raw strings here would show a single choice that silently
+        // matched only the videos spelled the way the label happened to be —
+        // a filter that looks unified and behaves partially.
         if !selectedTags.isEmpty {
-            let assetTags = Set(asset.actions)
+            let assetTags = Set(asset.actions.map(TagNormalizer.identityKey))
+            let wanted = Set(selectedTags.map(TagNormalizer.identityKey))
             if tagsLogic == .and {
-                if !selectedTags.isSubset(of: assetTags) { return false }
+                if !wanted.isSubset(of: assetTags) { return false }
             } else {
-                if selectedTags.isDisjoint(with: assetTags) { return false }
+                if wanted.isDisjoint(with: assetTags) { return false }
             }
         }
 
