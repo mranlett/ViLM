@@ -127,6 +127,45 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Who a performer IS, as far as the library knows.
+///
+/// A name alone is not an identity. Two people share it more often than is
+/// comfortable — a real search for "Robin Vale" returns two, born nine years
+/// apart — and picking the first is a coin flip that fails silently: the search
+/// returns nothing and reports "no match" rather than "I chose the wrong
+/// person of that name".
+///
+/// Everything the library has already established about a performer travels
+/// with the name, so a match that was validated once is not re-guessed on every
+/// subsequent lookup. That is the point of recording it.
+public struct PerformerIdentity: Equatable, Sendable {
+    public let name: String
+    /// From a previous match. The strongest evidence there is: two people of
+    /// one name are not born on the same day.
+    public let birthDate: String?
+    /// The source's own identifier, where a previous match recorded one.
+    /// Decisive when present — no searching required.
+    public let sourceId: String?
+
+    public init(name: String, birthDate: String? = nil, sourceId: String? = nil) {
+        self.name = name
+        self.birthDate = birthDate
+        self.sourceId = sourceId
+    }
+
+    /// Builds identities from the library's own profiles, so a search carries
+    /// what previous matching established.
+    public static func from(names: [String],
+                            profiles: [String: EntityProfile]) -> [PerformerIdentity] {
+        names.map { name in
+            let profile = profiles["actor:\(name)"] ?? profiles[name]
+            return PerformerIdentity(name: name,
+                                     birthDate: profile?.birthDate,
+                                     sourceId: profile?.enrichmentSourceId)
+        }
+    }
+}
+
 /// What an operator is asking for when they search by hand.
 public struct BrowseQuery: Equatable, Sendable {
     public var performerNames: [String]
@@ -194,6 +233,12 @@ public struct ProposedField<Value: Equatable & Sendable>: Equatable, Sendable {
 /// its source's enums — mapping happens inside the plugin, which is where
 /// source-specific knowledge belongs (D4).
 public struct ActorMetadataProposal: Equatable, Sendable {
+    /// The source's own identifier for this person.
+    ///
+    /// Carried so a validated match can be RECORDED rather than re-derived. A
+    /// name is not an identity — two people share one often enough that
+    /// re-searching later picks the wrong one and fails silently.
+    public var sourceId: ProposedField<String> = .absent
     public var bio: ProposedField<String> = .absent
     public var gender: ProposedField<String> = .absent
     public var hairColor: ProposedField<String> = .absent
@@ -311,7 +356,7 @@ public protocol VideoMetadataProvider: Plugin {
     /// most queries while a pair collapsed the same searches to five or fewer.
     /// A provider that cannot search this way returns nothing rather than
     /// falling back to one name, because a hundred candidates is not a result.
-    func search(performerNames: [String], studio: String?) async throws -> [PluginCandidate]
+    func search(performers: [PerformerIdentity], studio: String?) async throws -> [PluginCandidate]
 
     /// The outcome of an operator-driven search.
     ///
@@ -352,7 +397,7 @@ public extension VideoMetadataProvider {
     /// means "this provider cannot answer that", never "no such video".
     func match(perceptualHash: UInt64, distance: Int) async throws -> [PluginCandidate] { [] }
 
-    func search(performerNames: [String], studio: String?) async throws -> [PluginCandidate] { [] }
+    func search(performers: [PerformerIdentity], studio: String?) async throws -> [PluginCandidate] { [] }
 
     /// Empty means the provider cannot browse, not that nothing exists.
     func browse(_ query: BrowseQuery, page: Int) async throws -> BrowseResult {

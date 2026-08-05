@@ -19,6 +19,7 @@ struct VideoEnrichmentSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: VideoEnrichmentModel
+    @State private var examining: PluginCandidate?
 
     init(asset: Asset, libraryURL: URL, knownTags: Set<String>,
          onApply: @escaping (Asset) -> Void) {
@@ -52,11 +53,13 @@ struct VideoEnrichmentSheet: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         if case .reviewing = model.phase {
-                            Button("Apply") {
+                            // Never disabled: confirming a match with nothing
+                            // left to add is still a decision, and it has to be
+                            // recordable or the video returns to the queue.
+                            Button(model.hasAnythingToApply ? "Apply" : "Confirm Match") {
                                 if let updated = model.apply() { onApply(updated) }
                                 dismiss()
                             }
-                            .disabled(!model.hasAnythingToApply)
                         }
                     }
                 }
@@ -85,6 +88,16 @@ struct VideoEnrichmentSheet: View {
             }
         case .reviewing:
             review
+        case .alreadyResolved(let state, let source, let at):
+            ContentUnavailableView {
+                Label(state == .matched ? "Already matched" : "Ruled out",
+                      systemImage: state == .matched ? "checkmark.seal" : "person.crop.circle.badge.xmark")
+            } description: {
+                Text(resolvedDetail(state: state, source: source, at: at))
+            } actions: {
+                Button("Match again") { Task { await model.start(force: true) } }
+            }
+
         case .noMatches:
             // Not a dead end. The operator knows things the matcher does not —
             // that the cast list is short, that the studio is recorded as a
@@ -113,6 +126,20 @@ struct VideoEnrichmentSheet: View {
         }
     }
 
+    /// States plainly what is recorded and when, so "did that save?" is
+    /// answerable by looking rather than by re-running the match.
+    private func resolvedDetail(state: EnrichmentState, source: String?, at: Date?) -> String {
+        var parts: [String] = []
+        parts.append(state == .matched
+                     ? "This video was matched\(source.map { " to \($0)" } ?? "")."
+                     : "You marked this one as not findable.")
+        if let at {
+            parts.append("Recorded \(at.formatted(date: .abbreviated, time: .shortened)).")
+        }
+        parts.append("Batch runs skip it.")
+        return parts.joined(separator: " ")
+    }
+
     private func progress(_ title: String, detail: String?) -> some View {
         VStack(spacing: 10) {
             ProgressView()
@@ -127,38 +154,81 @@ struct VideoEnrichmentSheet: View {
 
     // MARK: - Choosing between candidates
 
+    /// Choosing between candidates is a VISUAL act. The previous version of
+    /// this showed two 96×54 stills with no way to enlarge them and no sight of
+    /// the file being matched — so the only way to compare was to accept one,
+    /// look, then cancel back out and start again.
     private func picker(_ candidates: [PluginCandidate]) -> some View {
-        List(candidates) { candidate in
-            Button {
-                Task { await model.choose(candidate) }
-            } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    thumbnail(candidate)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(candidate.title).font(.subheadline).fontWeight(.medium)
-                        if let subtitle = candidate.subtitle {
-                            // Date, studio and cast — the three things that
-                            // separate two scenes with near-identical names.
-                            Text(subtitle).font(.caption).foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Spacer()
+        List {
+            Section {
+                // The file's own frames, right here. Comparing against
+                // something you have to remember is not comparing.
+                VideoContextPanel(asset: asset, libraryURL: libraryURL)
+            }
+
+            Section {
+                ForEach(candidates) { candidate in
+                    candidateRow(candidate)
                 }
+            } header: {
+                HStack {
+                    Text("\(candidates.count) possible matches")
+                    Spacer()
+                    Button("None of these") { model.beginBrowsing() }.font(.caption)
+                }
+            } footer: {
+                Text("Tap a picture to see every image the source has for it, at a size worth looking at. Tap the text to choose.")
+            }
+        }
+        .sheet(item: $examining) { candidate in
+            CandidateImageSheet(candidate: candidate) {
+                examining = nil
+                Task { await model.choose(candidate) }
+            }
+        }
+    }
+
+    private func candidateRow(_ candidate: PluginCandidate) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button { examining = candidate } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    thumbnail(candidate)
+                    if candidate.imageURLs.count > 1 {
+                        Text("\(candidate.imageURLs.count)")
+                            .font(.caption2)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(.black.opacity(0.6)).foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .padding(3)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button { Task { await model.choose(candidate) } } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(candidate.title).font(.subheadline).fontWeight(.medium)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle = candidate.subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let seconds = candidate.durationSeconds {
+                        Text(durationText(seconds)).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Text("\(candidates.count) possible matches")
-                    .font(.caption).foregroundColor(.secondary)
-                Spacer()
-                Button("None of these") { model.beginBrowsing() }.font(.caption)
-            }
-            .padding(.horizontal).padding(.vertical, 8)
-            .background(.bar)
-        }
+        .padding(.vertical, 2)
+    }
+
+    private func durationText(_ seconds: Int) -> String {
+        let m = seconds / 60, s = seconds % 60
+        return m >= 60 ? String(format: "%d:%02d:%02d", m / 60, m % 60, s)
+                       : String(format: "%d:%02d", m, s)
     }
 
     @ViewBuilder
@@ -169,13 +239,14 @@ struct VideoEnrichmentSheet: View {
             } placeholder: {
                 Rectangle().fill(Color.secondary.opacity(0.15))
             }
-            .frame(width: 96, height: 54)
+            // Large enough to recognise a scene from, which 96×54 was not.
+            .frame(width: 132, height: 74)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.secondary.opacity(0.15))
-                .frame(width: 96, height: 54)
-                .overlay(Image(systemName: "film").foregroundColor(.secondary))
+                .frame(width: 132, height: 74)
+                .overlay(Image(systemName: "film").foregroundStyle(.secondary))
         }
     }
 
@@ -185,6 +256,36 @@ struct VideoEnrichmentSheet: View {
         List {
             Section {
                 VideoContextPanel(asset: asset, libraryURL: libraryURL)
+            }
+
+            if let candidate = model.chosenCandidate {
+                Section {
+                    Button { examining = candidate } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            thumbnail(candidate)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(candidate.title).font(.subheadline).fontWeight(.medium)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let subtitle = candidate.subtitle {
+                                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Text("Tap to see all \(candidate.imageURLs.count) images")
+                                    .font(.caption2).foregroundStyle(.tint)
+                            }
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("Matched to")
+                } footer: {
+                    // Metadata alone frequently is not enough to be sure. The
+                    // picture is what settles it, so it belongs on the screen
+                    // where the decision is made rather than one level down.
+                    Text("Check this is the same video before applying.")
+                }
             }
 
             if let route = model.matchRoute {
@@ -289,7 +390,59 @@ struct VideoEnrichmentSheet: View {
                 Button("None") { model.selectNoTags() }.font(.caption)
             }
         } footer: {
-            Text("Tags you already use are ticked. The rest are offered but left off, so one match can't flood your tag list.")
+            Text("Tags already on this video are ticked — unticking one removes it. Tags you already use elsewhere are ticked too; the rest are offered but left off, so one match can't flood your tag list.")
+        }
+    }
+}
+
+/// Every image a candidate has, at a size worth looking at.
+///
+/// Separate from the row because the two answer different questions: a row asks
+/// "is this worth a closer look", this asks "is this the one". Choosing from
+/// here returns straight to the flow rather than making you back out and start
+/// the picker again.
+private struct CandidateImageSheet: View {
+    let candidate: PluginCandidate
+    var onChoose: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    private let columns = [GridItem(.adaptive(minimum: 240), spacing: 10)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let subtitle = candidate.subtitle {
+                    Text(subtitle)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                }
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(candidate.imageURLs, id: \.self) { url in
+                        AsyncImage(url: url) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 150)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle(candidate.title)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                // "Back", not "Cancel": this returns to the list of candidates,
+                // which is where you were.
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Back") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("This is it") { onChoose() }
+                }
+            }
         }
     }
 }

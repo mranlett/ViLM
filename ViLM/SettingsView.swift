@@ -20,6 +20,9 @@ struct SettingsView: View {
     var onTagCleanup: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
+    var onReadFilenames: (() -> Void)?
+    var onBatchMatchVideos: (() -> Void)?
+    var onStudioConflicts: (() -> Void)?
     var onMoveVideos: (() -> Void)?
     var onBackupRestore: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
@@ -48,6 +51,91 @@ struct SettingsView: View {
                     }
                 }
                 
+                Section(
+                    header: Text("Library"),
+                    footer: Text(session.isFederated
+                        ? "Move Videos and Back Up work on one library at a time — detach the attached librar\(session.attachedURLs.count == 1 ? "y" : "ies") in the sidebar to use them."
+                        : "Choose which folder ViLM manages and keep it in sync with what's on disk.")
+                ) {
+                    toolButton("Open Library", icon: "folder.badge.plus", action: onOpenLibrary)
+                    toolButton("Check for Changes", icon: "arrow.triangle.2.circlepath", action: onCheckForChanges)
+                    toolButton("Move Videos Between Libraries", icon: "arrow.left.arrow.right", action: onMoveVideos)
+                        .disabled(session.isFederated)
+                    toolButton("Back Up & Restore", icon: "externaldrive.badge.timemachine", action: onBackupRestore)
+                        .disabled(session.isFederated)
+                }
+
+                // Grouped by what the operator is trying to DO, in the order
+                // the work actually happens: bring information in, correct what
+                // is wrong, then look for what is still off. "Cleanup Tools"
+                // had become the drawer everything landed in — eight items
+                // spanning acquisition, repair and reporting, with nothing to
+                // say which was which or which to reach for first.
+                Section(
+                    header: Text("Add Metadata"),
+                    footer: Text("Run these in order. Filenames usually know more than the records do, so reading them first gives the matcher far more to work with.")
+                ) {
+                    // Deliberately first: this is the step that has to precede
+                    // matching, and before any rename.
+                    toolButton("1 · Read Filenames Into Catalogue",
+                               icon: "text.magnifyingglass", action: onReadFilenames)
+                    toolButton("2 · Match All Videos",
+                               icon: "sparkle.magnifyingglass", action: onBatchMatchVideos)
+                }
+
+                Section(
+                    header: Text("Fix Problems"),
+                    footer: Text("Each finds records that are wrong rather than merely incomplete, shows them, and changes nothing until you say so.")
+                ) {
+                    toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
+                    toolButton("Fix Duplicate Studios",
+                               icon: "building.2.crop.circle.badge.questionmark",
+                               action: onStudioConflicts)
+                    toolButton("Remove Duplicate Actor Photos",
+                               icon: "photo.stack", action: onActorPhotoCleanup)
+                    toolButton("Merge Tags & Actors", icon: "paintbrush", action: onTagCleanup)
+                        .disabled(session.isFederated)
+                }
+
+                Section(
+                    header: Text("Find Problems"),
+                    footer: Text(session.isFederated
+                        ? "Find Duplicates scans every open library, so cross-library copies surface. File Name Audit works on one at a time — detach to use it."
+                        : "These report rather than change anything.")
+                ) {
+                    toolButton("Find Duplicate Videos",
+                               icon: "square.on.square.dashed", action: onFindDuplicates)
+                    toolButton("File Name Audit",
+                               icon: "doc.text.magnifyingglass", action: onAuditFileName)
+                        .disabled(session.isFederated)
+                }
+
+                Section(
+                    header: Text("Move Actor Data Between Libraries"),
+                    footer: Text(session.isFederated
+                        ? "With libraries attached, use Sync Actors in the sidebar instead — it converges them directly, no export file needed. These are for libraries that are never open together."
+                        : "Moves enriched bios and photos into another copy of the library without losing work already there.")
+                ) {
+                    toolButton("Export Actor Library", icon: "square.and.arrow.up",
+                               action: onExportActorLibrary)
+                        .disabled(session.isFederated)
+                    toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down",
+                               action: onImportActorLibrary)
+                        .disabled(session.isFederated)
+                }
+
+                Section(
+                    header: Text("One-off Migrations"),
+                    footer: Text("Run once, when the library predates the feature. Harmless to skip.")
+                ) {
+                    toolButton("Migrate Episode Info", icon: "arrow.triangle.branch",
+                               action: onMigrateEpisodes)
+                        .disabled(session.isFederated)
+                }
+
+                // Reference and setup last: these are read once or
+                // changed rarely, and they were pushing every tool below
+                // the fold on a phone.
                 Section(header: Text("Information")) {
                     NavigationLink {
                         // Deep-link handlers fire immediately; ContentView
@@ -81,55 +169,6 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section(
-                    header: Text("Library"),
-                    footer: Text(session.isFederated
-                        ? "Move Videos and Back Up work on one library at a time — detach the attached librar\(session.attachedURLs.count == 1 ? "y" : "ies") in the sidebar to use them."
-                        : "Choose which folder ViLM manages and keep it in sync with what's on disk.")
-                ) {
-                    toolButton("Open Library", icon: "folder.badge.plus", action: onOpenLibrary)
-                    toolButton("Check for Changes", icon: "arrow.triangle.2.circlepath", action: onCheckForChanges)
-                    toolButton("Move Videos Between Libraries", icon: "arrow.left.arrow.right", action: onMoveVideos)
-                        .disabled(session.isFederated)
-                    toolButton("Back Up & Restore", icon: "externaldrive.badge.timemachine", action: onBackupRestore)
-                        .disabled(session.isFederated)
-                }
-
-                Section(
-                    header: Text("Cleanup Tools"),
-                    footer: Text(session.isFederated
-                        ? "Find Duplicates scans every open library — duplicates across libraries surface too. The other tools work on one library at a time; detach to use them."
-                        : "Find and fix inconsistent or duplicated data across the whole library.")
-                ) {
-                    toolButton("File Name Audit", icon: "text.magnifyingglass", action: onAuditFileName)
-                        .disabled(session.isFederated)
-                    // Find Duplicates is federation-aware: it scans every open
-                    // library (cross-library duplicates surface) with each
-                    // video's fingerprint cached in its OWNING library.
-                    toolButton("Find Duplicates", icon: "square.on.square.dashed", action: onFindDuplicates)
-                    toolButton("Migrate Episode Info", icon: "arrow.triangle.branch", action: onMigrateEpisodes)
-                        .disabled(session.isFederated)
-                    toolButton("Tag & Actor Cleanup", icon: "paintbrush", action: onTagCleanup)
-                        .disabled(session.isFederated)
-                    // Reads and writes one library's own tags, so unlike the
-                    // merge tools it is safe while federated.
-                    toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
-                }
-
-                Section(
-                    header: Text("Actors"),
-                    footer: Text(session.isFederated
-                        ? "While libraries are attached, use Sync Actors in the sidebar's Open Libraries section instead — it converges the open libraries' actor databases directly, no export file needed. These file-based tools are for libraries that aren't open together; detach to use them."
-                        : "Export and Import move enriched actor bios and photos between library copies (e.g. a portable copy) without losing existing work.")
-                ) {
-                    toolButton("Export Actor Library For Merge", icon: "square.and.arrow.up", action: onExportActorLibrary)
-                        .disabled(session.isFederated)
-                    toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down", action: onImportActorLibrary)
-                        .disabled(session.isFederated)
-                    // Photo dedup reads and writes one library's own files, so
-                    // unlike the merge tools it is safe while federated.
-                    toolButton("Remove Duplicate Photos", icon: "photo.stack", action: onActorPhotoCleanup)
-                }
             }
             .navigationTitle("Settings")
             #if os(iOS)

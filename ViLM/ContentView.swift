@@ -86,6 +86,9 @@ struct ContentView: View {
     @State private var isShowingTagCleanup = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingTagCaseCleanup = false
+    @State private var isShowingReadFilenames = false
+    @State private var isShowingBatchMatch = false
+    @State private var isShowingStudioConflicts = false
     @State private var isShowingDuplicateDetection = false
     @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
@@ -221,6 +224,9 @@ struct ContentView: View {
                     onTagCleanup: { isShowingTagCleanup = true },
                     onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                     onTagCaseCleanup: { isShowingTagCaseCleanup = true },
+                    onReadFilenames: { isShowingReadFilenames = true },
+                    onBatchMatchVideos: { isShowingBatchMatch = true },
+                    onStudioConflicts: { isShowingStudioConflicts = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
                     onBackupRestore: { isShowingLibraryBackup = true },
                     onExportActorLibrary: { isShowingActorLibraryExport = true },
@@ -280,6 +286,27 @@ struct ContentView: View {
                         // scans it (Check for Changes) and flags any missing files.
                         processFolder(at: restoredURL)
                     })
+                }
+            }
+            .sheet(isPresented: $isShowingStudioConflicts) {
+                let urls = LibrarySession.shared.allURLs
+                if !urls.isEmpty {
+                    StudioConflictCleanupView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingBatchMatch) {
+                let urls = LibrarySession.shared.allURLs
+                if !urls.isEmpty {
+                    VideoBatchMatchView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingReadFilenames) {
+                // Every open library, matching the rename paths. Reading only
+                // the primary left an attached library untouched and narrowed
+                // the vocabulary the parse works from.
+                let urls = LibrarySession.shared.allURLs
+                if !urls.isEmpty {
+                    FileNameParseReviewView(libraryURLs: urls) { reloadUnionAssets() }
                 }
             }
             .sheet(isPresented: $isShowingTagCaseCleanup) {

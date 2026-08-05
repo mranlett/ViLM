@@ -224,6 +224,12 @@ public enum ActorEnrichment {
             careerStartYear: take(Field.careerStartYear, proposal.careerStartYear, profile?.careerStartYear),
             careerEndYear: take(Field.careerEndYear, proposal.careerEndYear, profile?.careerEndYear),
             ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile?.ageAtCareerStart),
+            // Recorded whenever the source supplies one, without needing to be
+            // ticked: it is not a value the operator reviews, it is the link
+            // back to the record they just confirmed. Without it, the next
+            // lookup re-searches by name and may pick a different person of
+            // that name entirely.
+            enrichmentSourceId: proposal.sourceId.value ?? profile?.enrichmentSourceId,
             // Union, like tags and AKAs: enrichment may add a link but never
             // removes one the operator curated.
             links: accepting.contains(Field.links)

@@ -50,10 +50,17 @@ public struct VideoTagOption: Equatable, Sendable, Identifiable {
     public let name: String
     /// Already in the library's vocabulary, so ticked by default.
     public let isKnown: Bool
+    /// This video already carries this tag.
+    ///
+    /// Shown ticked, and unticking REMOVES it. Without these the list is a
+    /// one-way door: a tag applied by mistake is invisible here and can only be
+    /// undone somewhere else, which is where a wrong tag quietly survives.
+    public let isExisting: Bool
 
-    public init(name: String, isKnown: Bool) {
+    public init(name: String, isKnown: Bool, isExisting: Bool = false) {
         self.name = name
         self.isKnown = isKnown
+        self.isExisting = isExisting
     }
 }
 
@@ -119,13 +126,21 @@ public enum VideoEnrichmentReview {
                proposed: proposal.externalLinks.value?.first?.absoluteString,
                note: linkNote(proposal))
 
-        // Studio is a tag, so "already has it" means the tag is present.
+        // Studio REPLACES rather than adds. A scene has one releasing studio,
+        // so treating it like the performer list — union, never remove — left a
+        // wrong studio sitting alongside the right one, and the video then
+        // carried two. Accepting a correction has to be able to correct.
         if let studio = proposal.studio.value, !studio.isEmpty {
-            let held = asset.studios.contains { $0.caseInsensitiveCompare(studio) == .orderedSame }
-            if !held {
-                rows.append(.init(field: Field.studio, label: "Studio", kind: .fill,
-                                  current: asset.studios.joined(separator: ", "),
-                                  proposed: studio, sourceNote: proposal.studio.sourceNote))
+            let held = asset.studios
+            if !held.contains(where: { $0.caseInsensitiveCompare(studio) == .orderedSame }) {
+                rows.append(.init(
+                    field: Field.studio, label: "Studio",
+                    // A studio already recorded and disagreeing is a CONFLICT,
+                    // not a fill: accepting it discards what is there, and that
+                    // must never happen without being ticked.
+                    kind: held.isEmpty ? .fill : .conflict,
+                    current: held.joined(separator: ", "),
+                    proposed: studio, sourceNote: proposal.studio.sourceNote))
             }
         }
 
@@ -172,15 +187,25 @@ public enum VideoEnrichmentReview {
     public static func tagOptions(for asset: Asset,
                                   proposal: VideoMetadataProposal,
                                   knownTags: Set<String>) -> [VideoTagOption] {
-        guard let tags = proposal.tags.value else { return [] }
         let held = Set(asset.actions.map { $0.lowercased() })
         let vocabulary = Set(knownTags.map { $0.lowercased() })
-        let options = tags
-            .filter { !held.contains($0.lowercased()) }
-            .map { VideoTagOption(name: $0, isKnown: vocabulary.contains($0.lowercased())) }
+
+        // The video's OWN tags first, ticked — so the list is the whole picture
+        // rather than only what the source wants to add.
+        var options = asset.actions.map {
+            VideoTagOption(name: $0, isKnown: true, isExisting: true)
+        }
+        for tag in proposal.tags.value ?? [] where !held.contains(tag.lowercased()) {
+            options.append(VideoTagOption(name: tag,
+                                          isKnown: vocabulary.contains(tag.lowercased()),
+                                          isExisting: false))
+        }
+        // Existing first, then ones already in the vocabulary, then the rest —
+        // which is also the order they are ticked in.
         return options.sorted { a, b in
-            a.isKnown == b.isKnown ? a.name.localizedStandardCompare(b.name) == .orderedAscending
-                                   : a.isKnown
+            if a.isExisting != b.isExisting { return a.isExisting }
+            if a.isKnown != b.isKnown { return a.isKnown }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
     }
 
@@ -193,7 +218,9 @@ public enum VideoEnrichmentReview {
     /// operator already uses are a different matter: applying those is filling
     /// in a tag they meant to add.
     public static func defaultSelection(_ options: [VideoTagOption]) -> Set<String> {
-        Set(options.filter(\.isKnown).map(\.name))
+        // Existing tags start ticked because they ARE the current state —
+        // opening this screen must not propose removing everything.
+        Set(options.filter { $0.isExisting || $0.isKnown }.map(\.name))
     }
 
     /// - Parameter acceptedTags: the exact tag names to add, chosen
@@ -220,7 +247,8 @@ public enum VideoEnrichmentReview {
     public static func merged(asset: Asset,
                               proposal: VideoMetadataProposal,
                               accepting: Set<String>,
-                              acceptedTags: Set<String> = []) -> Asset {
+                              acceptedTags: Set<String> = [],
+                              offeredTags: [String] = []) -> Asset {
         var merged = asset
 
         if accepting.contains(Field.seriesTitle), let v = proposal.seriesTitle.value { merged.videoName = v }
@@ -242,11 +270,27 @@ public enum VideoEnrichmentReview {
         }
 
         if accepting.contains(Field.studio), let studio = proposal.studio.value, !studio.isEmpty {
+            // Replace, not append. The old studio goes only because this field
+            // was explicitly accepted — an unticked conflict changes nothing.
+            tags.removeAll { $0.hasPrefix("studio:") }
             addTag("studio:\(studio)")
         }
         if accepting.contains(Field.performers), let performers = proposal.actors.value {
             for name in performers where !name.isEmpty { addTag("actor:\(name)") }
         }
+        // Unticking an existing tag REMOVES it. Scoped to `offeredTags` so
+        // this can only ever affect tags the operator was actually shown — a
+        // tag absent from the list is untouched, never silently dropped.
+        if !offeredTags.isEmpty {
+            let offered = Set(offeredTags.map { $0.lowercased() })
+            let keep = Set(acceptedTags.map { $0.lowercased() })
+            tags.removeAll { stored in
+                guard stored.hasPrefix("tag:") else { return false }
+                let bare = String(stored.dropFirst(4)).lowercased()
+                return offered.contains(bare) && !keep.contains(bare)
+            }
+        }
+
         // Exactly what was ticked, nothing inferred. Proposals carry bare
         // names, matching what `Asset.actions` shows; the stored form is
         // prefixed, and adding the unprefixed string would create a tag the

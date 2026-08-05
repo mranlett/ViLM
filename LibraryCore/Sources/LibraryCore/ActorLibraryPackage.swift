@@ -408,6 +408,7 @@ extension LibraryStore {
                 // so an older result must not mask a newer one.
                 enrichmentState: newerEnrichment.enrichmentState,
                 enrichmentSource: newerEnrichment.enrichmentSource,
+                enrichmentSourceId: newerEnrichment.enrichmentSourceId ?? existing?.enrichmentSourceId,
                 enrichmentCheckedAt: newerEnrichment.enrichmentCheckedAt,
                 links: EntityLink.merged(existing?.links ?? [], adding: imported.links)
             )

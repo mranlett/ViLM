@@ -99,6 +99,7 @@ struct EntityProfileEditorView: View {
     /// actor toggled on and off again must not come back as never-checked.
     @State private var stateBeforeUnmatchable: EnrichmentState??
     @State private var enrichmentSource: String?
+    @State private var enrichmentSourceId: String?
     @State private var enrichmentCheckedAt: Date?
     
     private var filteredTagSuggestions: [String] {
@@ -145,6 +146,7 @@ struct EntityProfileEditorView: View {
         _ageAtCareerStart = State(initialValue: profile?.ageAtCareerStart)
         _enrichmentState = State(initialValue: profile?.enrichmentState)
         _enrichmentSource = State(initialValue: profile?.enrichmentSource)
+        _enrichmentSourceId = State(initialValue: profile?.enrichmentSourceId)
         _enrichmentCheckedAt = State(initialValue: profile?.enrichmentCheckedAt)
         _tags = State(initialValue: profile?.tags ?? [])
         _akas = State(initialValue: profile?.akas ?? [])
@@ -633,6 +635,8 @@ struct EntityProfileEditorView: View {
                             ageAtCareerStart: ageAtCareerStart,
                             enrichmentState: enrichmentState,
                             enrichmentSource: enrichmentSource,
+            enrichmentSourceId: enrichmentSourceId,
+                            enrichmentSourceId: enrichmentSourceId,
                             enrichmentCheckedAt: enrichmentCheckedAt,
                             links: links
                         )
@@ -811,6 +815,7 @@ struct EntityProfileEditorView: View {
             ageAtCareerStart: ageAtCareerStart,
             enrichmentState: enrichmentState,
             enrichmentSource: enrichmentSource,
+            enrichmentSourceId: enrichmentSourceId,
             enrichmentCheckedAt: enrichmentCheckedAt,
             links: links
         )
@@ -840,6 +845,7 @@ struct EntityProfileEditorView: View {
         ageAtCareerStart = merged.ageAtCareerStart ?? ageAtCareerStart
         enrichmentState = merged.enrichmentState ?? enrichmentState
         enrichmentSource = merged.enrichmentSource ?? enrichmentSource
+        enrichmentSourceId = merged.enrichmentSourceId ?? enrichmentSourceId
         enrichmentCheckedAt = merged.enrichmentCheckedAt ?? enrichmentCheckedAt
     }
 

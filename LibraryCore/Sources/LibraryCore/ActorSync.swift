@@ -483,6 +483,9 @@ public enum ActorSync {
             //
             // So: no result, no timestamp. With a result, take the most recent
             // check that actually produced that result.
+            // Travels with the result it identifies, same as the timestamp.
+            converged.enrichmentSourceId = holders
+                .compactMap { $0.profile.enrichmentSourceId }.first
             converged.enrichmentCheckedAt = converged.enrichmentState.flatMap { state in
                 holders
                     .filter { $0.profile.enrichmentState == state }

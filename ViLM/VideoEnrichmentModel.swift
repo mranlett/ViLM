@@ -33,6 +33,10 @@ final class VideoEnrichmentModel: ObservableObject {
         case fetching
         case reviewing
         case noMatches
+        /// Already resolved on a previous visit. Shown rather than silently
+        /// re-searched, so the recorded state is visible instead of having to
+        /// be inferred from whether the same candidates come back.
+        case alreadyResolved(EnrichmentState, source: String?, at: Date?)
         /// The operator is driving the search themselves.
         case browsing
         /// Matched, but the library already holds everything it offered.
@@ -51,6 +55,10 @@ final class VideoEnrichmentModel: ObservableObject {
     /// How the match was found, shown so the operator can weigh it: an exact
     /// fingerprint deserves more trust than a name search.
     @Published private(set) var matchRoute: String?
+    /// The candidate that was chosen, kept so the review screen can show its
+    /// picture. Metadata alone frequently is not enough to be sure, and the
+    /// image is what actually settles it.
+    @Published private(set) var chosenCandidate: PluginCandidate?
 
     // MARK: Operator-driven search
     //
@@ -107,9 +115,20 @@ final class VideoEnrichmentModel: ObservableObject {
 
     // MARK: - Finding it
 
-    func start() async {
+    func start(force: Bool = false) async {
         guard let provider else {
             phase = .failed("No video metadata source is installed.")
+            return
+        }
+
+        // A settled record is reported, not re-searched. Searching again is
+        // still one tap away — but doing it automatically hid whether the last
+        // match had been recorded at all, because the same candidates came
+        // back either way.
+        if !force, let state = asset.enrichmentState,
+           state == .matched || state == .unmatchable {
+            phase = .alreadyResolved(state, source: asset.enrichmentSource,
+                                     at: asset.enrichmentCheckedAt)
             return
         }
 
@@ -135,9 +154,13 @@ final class VideoEnrichmentModel: ObservableObject {
 
         // 2 — the people in it. Two names or none; one name returns hundreds.
         phase = .searching
-        let performers = asset.actors
+        // Carries what previous actor matching established — the recorded
+        // source id where there is one, the birth date otherwise. Two people
+        // really are called "Robin Vale", and searching by name alone picks one
+        // at random and then reports "no match" when it guessed wrong.
+        let performers = PerformerIdentity.from(names: asset.actors, profiles: actorProfiles())
         if performers.count >= 2 {
-            if let hits = try? await provider.search(performerNames: performers,
+            if let hits = try? await provider.search(performers: performers,
                                                      studio: asset.studios.first),
                !hits.isEmpty {
                 matchRoute = "Matched on cast — check this is the right scene"
@@ -328,6 +351,7 @@ final class VideoEnrichmentModel: ObservableObject {
     func choose(_ candidate: PluginCandidate) async {
         guard let provider else { return }
         phase = .fetching
+        chosenCandidate = candidate
         do {
             let fetched = try await provider.fetch(videoId: candidate.id)
             proposal = fetched
@@ -375,14 +399,38 @@ final class VideoEnrichmentModel: ObservableObject {
 
     private var providerName: String? { provider?.displayName }
 
+    /// Profiles for this video's cast, from whichever library owns each.
+    private func actorProfiles() -> [String: EntityProfile] {
+        var out: [String: EntityProfile] = [:]
+        for name in asset.actors {
+            let entityId = "actor:\(name)"
+            if let profile = try? LibrarySession.shared.store(forProfile: entityId)
+                .fetchEntityProfile(for: entityId) {
+                out[entityId] = profile
+            }
+        }
+        return out
+    }
+
     /// The asset as it would be saved, or nil when nothing was accepted.
     ///
     /// Returns a value rather than persisting: the caller owns the write, the
     /// same way the actor editor does.
     func apply() -> Asset? {
-        guard let proposal, hasAnythingToApply else { return nil }
+        // A candidate confirmed by hand is a match whether or not anything was
+        // left to write. Returning nil here recorded no state, so the video
+        // came back in "needs your attention" on the next run — having already
+        // been dealt with.
+        guard let proposal else { return nil }
+        guard hasAnythingToApply else {
+            return VideoEnrichmentReview.recordingOutcome(asset, state: .matched,
+                                                          source: providerName)
+        }
+        // `offeredTags` scopes removal to what was actually shown, so an
+        // unticked tag is removed and an untouched one is never affected.
         let merged = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
-                                                  accepting: accepted, acceptedTags: acceptedTags)
+                                                  accepting: accepted, acceptedTags: acceptedTags,
+                                                  offeredTags: tagOptions.map(\.name))
         return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,
                                                       source: providerName)
     }

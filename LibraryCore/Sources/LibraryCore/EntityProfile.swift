@@ -113,6 +113,12 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     /// Data, not code: storing a name a plugin handed us is not the repository
     /// naming a source.
     public var enrichmentSource: String?
+    /// The source's own identifier for this person.
+    ///
+    /// Without it every later lookup re-searches by name and re-guesses which
+    /// of several same-named people was meant — discarding a match that was
+    /// already validated once. Recording it turns that into a lookup.
+    public var enrichmentSourceId: String?
 
     /// When the lookup ran. `nil` means NEVER ATTEMPTED, which is not the same
     /// as `noMatch` — conflating them would make every un-enriched entity look
@@ -212,10 +218,11 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
         self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
+        self.enrichmentSourceId = enrichmentSourceId
         self.enrichmentCheckedAt = enrichmentCheckedAt
         self.birthDate = birthDate
         self.careerSpanRaw = careerSpanRaw
@@ -267,6 +274,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
             ageAtCareerStart: ageAtCareerStart,
             enrichmentState: enrichmentState,
             enrichmentSource: enrichmentSource,
+            enrichmentSourceId: enrichmentSourceId,
             enrichmentCheckedAt: enrichmentCheckedAt,
             links: links
         )
@@ -293,6 +301,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case ageAtCareerStart = "age_at_career_start"
         case enrichmentState = "enrichment_state"
         case enrichmentSource = "enrichment_source"
+        case enrichmentSourceId = "enrichment_source_id"
         case enrichmentCheckedAt = "enrichment_checked_at"
         case links
     }
@@ -319,6 +328,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.enrichmentState = (try? container.decodeIfPresent(String.self, forKey: .enrichmentState))
             .flatMap { $0.flatMap(EnrichmentState.init(rawValue:)) }
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
+        self.enrichmentSourceId = try container.decodeIfPresent(String.self, forKey: .enrichmentSourceId)
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         // Stored as a JSON string in SQLite, like tags/akas — accept either
         // shape so an archive and a live row both decode.
@@ -380,6 +390,7 @@ extension EntityProfile {
         container["age_at_career_start"] = ageAtCareerStart
         container["enrichment_state"] = enrichmentState?.rawValue
         container["enrichment_source"] = enrichmentSource
+        container["enrichment_source_id"] = enrichmentSourceId
         container["enrichment_checked_at"] = enrichmentCheckedAt
         if let data = try? JSONEncoder().encode(links),
            let string = String(data: data, encoding: .utf8) {

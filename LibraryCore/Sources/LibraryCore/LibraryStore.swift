@@ -305,6 +305,17 @@ public class LibraryStore {
             }
         }
 
+        // v23 — the source's own id for a matched person.
+        //
+        // A validated match was being thrown away: every later lookup
+        // re-searched by name and re-guessed which of several same-named
+        // people was meant. Keeping the id turns a guess into a lookup.
+        migrator.registerMigration("v23") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "enrichment_source_id", .text)
+            }
+        }
+
         // v22 — lookup state on a video.
         //
         // The actor side has had this since v18. A video an external source
@@ -836,6 +847,7 @@ public class LibraryStore {
                     dest.ageAtCareerStart = dest.ageAtCareerStart ?? oldProfile.ageAtCareerStart
                     dest.enrichmentState = dest.enrichmentState ?? oldProfile.enrichmentState
                     dest.enrichmentSource = dest.enrichmentSource ?? oldProfile.enrichmentSource
+                    dest.enrichmentSourceId = dest.enrichmentSourceId ?? oldProfile.enrichmentSourceId
                     dest.enrichmentCheckedAt = dest.enrichmentCheckedAt ?? oldProfile.enrichmentCheckedAt
                     dest.links = EntityLink.merged(dest.links, adding: oldProfile.links)
                     try dest.save(db)

@@ -38,6 +38,7 @@ final class EntityProfilePreservationTests: XCTestCase {
             ageAtCareerStart: 20,
             enrichmentState: .matched,
             enrichmentSource: "TestSource",
+            enrichmentSourceId: "src-1",
             enrichmentCheckedAt: Date(timeIntervalSince1970: 1_700_000_000),
             links: [EntityLink(url: "https://example.com/profile", label: "Example")]
         )
@@ -52,7 +53,7 @@ final class EntityProfilePreservationTests: XCTestCase {
     /// and look at the copy sites listed below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 22, """
+        XCTAssertEqual(count, 23, """
             EntityProfile gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds a profile.
@@ -98,6 +99,7 @@ final class EntityProfilePreservationTests: XCTestCase {
         XCTAssertEqual(renamed.ageAtCareerStart, original.ageAtCareerStart)
         XCTAssertEqual(renamed.enrichmentState, original.enrichmentState)
         XCTAssertEqual(renamed.enrichmentSource, original.enrichmentSource)
+        XCTAssertEqual(renamed.enrichmentSourceId, original.enrichmentSourceId)
         XCTAssertEqual(renamed.enrichmentCheckedAt, original.enrichmentCheckedAt)
         XCTAssertEqual(renamed.links, original.links)
     }
@@ -224,5 +226,32 @@ final class EntityProfilePreservationTests: XCTestCase {
         XCTAssertEqual(out.filter { $0.url == "https://a.example" }.count, 2,
                        "existing entries are preserved as-is")
         XCTAssertTrue(out.contains { $0.url == "https://b.example" })
+    }
+}
+
+/// Using what previous matching established, instead of re-guessing it.
+extension EntityProfilePreservationTests {
+
+    /// A name is not an identity. Two performers really are called "Robin Vale",
+    /// born nine years apart — picking the first is a coin flip that fails
+    /// silently, reporting "no match" rather than "wrong person of that name".
+    func testIdentityCarriesWhatTheLibraryAlreadyKnows() {
+        var profile = EntityProfile(id: "actor:Robin Vale")
+        profile.birthDate = "1997-09-20"
+        profile.enrichmentSourceId = "f0640c6c"
+
+        let identities = PerformerIdentity.from(names: ["Robin Vale", "Someone Unknown"],
+                                                profiles: [profile.id: profile])
+        XCTAssertEqual(identities[0].birthDate, "1997-09-20")
+        XCTAssertEqual(identities[0].sourceId, "f0640c6c")
+        XCTAssertNil(identities[1].birthDate, "nothing known, nothing invented")
+    }
+
+    func testTheSourceIdSurvivesACodingRoundTrip() throws {
+        var profile = EntityProfile(id: "actor:Someone")
+        profile.enrichmentSourceId = "abc-123"
+        let decoded = try JSONDecoder().decode(EntityProfile.self,
+                                               from: JSONEncoder().encode(profile))
+        XCTAssertEqual(decoded.enrichmentSourceId, "abc-123")
     }
 }

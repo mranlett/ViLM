@@ -978,7 +978,6 @@ struct AssetsGridView: View {
 #endif
     }
     
-    @ViewBuilder
     /// How old THIS actor was when the video was released.
     ///
     /// Only on an actor's own page: the figure is a property of the pairing,

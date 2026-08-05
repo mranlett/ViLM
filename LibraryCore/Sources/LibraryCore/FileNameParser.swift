@@ -147,13 +147,102 @@ public enum FileNameParser {
         func add(_ prefixed: String) {
             if !held.contains(prefixed.lowercased()) { additions.append(prefixed) }
         }
+        // Cast and tags accumulate: a video genuinely has several, and a
+        // filename naming one the record lacks is new information.
         for actor in parsed.actors { add("actor:\(actor)") }
-        for studio in parsed.studios { add("studio:\(studio)") }
         for tag in parsed.tags { add("tag:\(tag)") }
+
+        // Studio does NOT. A scene has one releasing studio, and anything
+        // already recorded came from a download or from the operator — both of
+        // which outrank a filename. Adding to it produced the two-studio state
+        // this project spent a day unpicking, arriving from the other side.
+        if asset.studios.isEmpty {
+            for studio in parsed.studios { add("studio:\(studio)") }
+        }
 
         // Only offered when the record has no series at all — a filename must
         // not overwrite one that was entered deliberately.
         let series = (asset.videoName?.isEmpty ?? true) ? parsed.seriesBlock : nil
         return (additions, series)
+    }
+}
+
+
+/// One file's reading, ready to review.
+public struct FileNameProposal: Equatable, Sendable, Identifiable {
+    public let assetId: UUID
+    public let fileName: String
+    public let parsed: ParsedFileName
+    /// Prefixed tags this would add, none of which the record already holds.
+    public let additions: [String]
+    public let seriesBlock: String?
+
+    public var id: UUID { assetId }
+    public var hasSomethingToAdd: Bool { !additions.isEmpty || seriesBlock != nil }
+
+    /// Every segment was placed AND something new came of it. These are the
+    /// ones safe to accept without reading each in turn.
+    public var isClean: Bool { parsed.unrecognised.isEmpty && hasSomethingToAdd }
+
+    public init(assetId: UUID, fileName: String, parsed: ParsedFileName,
+                additions: [String], seriesBlock: String?) {
+        self.assetId = assetId
+        self.fileName = fileName
+        self.parsed = parsed
+        self.additions = additions
+        self.seriesBlock = seriesBlock
+    }
+}
+
+public extension FileNameParser {
+
+    /// Reads every filename and reports what each would contribute.
+    ///
+    /// Files whose name yields nothing NEW are dropped: a review listing
+    /// hundreds of rows that change nothing buries the ones that do. Files
+    /// nothing could be read from are kept though — see `unreadable`, because
+    /// "we could not read this" is a finding, not an absence.
+    static func plan(assets: [Asset], vocabulary: NameVocabulary) -> [FileNameProposal] {
+        assets.compactMap { asset in
+            let parsed = parse(fileName: asset.fileName, vocabulary: vocabulary)
+            let (additions, series) = additions(for: asset, parsed: parsed)
+            let proposal = FileNameProposal(assetId: asset.id, fileName: asset.fileName,
+                                            parsed: parsed, additions: additions,
+                                            seriesBlock: series)
+            return proposal.hasSomethingToAdd ? proposal : nil
+        }
+        // Cleanest first: a reviewer who stops halfway has still banked the
+        // safe ones, and the doubtful rows are never hidden below them.
+        .sorted {
+            $0.parsed.confidence != $1.parsed.confidence
+                ? $0.parsed.confidence > $1.parsed.confidence
+                : $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
+        }
+    }
+
+    /// Files whose names yielded nothing at all.
+    ///
+    /// Surfaced rather than silently skipped: these are the names the
+    /// vocabulary cannot yet explain, and they are the list worth working
+    /// through to make the NEXT pass read more.
+    static func unreadable(assets: [Asset], vocabulary: NameVocabulary) -> [Asset] {
+        assets.filter { parse(fileName: $0.fileName, vocabulary: vocabulary).isEmpty }
+    }
+
+    /// Applies a proposal, adding only what is missing.
+    static func applying(_ proposal: FileNameProposal, to asset: Asset) -> Asset {
+        var updated = asset
+        var tags = updated.tags
+        for addition in proposal.additions {
+            let normalized = TagNormalizer.normalize(fullTag: addition)
+            if !tags.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+                tags.append(normalized)
+            }
+        }
+        updated.tags = tags
+        if let series = proposal.seriesBlock, (updated.videoName?.isEmpty ?? true) {
+            updated.videoName = series
+        }
+        return updated
     }
 }

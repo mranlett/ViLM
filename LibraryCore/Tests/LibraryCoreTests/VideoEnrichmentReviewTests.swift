@@ -199,12 +199,19 @@ extension VideoEnrichmentReviewTests {
         XCTAssertTrue(options.first?.isKnown == true)
     }
 
-    func testTagsAlreadyOnTheVideoAreNotOffered() {
+    /// Tags already on the video ARE offered now — ticked, and marked as
+    /// existing — so a wrong one can be taken off here rather than surviving
+    /// because this screen never mentioned it. Each appears once, not twice.
+    func testTagsAlreadyOnTheVideoAreShownAsExisting() {
         let options = VideoEnrichmentReview.tagOptions(
             for: Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: ["tag:Outdoors"]),
             proposal: taggedProposal(["Outdoors", "Night"]),
             knownTags: ["outdoors", "night"])
-        XCTAssertEqual(options.map(\.name), ["Night"])
+        XCTAssertEqual(options.map(\.name), ["Outdoors", "Night"])
+        XCTAssertTrue(options[0].isExisting)
+        XCTAssertFalse(options[1].isExisting)
+        XCTAssertEqual(options.filter { $0.name == "Outdoors" }.count, 1,
+                       "offered by the source AND already held is still one row")
     }
 
     func testWithNoVocabularyNothingIsTicked() {
@@ -274,5 +281,117 @@ extension VideoEnrichmentReviewTests {
             for: asset, proposal: linkProposal(["https://studio.example/scene"]))
         XCTAssertEqual(rows.first { $0.field == VideoEnrichmentReview.Field.externalLink }?.kind,
                        .conflict)
+    }
+}
+
+/// The tag list is the video's whole tag state, not a one-way add.
+extension VideoEnrichmentReviewTests {
+
+    private var tagged: Asset {
+        Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: ["tag:Mine", "tag:Wrong"])
+    }
+
+    private func withTags(_ tags: [String]) -> VideoMetadataProposal {
+        var p = VideoMetadataProposal(); p.tags = .init(tags); return p
+    }
+
+    func testExistingTagsAppearTickedAndFirst() {
+        let options = VideoEnrichmentReview.tagOptions(
+            for: tagged, proposal: withTags(["New One"]), knownTags: [])
+        XCTAssertEqual(options.prefix(2).map(\.name), ["Mine", "Wrong"])
+        XCTAssertTrue(options.prefix(2).allSatisfy(\.isExisting))
+        XCTAssertTrue(VideoEnrichmentReview.defaultSelection(options).isSuperset(of: ["Mine", "Wrong"]))
+    }
+
+    /// The point of showing them: a tag applied by mistake can be taken off
+    /// here rather than surviving because this screen never mentioned it.
+    func testUntickingAnExistingTagRemovesIt() {
+        let options = VideoEnrichmentReview.tagOptions(
+            for: tagged, proposal: withTags([]), knownTags: [])
+        let merged = VideoEnrichmentReview.merged(
+            asset: tagged, proposal: withTags([]),
+            accepting: [], acceptedTags: ["Mine"], offeredTags: options.map(\.name))
+        XCTAssertEqual(merged.actions, ["Mine"], "Wrong was unticked, so it goes")
+    }
+
+    /// Removal is scoped to what was SHOWN. A tag absent from the list is never
+    /// touched, so an empty list cannot wipe a video's tags.
+    func testTagsNeverOfferedAreUntouched() {
+        let merged = VideoEnrichmentReview.merged(
+            asset: tagged, proposal: withTags([]),
+            accepting: [], acceptedTags: [], offeredTags: [])
+        XCTAssertEqual(merged.actions.sorted(), ["Mine", "Wrong"])
+    }
+
+    func testActorAndStudioTagsAreNeverRemovedByTheTagList() {
+        let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: ["tag:Mine", "actor:Someone", "studio:Somewhere"])
+        let merged = VideoEnrichmentReview.merged(
+            asset: asset, proposal: withTags([]),
+            accepting: [], acceptedTags: [], offeredTags: ["Mine"])
+        XCTAssertTrue(merged.actions.isEmpty)
+        XCTAssertEqual(merged.actors, ["Someone"])
+        XCTAssertEqual(merged.studios, ["Somewhere"])
+    }
+}
+
+/// Studio replaces; performers accumulate. The difference is not a detail — a
+/// scene has one releasing studio, and treating it like the cast list left a
+/// wrong studio sitting beside the right one.
+extension VideoEnrichmentReviewTests {
+
+    private func studioProposal(_ name: String) -> VideoMetadataProposal {
+        var p = VideoMetadataProposal(); p.studio = .init(name); return p
+    }
+
+    private func withStudio(_ name: String) -> Asset {
+        Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: ["studio:\(name)"])
+    }
+
+    /// Never a silent fill when something is already there.
+    func testADifferentStudioIsAConflict() {
+        let rows = VideoEnrichmentReview.changes(for: withStudio("Wrong Pictures"),
+                                                 proposal: studioProposal("Right Pictures"))
+        let row = rows.first { $0.field == VideoEnrichmentReview.Field.studio }
+        XCTAssertEqual(row?.kind, .conflict)
+        XCTAssertEqual(row?.current, "Wrong Pictures")
+    }
+
+    func testAnEmptyStudioIsStillAFill() {
+        let rows = VideoEnrichmentReview.changes(
+            for: Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            proposal: studioProposal("Right Pictures"))
+        XCTAssertEqual(rows.first { $0.field == VideoEnrichmentReview.Field.studio }?.kind, .fill)
+    }
+
+    /// The reported bug: accepting the correction left both.
+    func testAcceptingAStudioReplacesTheWrongOne() {
+        let merged = VideoEnrichmentReview.merged(
+            asset: withStudio("Wrong Pictures"),
+            proposal: studioProposal("Right Pictures"),
+            accepting: [VideoEnrichmentReview.Field.studio])
+        XCTAssertEqual(merged.studios, ["Right Pictures"], "one studio, and the right one")
+    }
+
+    /// An unticked conflict changes nothing — the wrong studio survives until
+    /// the correction is actually accepted.
+    func testDecliningTheStudioLeavesItAlone() {
+        let merged = VideoEnrichmentReview.merged(
+            asset: withStudio("Wrong Pictures"),
+            proposal: studioProposal("Right Pictures"),
+            accepting: [])
+        XCTAssertEqual(merged.studios, ["Wrong Pictures"])
+    }
+
+    /// Replacing the studio must not disturb anything else stored the same way.
+    func testReplacingTheStudioLeavesCastAndTagsIntact() {
+        let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: ["studio:Wrong", "actor:Someone", "tag:Outdoors"])
+        let merged = VideoEnrichmentReview.merged(
+            asset: asset, proposal: studioProposal("Right"),
+            accepting: [VideoEnrichmentReview.Field.studio])
+        XCTAssertEqual(merged.studios, ["Right"])
+        XCTAssertEqual(merged.actors, ["Someone"])
+        XCTAssertEqual(merged.actions, ["Outdoors"])
     }
 }

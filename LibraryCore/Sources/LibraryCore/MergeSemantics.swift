@@ -51,7 +51,7 @@ public enum MergeSemantics {
     /// `lower` fills gaps, list fields union. `createdAt` takes the earliest
     /// so "recently added actors" reflects first appearance anywhere.
     static func mergedProfileView(higher: EntityProfile, lower: EntityProfile) -> EntityProfile {
-        EntityProfile(
+        var merged = EntityProfile(
             id: higher.id,
             bio: coalesce(higher.bio, lower.bio),
             photoUrl: higher.photoUrl ?? lower.photoUrl,
@@ -80,6 +80,8 @@ public enum MergeSemantics {
             enrichmentCheckedAt: newerChecked(higher, lower).enrichmentCheckedAt,
             links: EntityLink.merged(higher.links, adding: lower.links)
         )
+        merged.enrichmentSourceId = higher.enrichmentSourceId ?? lower.enrichmentSourceId
+        return merged
     }
 
     /// Whichever profile was enrichment-checked most recently. Falls back to
