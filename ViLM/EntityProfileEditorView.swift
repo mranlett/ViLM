@@ -614,6 +614,9 @@ struct EntityProfileEditorView: View {
                         // federated view showing both names.
                         let savedEntityId = performCanonicalRename() ?? entityId
 
+                        // Assigned below rather than inline: at 23 fields this
+                        // initialiser exceeds what the type-checker will resolve
+                        // in one expression.
                         var profile = EntityProfile(
                             id: savedEntityId,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
@@ -635,11 +638,11 @@ struct EntityProfileEditorView: View {
                             ageAtCareerStart: ageAtCareerStart,
                             enrichmentState: enrichmentState,
                             enrichmentSource: enrichmentSource,
-            enrichmentSourceId: enrichmentSourceId,
-                            enrichmentSourceId: enrichmentSourceId,
                             enrichmentCheckedAt: enrichmentCheckedAt,
                             links: links
                         )
+
+                        profile.enrichmentSourceId = enrichmentSourceId
 
                         // An unresolved lookup verdict is only as good as the
                         // data it was based on. If the operator supplied an
@@ -794,7 +797,9 @@ struct EntityProfileEditorView: View {
 
     /// The profile as it stands in the form right now.
     private var editedProfile: EntityProfile {
-        EntityProfile(
+        // Built then amended: a 23-field initialiser is past what the
+        // type-checker will resolve in a single expression.
+        var profile = EntityProfile(
             id: entityId,
             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
             photoUrl: photoUrl.isEmpty ? nil : photoUrl,
@@ -815,10 +820,11 @@ struct EntityProfileEditorView: View {
             ageAtCareerStart: ageAtCareerStart,
             enrichmentState: enrichmentState,
             enrichmentSource: enrichmentSource,
-            enrichmentSourceId: enrichmentSourceId,
             enrichmentCheckedAt: enrichmentCheckedAt,
             links: links
         )
+        profile.enrichmentSourceId = enrichmentSourceId
+        return profile
     }
 
     /// Drops accepted values into the form. Deliberately NOT a save: the user
