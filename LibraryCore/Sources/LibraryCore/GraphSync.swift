@@ -30,6 +30,39 @@ public struct GraphEdgePair: Codable, Sendable, Equatable, Hashable {
     }
 }
 
+/// A fact the two libraries disagree about.
+///
+/// ⚠️ Reported rather than resolved. The merge is additive by design — it fills
+/// gaps and never overwrites a decision the receiving library already made — so
+/// a disagreement leaves BOTH sides exactly as they were. That is safe, but
+/// silent, and a library quietly holding two answers to the same question is
+/// worse than one that says so.
+public struct GraphDisagreement: Sendable, Equatable, Identifiable {
+    public enum Subject: String, Sendable, Equatable {
+        /// The same tag classified differently on each side.
+        case tagKind
+        /// The same studio confirmed against different sources.
+        case studioSource
+    }
+
+    public let subject: Subject
+    /// The thing being disagreed about — a tag's identity key, a studio's id.
+    public let name: String
+    /// What this library holds.
+    public let mine: String
+    /// What the arriving export holds.
+    public let theirs: String
+
+    public var id: String { "\(subject.rawValue):\(name)" }
+
+    public init(subject: Subject, name: String, mine: String, theirs: String) {
+        self.subject = subject
+        self.name = name
+        self.mine = mine
+        self.theirs = theirs
+    }
+}
+
 /// What a sync did, counted so the operator can see it landed.
 public struct GraphMergeResult: Sendable, Equatable {
     public let actors: ActorMergeCounts
@@ -41,6 +74,9 @@ public struct GraphMergeResult: Sendable, Equatable {
     public let newStudioParents: Int
     /// Hierarchy edges refused because taking them would have made a loop.
     public let refusedCycles: Int
+    /// ⚠️ Facts the two libraries answer differently. Nothing was changed for
+    /// these — they are here so the operator learns the disagreement exists.
+    public let disagreements: [GraphDisagreement]
 
     public struct ActorMergeCounts: Sendable, Equatable {
         public let new: Int
@@ -95,6 +131,7 @@ extension LibraryStore {
         // an unconfirmed studio learning that it IS confirmed elsewhere, since
         // that is knowledge rather than a competing opinion.
         var newStudios = 0, updatedStudios = 0
+        var disagreements: [GraphDisagreement] = []
         for incoming in export.studios {
             guard let existing = try fetchEntityProfile(for: incoming.id) else {
                 try saveEntityProfile(incoming)
@@ -108,6 +145,16 @@ extension LibraryStore {
                 upgraded.enrichmentCheckedAt = incoming.enrichmentCheckedAt
                 try saveEntityProfile(upgraded)
                 updatedStudios += 1
+            } else if existing.enrichmentState == .matched,
+                      incoming.enrichmentState == .matched,
+                      let mine = existing.enrichmentSource,
+                      let theirs = incoming.enrichmentSource,
+                      mine != theirs {
+                // Both confirmed, but against different sources. Neither is
+                // wrong and neither wins — worth knowing about rather than
+                // burying.
+                disagreements.append(GraphDisagreement(
+                    subject: .studioSource, name: incoming.id, mine: mine, theirs: theirs))
             }
         }
 
@@ -129,6 +176,12 @@ extension LibraryStore {
                 upgraded.kind = incoming.kind
                 try saveTagRecord(upgraded)
                 classifiedTags += 1
+            } else if let mine = existing.kind, let theirs = incoming.kind, mine != theirs {
+                // ⚠️ The one that matters most. A tag classified two ways means
+                // the two libraries attach it to different KINDS of node, so
+                // their graphs diverge in shape rather than merely in content.
+                disagreements.append(GraphDisagreement(
+                    subject: .tagKind, name: existing.displayName, mine: mine, theirs: theirs))
             }
         }
 
@@ -168,6 +221,6 @@ extension LibraryStore {
             newStudios: newStudios, updatedStudios: updatedStudios,
             newTags: newTags, classifiedTags: classifiedTags,
             newPerformerTags: newPerformerTags, newStudioParents: newStudioParents,
-            refusedCycles: refusedCycles)
+            refusedCycles: refusedCycles, disagreements: disagreements)
     }
 }

@@ -1105,6 +1105,52 @@ public class LibraryStore {
         return becomesEdge ? (videoIds.count, 0) : (0, videoIds.count)
     }
 
+    // MARK: - Tags arriving on people
+
+    /// Registers and connects the tags carried by actor profiles.
+    ///
+    /// ⚠️ A tag arriving ON A PERSON is known to describe a person — that is
+    /// what the file it came from means. So an unknown one is created as a
+    /// performer attribute rather than left unclassified, which is the one
+    /// place the taxonomy can be inferred instead of asked about.
+    ///
+    /// Built for the CSV round-trip, which saved profiles and stopped: the tags
+    /// landed as bare strings with no vocabulary record and no edge, so an
+    /// enriched file made the graph no better than before it ran.
+    ///
+    /// Never reclassifies. A tag already known as something else keeps its
+    /// kind, and simply gets no edge here — the arriving file does not outrank
+    /// a decision already made.
+    @discardableResult
+    public func connectPerformerTags(for profileIds: [String],
+                                     available: [TagKind] = TagKind.seed) throws
+    -> (created: Int, linked: Int) {
+        var created = 0, linked = 0
+        var vocabulary = try fetchTagVocabulary()
+
+        for id in profileIds where id.hasPrefix("actor:") {
+            guard let profile = try fetchEntityProfile(for: id) else { continue }
+            for raw in Set(profile.tags) where !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+                let key = TagNormalizer.identityKey(raw)
+                var record = vocabulary.first { $0.identityKey == key }
+
+                if record == nil {
+                    let new = TagRecord(displayName: raw, kind: .performerAttribute)
+                    try saveTagRecord(new)
+                    vocabulary.append(new)
+                    record = new
+                    created += 1
+                }
+
+                guard let kind = record?.resolvedKind(from: available),
+                      kind.canAttach(to: .performer) else { continue }
+                try linkTag(key, toPerformer: id)
+                linked += 1
+            }
+        }
+        return (created, linked)
+    }
+
     // MARK: - The edges that travel between libraries
 
     /// Performer traits, as portable pairs. Names no video, so it means the

@@ -95,6 +95,20 @@ struct ActorLibraryImportView: View {
                 }
                 .foregroundColor(.secondary)
 
+                // ⚠️ Shown, never resolved. Both libraries keep what they had;
+                // this is the only place the operator learns they differ.
+                if !result.disagreements.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(result.disagreements.count) disagreement\(result.disagreements.count == 1 ? "" : "s") — nothing changed for these")
+                            .font(.callout).foregroundStyle(.orange)
+                        ForEach(result.disagreements) { item in
+                            Text("\(item.name): here “\(item.mine)”, there “\(item.theirs)”")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+
                 if result.refusedCycles > 0 {
                     Text("\(result.refusedCycles) studio parent\(result.refusedCycles == 1 ? "" : "s") skipped — taking them would have made a loop")
                         .foregroundStyle(.orange)

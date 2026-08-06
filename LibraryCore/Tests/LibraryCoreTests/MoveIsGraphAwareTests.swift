@@ -140,3 +140,91 @@ final class MoveIsGraphAwareTests: XCTestCase {
         XCTAssertTrue(try store.fetchTagVocabulary().isEmpty)
     }
 }
+
+/// The CSV round-trip's graph half. An enriched file used to land its tags as
+/// bare strings, so running the enricher left the graph exactly as it was.
+final class PerformerTagImportTests: XCTestCase {
+
+    private var libraryURL: URL!
+    private var store: LibraryStore!
+
+    override func setUpWithError() throws {
+        libraryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PerfTags-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+        store = try LibraryStore(at: libraryURL)
+    }
+
+    override func tearDownWithError() throws {
+        store = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        try? FileManager.default.removeItem(at: libraryURL)
+    }
+
+    private func actor(_ name: String, tags: [String]) throws -> String {
+        var p = EntityProfile(id: "actor:\(name)")
+        p.tags = tags
+        try store.saveEntityProfile(p)
+        return p.id
+    }
+
+    /// ⚠️ The inference the taxonomy allows: a tag arriving ON a person is
+    /// known to describe a person, so it needs no classification step.
+    func testAnUnknownTagOnAnActorBecomesAPerformerAttribute() throws {
+        let id = try actor("Alice Example", tags: ["Redhead"])
+
+        let result = try store.connectPerformerTags(for: [id])
+
+        XCTAssertEqual(result.created, 1)
+        XCTAssertEqual(result.linked, 1)
+        XCTAssertEqual(try store.fetchTagVocabulary().first?.resolvedKind(),
+                       TagKind.performerAttribute)
+        XCTAssertEqual(try store.edgeCount(.performerTag), 1)
+    }
+
+    /// ⚠️ A tag already known as something else keeps its kind, and gets no
+    /// edge — an arriving file does not outrank a decision already made.
+    func testAnExistingClassificationIsNotOverruled() throws {
+        try store.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+        let id = try actor("Alice Example", tags: ["Climbing"])
+
+        let result = try store.connectPerformerTags(for: [id])
+
+        XCTAssertEqual(result.created, 0)
+        XCTAssertEqual(result.linked, 0, "an action does not attach to a person")
+        XCTAssertEqual(try store.fetchTagVocabulary().first?.resolvedKind(), TagKind.action)
+    }
+
+    func testRunningTwiceAddsNothing() throws {
+        let id = try actor("Alice Example", tags: ["Redhead"])
+
+        try store.connectPerformerTags(for: [id])
+        try store.connectPerformerTags(for: [id])
+
+        XCTAssertEqual(try store.edgeCount(.performerTag), 1)
+        XCTAssertEqual(try store.fetchTagVocabulary().count, 1)
+    }
+
+    /// Case variants are one tag, not two.
+    func testSpellingVariantsResolveToOneTag() throws {
+        let a = try actor("Alice Example", tags: ["Redhead"])
+        let b = try actor("Bob Example", tags: ["redhead"])
+
+        try store.connectPerformerTags(for: [a, b])
+
+        XCTAssertEqual(try store.fetchTagVocabulary().count, 1)
+        XCTAssertEqual(try store.edgeCount(.performerTag), 2)
+    }
+
+    /// Studios are not people.
+    func testNonActorProfilesAreIgnored() throws {
+        var studio = EntityProfile(id: "studio:Example Studio")
+        studio.tags = ["Redhead"]
+        try store.saveEntityProfile(studio)
+
+        let result = try store.connectPerformerTags(for: ["studio:Example Studio"])
+
+        XCTAssertEqual(result.created, 0)
+        XCTAssertEqual(try store.edgeCount(.performerTag), 0)
+    }
+}

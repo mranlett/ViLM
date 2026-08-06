@@ -104,7 +104,7 @@ struct SettingsView: View {
                                action: onStudioConflicts)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
-                    toolButton("Merge Tags & Actors", icon: "paintbrush", action: onTagCleanup)
+                    toolButton("Remove Orphaned Profiles", icon: "trash.slash", action: onTagCleanup)
                         .disabled(session.isFederated)
                     toolButton("Classify Tags", icon: "tag.circle", action: onClassifyTags)
                         .disabled(session.isFederated)
@@ -119,9 +119,6 @@ struct SettingsView: View {
                     toolButton("Connect the Graph",
                                icon: "point.3.connected.trianglepath.dotted",
                                action: onConnectGraph)
-                        .disabled(session.isFederated)
-                    toolButton("Match Again", icon: "arrow.counterclockwise",
-                               action: onResetMatches)
                         .disabled(session.isFederated)
                 }
 
@@ -152,12 +149,20 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                 }
 
+                // Rare, and one of them destructive. Kept together and out
+                // of the everyday flow rather than sitting beside tools reached
+                // weekly — Match Again in particular was one row below Connect
+                // the Graph, which is the tool it most resembles and least
+                // resembles the consequences of.
                 Section(
-                    header: Text("One-off Migrations"),
-                    footer: Text("Run once, when the library predates the feature. Harmless to skip.")
+                    header: Text("Maintenance"),
+                    footer: Text("Rarely needed. Migrate Episode Info runs once on a library that predates structured episodes. Match Again clears match status so videos are looked up afresh — it cannot be undone.")
                 ) {
                     toolButton("Migrate Episode Info", icon: "arrow.triangle.branch",
                                action: onMigrateEpisodes)
+                        .disabled(session.isFederated)
+                    toolButton("Match Again", icon: "arrow.counterclockwise",
+                               action: onResetMatches)
                         .disabled(session.isFederated)
                 }
 

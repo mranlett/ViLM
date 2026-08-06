@@ -751,6 +751,11 @@ struct ActorGridView: View {
                 }
 
                 try store.saveEntityProfiles(Array(merged.values))
+                // ⚠️ The graph half of the round-trip. Saving the profiles used
+                // to be the whole import, so an enriched file's tags landed as
+                // bare strings — no vocabulary record, no edge — and the graph
+                // was no better for having run the enricher at all.
+                try store.connectPerformerTags(for: Array(merged.keys))
 
                 await MainActor.run {
                     NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)

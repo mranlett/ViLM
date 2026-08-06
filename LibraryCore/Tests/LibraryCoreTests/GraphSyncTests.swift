@@ -292,3 +292,69 @@ final class LiveGraphSyncTests: XCTestCase {
         XCTAssertEqual(try b.edgeCount(.videoPerformer), 0)
     }
 }
+
+/// ⚠️ A sync that changes nothing is safe. A sync that changes nothing and
+/// SAYS nothing leaves a library quietly holding a different answer from its
+/// twin, and no way to find out.
+final class GraphSyncDisagreementTests: XCTestCase {
+
+    private var aURL: URL!, bURL: URL!
+    private var a: LibraryStore!, b: LibraryStore!
+
+    override func setUpWithError() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Disagree-\(UUID().uuidString)", isDirectory: true)
+        aURL = root.appendingPathComponent("a", isDirectory: true)
+        bURL = root.appendingPathComponent("b", isDirectory: true)
+        for url in [aURL!, bURL!] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        a = try LibraryStore(at: aURL)
+        b = try LibraryStore(at: bURL)
+    }
+
+    override func tearDownWithError() throws {
+        a = nil; b = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        try? FileManager.default.removeItem(at: aURL.deletingLastPathComponent())
+    }
+
+    func testATagClassifiedTwoWaysIsReported() throws {
+        try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .videoAttribute))
+        try b.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+
+        let result = try b.applyGraphMerge(try a.exportGraph(includingPhotoData: false))
+
+        XCTAssertEqual(result.disagreements.count, 1)
+        let item = try XCTUnwrap(result.disagreements.first)
+        XCTAssertEqual(item.subject, .tagKind)
+        XCTAssertEqual(item.mine, "action")
+        XCTAssertEqual(item.theirs, "video-attribute")
+        XCTAssertEqual(try b.fetchTagVocabulary().first?.resolvedKind(), TagKind.action,
+                       "reported, and still not overruled")
+    }
+
+    func testAStudioConfirmedAgainstTwoSourcesIsReported() throws {
+        try a.confirmStudio("Example Studio", source: "Source A")
+        try b.confirmStudio("Example Studio", source: "Source B")
+
+        let result = try b.applyGraphMerge(try a.exportGraph(includingPhotoData: false))
+
+        XCTAssertEqual(result.disagreements.first?.subject, .studioSource)
+        XCTAssertEqual(try b.fetchEntityProfile(for: "studio:Example Studio")?.enrichmentSource,
+                       "Source B")
+    }
+
+    /// Agreement is not a disagreement, and neither is a gap being filled.
+    func testAgreementAndGapsReportNothing() throws {
+        try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+        try b.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+        try a.saveTagRecord(TagRecord(displayName: "Compilation", kind: .videoAttribute))
+        try b.saveTagRecord(TagRecord(displayName: "Compilation", kind: nil))
+
+        let result = try b.applyGraphMerge(try a.exportGraph(includingPhotoData: false))
+
+        XCTAssertTrue(result.disagreements.isEmpty)
+        XCTAssertEqual(result.classifiedTags, 1)
+    }
+}
