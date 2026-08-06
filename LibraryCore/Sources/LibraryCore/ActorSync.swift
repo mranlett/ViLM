@@ -260,7 +260,7 @@ public enum ActorSync {
     public static func snapshot(of libraryURL: URL) throws -> LibrarySnapshot {
         LibrarySnapshot(url: libraryURL,
                         export: try LibraryStore(at: libraryURL)
-                            .exportActorLibrary(includingPhotoData: false))
+                            .exportGraph(includingPhotoData: false))
     }
 
     /// A snapshot carrying real photo bytes for a bounded set of actors.
@@ -271,7 +271,7 @@ public enum ActorSync {
                                             actorIds: Set<String>) throws -> LibrarySnapshot {
         LibrarySnapshot(url: libraryURL,
                         export: try LibraryStore(at: libraryURL)
-                            .exportActorLibrary(onlyActorIds: actorIds, includingPhotoData: true))
+                            .exportGraph(onlyActorIds: actorIds, includingPhotoData: true))
     }
 
     // MARK: Planning (pure)
@@ -518,17 +518,66 @@ public enum ActorSync {
             }
         }
 
-        return ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion,
-                                  exportedAt: Date(), profiles: profiles, photos: photos,
-                                  tombstones: Array(tombstones.values))
+        var export = ActorLibraryExport(formatVersion: ActorLibraryExport.currentFormatVersion,
+                                        exportedAt: Date(), profiles: profiles, photos: photos,
+                                        tombstones: Array(tombstones.values))
+
+        // The rest of the graph, unioned across every library so applying this
+        // to each of them leaves them all holding the same thing.
+        //
+        // ⚠️ No per-field conflict resolution here, unlike actors. A studio or
+        // a tag has one fact worth carrying — is it confirmed, what kind is it
+        // — and `applyGraphMerge` is additive: it fills gaps and upgrades
+        // unknowns, and never overwrites a decision the receiving library has
+        // already made. So a genuine disagreement (A says action, B says
+        // video-attribute) leaves BOTH untouched rather than one silently
+        // winning. That is a gap in what the operator gets asked about, not a
+        // gap in what is protected.
+        export.studios = preferring(snapshots.flatMap(\.export.studios), by: \.id) { new, held in
+            held.enrichmentState == .matched ? held : new
+        }
+        export.tags = preferring(snapshots.flatMap(\.export.tags), by: \.identityKey) { new, held in
+            held.kind != nil ? held : new
+        }
+        export.performerTags = orderedDistinctEdges(snapshots.flatMap(\.export.performerTags))
+        export.studioParents = orderedDistinctEdges(snapshots.flatMap(\.export.studioParents))
+        return export
+    }
+
+    /// First occurrence wins unless `resolve` says the later one is better.
+    private static func preferring<T, K: Hashable>(
+        _ values: [T], by key: (T) -> K, resolve: (T, T) -> T
+    ) -> [T] {
+        var byKey: [K: T] = [:]
+        var order: [K] = []
+        for value in values {
+            let k = key(value)
+            if let held = byKey[k] {
+                byKey[k] = resolve(value, held)
+            } else {
+                byKey[k] = value
+                order.append(k)
+            }
+        }
+        return order.compactMap { byKey[$0] }
+    }
+
+    private static func orderedDistinctEdges(_ edges: [GraphEdgePair]) -> [GraphEdgePair] {
+        var seen = Set<GraphEdgePair>()
+        return edges.filter { seen.insert($0).inserted }
     }
 
     /// Applies the converged export to one library — the existing merge
     /// engine does the heavy lifting (field semantics, photo dedupe/adoption,
     /// single transaction).
     @discardableResult
-    public static func apply(_ export: ActorLibraryExport, to libraryURL: URL) throws -> ActorMergeResult {
-        try LibraryStore(at: libraryURL).applyActorMerge(export)
+    public static func apply(_ export: ActorLibraryExport, to libraryURL: URL) throws -> GraphMergeResult {
+        // ⚠️ The whole graph, not just the actors. The live sync converges two
+        // attached libraries; leaving studios, the tag vocabulary and the
+        // portable edges out meant the file-based route carried them and this
+        // one silently did not — two ways to sync that produced different
+        // libraries.
+        try LibraryStore(at: libraryURL).applyGraphMerge(export)
     }
 
     // MARK: - Helpers

@@ -90,6 +90,7 @@ struct ContentView: View {
     @State private var isShowingTagCaseCleanup = false
     @State private var isShowingReadFilenames = false
     @State private var isShowingBatchMatch = false
+    @State private var isShowingActorBatchMatch = false
     @State private var isShowingStudioConflicts = false
     @State private var isShowingGraphConnect = false
     @State private var isShowingMatchReset = false
@@ -231,6 +232,7 @@ struct ContentView: View {
                     onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                     onReadFilenames: { isShowingReadFilenames = true },
                     onBatchMatchVideos: { isShowingBatchMatch = true },
+                    onBatchMatchActors: { isShowingActorBatchMatch = true },
                     onStudioConflicts: { isShowingStudioConflicts = true },
                     onConnectGraph: { isShowingGraphConnect = true },
                     onResetMatches: { isShowingMatchReset = true },
@@ -293,6 +295,12 @@ struct ContentView: View {
                         // scans it (Check for Changes) and flags any missing files.
                         processFolder(at: restoredURL)
                     })
+                }
+            }
+            .sheet(isPresented: $isShowingActorBatchMatch) {
+                let urls = LibrarySession.shared.allURLs
+                if !urls.isEmpty {
+                    ActorBatchMatchView(libraryURLs: urls) { reloadUnionAssets() }
                 }
             }
             .sheet(isPresented: $isShowingMatchReset) {

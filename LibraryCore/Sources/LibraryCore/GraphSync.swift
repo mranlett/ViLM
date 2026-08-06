@@ -66,8 +66,16 @@ extension LibraryStore {
     // convenience.
 
     /// The actor library plus the rest of the portable graph.
-    public func exportGraph(includingPhotoData: Bool = true) throws -> ActorLibraryExport {
-        var export = try exportActorLibrary(includingPhotoData: includingPhotoData)
+    ///
+    /// ⚠️ `onlyActorIds` narrows the ACTORS only. The studios, tags and edges
+    /// always travel whole: they are library-wide facts, not per-actor ones,
+    /// and the live sync applies actors in batches — so scoping them to a batch
+    /// would mean each batch carried a different slice of the vocabulary and
+    /// none carried all of it.
+    public func exportGraph(onlyActorIds: Set<String>? = nil,
+                            includingPhotoData: Bool = true) throws -> ActorLibraryExport {
+        var export = try exportActorLibrary(onlyActorIds: onlyActorIds,
+                                            includingPhotoData: includingPhotoData)
         export.studios = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("studio:") }
         export.tags = try fetchTagVocabulary()
         export.performerTags = try performerTagPairs()

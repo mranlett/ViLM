@@ -52,6 +52,14 @@ struct InspectorView: View {
 }
 
 struct SingleInspectorView: View {
+    /// The source page for this video, opened in the app's private browser.
+    @State private var browsingLink: BrowsableURL?
+
+    /// `URL` is not `Identifiable`, and `sheet(item:)` needs identity.
+    struct BrowsableURL: Identifiable {
+        let url: URL
+        var id: String { url.absoluteString }
+    }
     @Binding var sidebarSelection: Set<SidebarItem>
     let asset: Asset
     @Binding var assets: [Asset]
@@ -961,12 +969,15 @@ struct SingleInspectorView: View {
                             .textFieldStyle(.roundedBorder)
 
                             if let linkString = asset.externalLink, let url = URL(string: linkString) {
+                                // ⚠️ In-app and private, like the actor links.
+                                // This is the source's page for this scene —
+                                // the single most identifying URL in the
+                                // library — and handing it to the system
+                                // browser writes it into a history the operator
+                                // never chose to write to. "Open in Browser"
+                                // is still one tap away inside.
                                 Button {
-                                    #if os(macOS)
-                                    NSWorkspace.shared.open(url)
-                                    #else
-                                    UIApplication.shared.open(url)
-                                    #endif
+                                    browsingLink = BrowsableURL(url: url)
                                 } label: {
                                     Image(systemName: "safari")
                                 }
@@ -1025,6 +1036,9 @@ struct SingleInspectorView: View {
             }
             .popover(isPresented: $isShowingTagEntry) {
                 tagEntryPopover
+            }
+            .sheet(item: $browsingLink) { target in
+                PrivateBrowserView(url: target.url, title: "Source")
             }
             .alert("That tag describes a performer",
                    isPresented: Binding(get: { tagRejectionMessage != nil },

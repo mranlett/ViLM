@@ -20,6 +20,14 @@ struct EntityLinksView: View {
     /// Supplied by the editor; absent on read-only surfaces.
     var onDelete: ((EntityLink) -> Void)? = nil
 
+    @State private var browsing: IdentifiableURL?
+
+    struct IdentifiableURL: Identifiable {
+        let url: URL
+        let label: String
+        var id: String { url.absoluteString }
+    }
+
     /// Valid, de-duplicated, in stored order.
     ///
     /// Dedupe is by URL rather than by label because the same address can
@@ -47,6 +55,9 @@ struct EntityLinksView: View {
                     }
                 }
             }
+            .sheet(item: $browsing) { target in
+                PrivateBrowserView(url: target.url, title: target.label)
+            }
         }
     }
 
@@ -54,7 +65,14 @@ struct EntityLinksView: View {
     private func chip(for link: EntityLink) -> some View {
         HStack(spacing: 6) {
             if let url = URL(string: link.url) {
-                Link(destination: url) {
+                // ⚠️ Opens INSIDE the app, not in the browser. A link imported
+                // from a source names what this library is about, and handing
+                // it to the system browser writes that into a history the
+                // operator did not choose to write to. The private browser
+                // still offers "Open in Browser" for when that is wanted.
+                Button {
+                    browsing = IdentifiableURL(url: url, label: link.displayLabel)
+                } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.forward.app")
                         Text(link.displayLabel)

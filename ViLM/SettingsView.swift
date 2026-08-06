@@ -23,6 +23,7 @@ struct SettingsView: View {
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
+    var onBatchMatchActors: (() -> Void)?
     var onStudioConflicts: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
@@ -84,6 +85,9 @@ struct SettingsView: View {
                                icon: "text.magnifyingglass", action: onReadFilenames)
                     toolButton("2 · Match All Videos",
                                icon: "sparkle.magnifyingglass", action: onBatchMatchVideos)
+                    toolButton("3 · Match All Actors",
+                               icon: "person.crop.circle.badge.checkmark",
+                               action: onBatchMatchActors)
                 }
 
                 Section(

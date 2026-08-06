@@ -195,3 +195,100 @@ final class GraphSyncTests: XCTestCase {
         XCTAssertEqual(result.newTags, 1, "and the rest of the sync still landed")
     }
 }
+
+/// The LIVE path — two attached libraries converged in place, no export file.
+/// It used to carry actors only, so the two ways to sync produced different
+/// libraries.
+final class LiveGraphSyncTests: XCTestCase {
+
+    private var aURL: URL!, bURL: URL!
+    private var a: LibraryStore!, b: LibraryStore!
+
+    override func setUpWithError() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveSync-\(UUID().uuidString)", isDirectory: true)
+        aURL = root.appendingPathComponent("a", isDirectory: true)
+        bURL = root.appendingPathComponent("b", isDirectory: true)
+        for url in [aURL!, bURL!] {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        a = try LibraryStore(at: aURL)
+        b = try LibraryStore(at: bURL)
+    }
+
+    override func tearDownWithError() throws {
+        a = nil; b = nil
+        LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+        try? FileManager.default.removeItem(at: aURL.deletingLastPathComponent())
+    }
+
+    func testASnapshotCarriesTheWholeGraph() throws {
+        try a.confirmStudio("Example Studio", source: "Example Source")
+        try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+
+        let snapshot = try ActorSync.snapshot(of: aURL)
+
+        XCTAssertEqual(snapshot.export.studios.count, 1)
+        XCTAssertEqual(snapshot.export.tags.count, 1)
+    }
+
+    /// The union travels both ways, so converging leaves both libraries the
+    /// same rather than only topping up one of them.
+    func testConvergingCarriesEachLibrarysStudiosToTheOther() throws {
+        try a.confirmStudio("Only In A", source: "Example Source")
+        try b.confirmStudio("Only In B", source: "Example Source")
+
+        let snapshots = [try ActorSync.snapshot(of: aURL), try ActorSync.snapshot(of: bURL)]
+        let converged = ActorSync.convergedExport(actorIds: [], resolutions: [:],
+                                                  snapshots: snapshots)
+        try ActorSync.apply(converged, to: aURL)
+        try ActorSync.apply(converged, to: bURL)
+
+        XCTAssertNotNil(try a.fetchEntityProfile(for: "studio:Only In B"))
+        XCTAssertNotNil(try b.fetchEntityProfile(for: "studio:Only In A"))
+    }
+
+    func testTagKindsSurviveTheUnion() throws {
+        try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+        try b.saveTagRecord(TagRecord(displayName: "Climbing", kind: nil))
+
+        let snapshots = [try ActorSync.snapshot(of: aURL), try ActorSync.snapshot(of: bURL)]
+        let converged = ActorSync.convergedExport(actorIds: [], resolutions: [:],
+                                                  snapshots: snapshots)
+        try ActorSync.apply(converged, to: bURL)
+
+        XCTAssertEqual(try b.fetchTagVocabulary().first?.resolvedKind(), TagKind.action,
+                       "B learns the kind it did not have")
+    }
+
+    /// ⚠️ A genuine disagreement leaves BOTH sides as they were. Nothing is
+    /// lost, but nothing asks the operator either — the known gap.
+    func testADisagreementOverAKindChangesNeitherLibrary() throws {
+        try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
+        try b.saveTagRecord(TagRecord(displayName: "Climbing", kind: .videoAttribute))
+
+        let snapshots = [try ActorSync.snapshot(of: aURL), try ActorSync.snapshot(of: bURL)]
+        let converged = ActorSync.convergedExport(actorIds: [], resolutions: [:],
+                                                  snapshots: snapshots)
+        try ActorSync.apply(converged, to: aURL)
+        try ActorSync.apply(converged, to: bURL)
+
+        XCTAssertEqual(try a.fetchTagVocabulary().first?.resolvedKind(), TagKind.action)
+        XCTAssertEqual(try b.fetchTagVocabulary().first?.resolvedKind(), TagKind.videoAttribute)
+    }
+
+    func testNoVideoEverTravelsOnTheLivePath() throws {
+        try a.saveEntityProfile(EntityProfile(id: "actor:Alice Example"))
+        let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: ["actor:Alice Example"])
+        try a.insertAsset(asset)
+        try a.connectEdges(forVideo: asset.id)
+
+        let snapshots = [try ActorSync.snapshot(of: aURL), try ActorSync.snapshot(of: bURL)]
+        let converged = ActorSync.convergedExport(actorIds: ["actor:Alice Example"],
+                                                  resolutions: [:], snapshots: snapshots)
+        try ActorSync.apply(converged, to: bURL)
+
+        XCTAssertTrue(try b.fetchAllAssets().isEmpty)
+        XCTAssertEqual(try b.edgeCount(.videoPerformer), 0)
+    }
+}
