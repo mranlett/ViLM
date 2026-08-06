@@ -103,6 +103,16 @@ public enum VideoBatchPolicy {
         switch asset.enrichmentState {
         case .matched: return "already matched"
         case .unmatchable: return "you ruled this one out"
+        // ⚠️ Ambiguous means a PERSON has to choose — between two scenes with
+        // one fingerprint, or between an imprint and its network. A batch run
+        // cannot make either choice, so examining it again reaches the same
+        // dead end having spent a fingerprint and a request to get there.
+        //
+        // Left out of this list, a library accumulating ambiguities gets slower
+        // every run while doing no more work, and looks like it has forgotten
+        // where it got to. `Match Again` clears these when the answer that was
+        // missing — usually a confirmed studio — finally exists.
+        case .ambiguous: return "waiting on your decision"
         default: return nil
         }
     }

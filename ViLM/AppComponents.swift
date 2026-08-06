@@ -478,7 +478,32 @@ extension View {
         #if os(macOS)
         self
             .formStyle(.grouped)
-            .frame(minWidth: minWidth, idealWidth: minWidth + 60,
+            .macSheet(minWidth: minWidth, minHeight: minHeight)
+        #else
+        self
+        #endif
+    }
+
+    /// Gives a sheet a size on macOS. Use for sheets that are NOT built from a
+    /// `Form` — lists, image grids, photo browsers.
+    ///
+    /// ⚠️ A macOS sheet sizes to its content, and `List`, `ScrollView` and
+    /// `LazyVGrid` have no intrinsic height — so a sheet built from any of them
+    /// and given no frame collapses to nothing but its title bar and buttons.
+    /// It is not a small window; it is a window with no content area at all,
+    /// and no amount of resizing reveals the content.
+    ///
+    /// Split out from `macFormSheet` because `.formStyle(.grouped)` is
+    /// meaningless on a photo browser — the two screens needed the same frame
+    /// for a different reason, and sharing the name hid that the frame was the
+    /// part that mattered.
+    ///
+    /// No-op on iOS, where a sheet is the size of the device.
+    @ViewBuilder
+    func macSheet(minWidth: CGFloat = 620,
+                  minHeight: CGFloat = 520) -> some View {
+        #if os(macOS)
+        self.frame(minWidth: minWidth, idealWidth: minWidth + 60,
                    minHeight: minHeight, idealHeight: minHeight + 140)
         #else
         self

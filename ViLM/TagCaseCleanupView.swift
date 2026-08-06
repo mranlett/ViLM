@@ -64,6 +64,7 @@ struct TagCaseCleanupView: View {
                     }
                 }
         }
+        .macSheet(minWidth: 700, minHeight: 540)
         .task { await scan() }
     }
 

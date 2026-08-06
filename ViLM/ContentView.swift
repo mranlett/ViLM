@@ -91,6 +91,8 @@ struct ContentView: View {
     @State private var isShowingReadFilenames = false
     @State private var isShowingBatchMatch = false
     @State private var isShowingStudioConflicts = false
+    @State private var isShowingGraphConnect = false
+    @State private var isShowingMatchReset = false
     @State private var isShowingDuplicateDetection = false
     @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
@@ -230,6 +232,8 @@ struct ContentView: View {
                     onReadFilenames: { isShowingReadFilenames = true },
                     onBatchMatchVideos: { isShowingBatchMatch = true },
                     onStudioConflicts: { isShowingStudioConflicts = true },
+                    onConnectGraph: { isShowingGraphConnect = true },
+                    onResetMatches: { isShowingMatchReset = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
                     onBackupRestore: { isShowingLibraryBackup = true },
                     onExportActorLibrary: { isShowingActorLibraryExport = true },
@@ -289,6 +293,16 @@ struct ContentView: View {
                         // scans it (Check for Changes) and flags any missing files.
                         processFolder(at: restoredURL)
                     })
+                }
+            }
+            .sheet(isPresented: $isShowingMatchReset) {
+                if let url = selectedLibraryURL {
+                    MatchResetView(libraryURL: url) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingGraphConnect) {
+                if let url = selectedLibraryURL {
+                    GraphConnectView(libraryURL: url) { reloadUnionAssets() }
                 }
             }
             .sheet(isPresented: $isShowingStudioConflicts) {

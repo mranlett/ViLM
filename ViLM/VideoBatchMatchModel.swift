@@ -214,9 +214,37 @@ final class VideoBatchMatchModel: ObservableObject {
                 queue.append(QueuedMatch(asset: asset, route: .fingerprint, candidates: hits, libraryURL: libraryURL))
                 return .queued(route: .fingerprint, candidateCount: hits.count)
             }
-            guard let proposal = try? await provider.fetch(videoId: hit.id) else {
+            guard let fetched = try? await provider.fetch(videoId: hit.id) else {
                 return .failed("couldn't load details")
             }
+
+            // The same studio policy the per-video path follows. A batch run
+            // cannot ask, so where verification decides it proceeds, and where
+            // it cannot the video is QUEUED rather than given whichever name
+            // the source happened to list first.
+            //
+            // ⚠️ Queuing rather than defaulting to the imprint is deliberate,
+            // and it is the same rule as an ambiguous fingerprint two blocks
+            // up: a batch run may apply what is certain and must hand back what
+            // is not. "Matched once, stays matched" is what makes the
+            // difference permanent — a video written with a guessed studio does
+            // not come back on its own to have it corrected.
+            let proposal: VideoMetadataProposal
+            switch VideoEnrichmentReview.studioResolution(
+                proposal: fetched,
+                isVerified: { (try? store.fetchEntityProfile(for: "studio:\($0)"))?
+                    .enrichmentState == .matched }
+            ) {
+            case let .use(choice):
+                proposal = VideoEnrichmentReview.resolvingStudio(fetched, to: choice)
+            case .ask:
+                queue.append(QueuedMatch(asset: asset, route: .fingerprint,
+                                         candidates: [hit], libraryURL: libraryURL))
+                return .queued(route: .fingerprint, candidateCount: 1)
+            case .none:
+                proposal = fetched
+            }
+
             let changes = VideoEnrichmentReview.changes(for: asset, proposal: proposal)
             let fields = VideoBatchPolicy.autoApplicableFields(route: .fingerprint, changes: changes)
             // A match that offers nothing new is still a MATCH. Recording it
@@ -227,6 +255,22 @@ final class VideoBatchMatchModel: ObservableObject {
             // The fingerprint route is exact, so this id IS the match — keep it
             // whether or not the proposal had anything left to write.
             matchedSourceId = hit.id
+
+            // ⚠️ ABOVE the "nothing to write" return, and not gated on the
+            // studio field being applied. An imprint belongs to a network
+            // whether or not this video ended up carrying either name, and a
+            // library that is already correct produces no fields to write at
+            // all — so gating the hierarchy on having something to change
+            // meant a re-match of a tidy library recorded no hierarchy
+            // whatsoever, which is precisely the library most likely to be
+            // re-matched.
+            if let child = fetched.studio.value, let parent = fetched.studioParent.value,
+               !StudioResolution.isSameStudio(child, parent) {
+                try? store.confirmStudio(parent, source: provider.displayName)
+                // Cycles are refused by the store, so a source disagreeing with
+                // itself about which way a hierarchy runs cannot wedge it.
+                try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")
+            }
 
             guard !fields.isEmpty else {
                 appliedAsset = asset

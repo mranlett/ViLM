@@ -65,12 +65,41 @@ final class MediaTitleParserTests: XCTestCase {
         XCTAssertEqual(p.episodeNumber, 2, "the scene within that volume")
     }
 
-    /// A series whose name merely ends in a digit must not be renumbered.
-    func testSeriesEndingInADigitIsNotAVolume() {
+    /// ⚠️ A trailing digit IS read as a volume, and this is knowingly wrong for
+    /// a series genuinely named "Catch 22".
+    ///
+    /// The operator's call, on the grounds that a number at the end of one of
+    /// these titles is a volume far more often than it is part of the name —
+    /// so the minority gets corrected by hand rather than the majority getting
+    /// entered by hand.
+    func testATrailingDigitIsReadAsAVolume() {
         let p = MediaTitleParser.parse("Catch 22 - Scene 3")
-        XCTAssertEqual(p.seriesName, "Catch 22")
-        XCTAssertNil(p.seasonNumber)
+        XCTAssertEqual(p.seriesName, "Catch")
+        XCTAssertEqual(p.seasonNumber, 22)
         XCTAssertEqual(p.episodeNumber, 3)
+    }
+
+    /// The case the policy is FOR: a numbered entry with its own title.
+    func testANumberedEntryKeepsItsTitle() {
+        let p = MediaTitleParser.parse("Star Wars 4 A New Hope")
+        XCTAssertEqual(p.seriesName, "Star Wars")
+        XCTAssertEqual(p.seasonNumber, 4)
+        XCTAssertEqual(p.title, "A New Hope")
+    }
+
+    func testABareTrailingNumberNeedsNoTitle() {
+        let p = MediaTitleParser.parse("Road Trip 12")
+        XCTAssertEqual(p.seriesName, "Road Trip")
+        XCTAssertEqual(p.seasonNumber, 12)
+        XCTAssertNil(p.title)
+    }
+
+    /// ⚠️ The guard that keeps the policy from eating dates: a year is not a
+    /// plausible volume, so it is left in the name.
+    func testAYearIsNotAVolume() {
+        let p = MediaTitleParser.parse("Anniversary 1999")
+        XCTAssertNil(p.seasonNumber)
+        XCTAssertEqual(p.title, "Anniversary 1999")
     }
 
     func testLeadingNumberSignIsATitleNotStructure() {

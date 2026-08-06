@@ -1105,6 +1105,168 @@ public class LibraryStore {
         return becomesEdge ? (videoIds.count, 0) : (0, videoIds.count)
     }
 
+    // MARK: - The edges that travel between libraries
+
+    /// Performer traits, as portable pairs. Names no video, so it means the
+    /// same thing in any library — see `GraphSync`.
+    public func performerTagPairs() throws -> [GraphEdgePair] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT performer_id, tag_id FROM performer_tag")
+                .map { GraphEdgePair(from: $0["performer_id"], to: $0["tag_id"]) }
+        }
+    }
+
+    /// Which network owns which imprint.
+    public func studioParentPairs() throws -> [GraphEdgePair] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT studio_id, parent_studio_id FROM studio_parent")
+                .map { GraphEdgePair(from: $0["studio_id"], to: $0["parent_studio_id"]) }
+        }
+    }
+
+    // MARK: - Connecting one video
+
+    /// Builds the edges for a SINGLE video from its own strings.
+    ///
+    /// Same routing as the bulk connect — a credit with no profile is skipped,
+    /// two studios cannot be represented, a tag goes where its kind says — but
+    /// scoped to one record so a video arriving from elsewhere can be wired in
+    /// without re-scanning the library.
+    ///
+    /// ⚠️ Exists because a moved video is created under a NEW id in the
+    /// destination. Edges point at ids, so none of the source's edges can
+    /// follow it, and without this the video would sit in its new library with
+    /// its text intact and no place in the graph until someone happened to run
+    /// a full connect.
+    @discardableResult
+    public func connectEdges(forVideo videoId: UUID,
+                             available: [TagKind] = TagKind.seed) throws -> Int {
+        guard let asset = try fetchAllAssets().first(where: { $0.id == videoId }) else { return 0 }
+        let profiles = Set(try fetchAllEntityProfiles().map(\.id))
+        let vocabulary = try fetchTagVocabulary()
+        var written = 0
+
+        for name in Set(asset.actors) where profiles.contains("actor:\(name)") {
+            try linkPerformer("actor:\(name)", toVideo: videoId)
+            written += 1
+        }
+
+        // One studio only. Two is the conflict the schema refuses, and picking
+        // one here would make a move quietly resolve something the dedicated
+        // screen exists to put in front of a person.
+        let studios = Set(asset.studios.filter { !$0.isEmpty })
+        if studios.count == 1, let name = studios.first, profiles.contains("studio:\(name)") {
+            try setStudio("studio:\(name)", forVideo: videoId)
+            written += 1
+        }
+
+        for raw in Set(asset.actions) {
+            let key = TagNormalizer.identityKey(raw)
+            guard let record = vocabulary.first(where: { $0.identityKey == key }) else { continue }
+            guard let kind = record.resolvedKind(from: available) else {
+                // Held rather than dropped, exactly as the bulk connect does.
+                try addPendingTagAssociation(key, forVideo: videoId)
+                continue
+            }
+            // A trait describing a person is left alone: which of the cast it
+            // refers to is a guess, and a move must not be where that guess
+            // gets made.
+            guard kind.canAttach(to: .video) else { continue }
+            try linkTag(key, toVideo: videoId)
+            written += 1
+        }
+        return written
+    }
+
+    // MARK: - Reading across both representations
+    //
+    // ⚠️ Between connecting and retiring, a video's cast lives partly in edges
+    // and partly in the legacy strings. Reads must not see either half alone,
+    // or the same library answers differently depending on how far the
+    // migration has run — and browse, filter and counts would shift under the
+    // operator while nothing they did caused it.
+    //
+    // The union is what lets step 5 retire a string WITHOUT changing an answer:
+    // the edge already says the same thing, so removing the string is invisible.
+    // That property is the gate, and it is what these exist to make testable.
+
+    /// A video's performers, from edges and strings together.
+    public func resolvedPerformerIds(forVideo videoId: UUID, in asset: Asset? = nil)
+    throws -> Set<String> {
+        let fromEdges = Set(try performerIds(forVideo: videoId))
+        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let fromStrings = Set((source?.actors ?? []).map { "actor:\($0)" })
+        return fromEdges.union(fromStrings)
+    }
+
+    /// A video's releasing studio.
+    ///
+    /// The EDGE wins where one exists: it is the representation the schema
+    /// constrains, and a video the strings gave two studios has no edge at all
+    /// — so falling back to the strings there would hand back an arbitrary one
+    /// of the two, which is the choice this migration refuses to make.
+    public func resolvedStudioId(forVideo videoId: UUID, in asset: Asset? = nil)
+    throws -> String? {
+        if let edge = try studioId(forVideo: videoId) { return edge }
+        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let studios = Set((source?.studios ?? []).filter { !$0.isEmpty })
+        guard studios.count == 1, let name = studios.first else { return nil }
+        return "studio:\(name)"
+    }
+
+    /// A video's tags, folded so two spellings of one tag answer once.
+    ///
+    /// ⚠️ Deliberately does NOT include pending associations. A staged tag is
+    /// not attached to anything yet — that is the whole point of staging it —
+    /// and surfacing it here would put an unclassified tag back on the video by
+    /// a different route.
+    public func resolvedTagIds(forVideo videoId: UUID, in asset: Asset? = nil)
+    throws -> Set<String> {
+        let fromEdges = Set(try tagIds(forVideo: videoId))
+        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let fromStrings = Set((source?.actions ?? []).map(TagNormalizer.identityKey))
+        return fromEdges.union(fromStrings)
+    }
+
+    // MARK: - Retiring the strings
+
+    /// Whether a tag's strings can be dropped: every video that carries it in a
+    /// string also carries it as an edge.
+    ///
+    /// ⚠️ Scoped PER TAG. Gating the whole cleanup on "every tag is classified"
+    /// would let one stubborn tag freeze the legacy representation for the
+    /// entire library indefinitely; per tag, the migration makes progress the
+    /// whole way there.
+    ///
+    /// A tag classified as describing a PERFORMER is never retirable from
+    /// videos: its associations were deliberately not turned into edges, and
+    /// dropping the strings would destroy the record that enrichment still has
+    /// work to do.
+    public func canRetireStrings(forTag tagId: String,
+                                 available: [TagKind] = TagKind.seed) throws -> Bool {
+        guard let record = try fetchTagVocabulary().first(where: { $0.identityKey == tagId }),
+              let kind = record.resolvedKind(from: available),
+              kind.canAttach(to: .video)
+        else { return false }
+
+        let pending = try dbQueue.read { db in
+            try Int.fetchOne(db, sql:
+                "SELECT COUNT(*) FROM pending_tag_association WHERE tag_id = ?",
+                arguments: [tagId]) ?? 0
+        }
+        guard pending == 0 else { return false }
+
+        let edged = Set(try dbQueue.read { db in
+            try String.fetchAll(db, sql: "SELECT video_id FROM video_tag WHERE tag_id = ?",
+                                arguments: [tagId])
+        })
+        for asset in try fetchAllAssets() {
+            let carriesString = asset.actions.contains { TagNormalizer.identityKey($0) == tagId }
+            if carriesString && !edged.contains(asset.id.uuidString) { return false }
+        }
+        return true
+    }
+
     // MARK: - Resetting match status
 
     /// What a reset would affect, counted before anything is written.

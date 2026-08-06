@@ -110,12 +110,23 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     /// are not videos at all.
     public let durationSeconds: Int?
 
+    /// When the source says this was released, as the source wrote it —
+    /// `YYYY-MM-DD` from every provider so far.
+    ///
+    /// Structured rather than left inside `subtitle` because it decides
+    /// something: where the same work is offered by two studios, the earlier
+    /// release is the original production and the later one a redistribution.
+    /// A date buried in display text cannot make that comparison.
+    public let releaseDate: String?
+
     public init(id: String, title: String, subtitle: String? = nil,
                 thumbnailURL: URL? = nil, fullImageURL: URL? = nil,
-                imageURLs: [URL] = [], durationSeconds: Int? = nil) {
+                imageURLs: [URL] = [], durationSeconds: Int? = nil,
+                releaseDate: String? = nil) {
         self.id = id
         self.title = title
         self.durationSeconds = durationSeconds
+        self.releaseDate = releaseDate
         self.subtitle = subtitle
         self.thumbnailURL = thumbnailURL
         self.fullImageURL = fullImageURL ?? thumbnailURL

@@ -24,6 +24,8 @@ struct SettingsView: View {
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
     var onStudioConflicts: (() -> Void)?
+    var onConnectGraph: (() -> Void)?
+    var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
     var onBackupRestore: (() -> Void)?
     var onExportActorLibrary: (() -> Void)?
@@ -105,6 +107,21 @@ struct SettingsView: View {
                 }
 
                 Section(
+                    header: Text("Build the Graph"),
+                    footer: Text(session.isFederated
+                        ? "Edges live inside one library and point at rows in it, so there is nothing an edge spanning two could mean. Detach to use this."
+                        : "Adds a structured copy of what the tags already say, so the app can ask questions the text cannot answer. Your tags are left exactly as they are.")
+                ) {
+                    toolButton("Connect the Graph",
+                               icon: "point.3.connected.trianglepath.dotted",
+                               action: onConnectGraph)
+                        .disabled(session.isFederated)
+                    toolButton("Match Again", icon: "arrow.counterclockwise",
+                               action: onResetMatches)
+                        .disabled(session.isFederated)
+                }
+
+                Section(
                     header: Text("Find Problems"),
                     footer: Text(session.isFederated
                         ? "Find Duplicates scans every open library, so cross-library copies surface. File Name Audit works on one at a time — detach to use it."
@@ -118,15 +135,15 @@ struct SettingsView: View {
                 }
 
                 Section(
-                    header: Text("Move Actor Data Between Libraries"),
+                    header: Text("Move the Graph Between Libraries"),
                     footer: Text(session.isFederated
                         ? "With libraries attached, use Sync Actors in the sidebar instead — it converges them directly, no export file needed. These are for libraries that are never open together."
-                        : "Moves enriched bios and photos into another copy of the library without losing work already there.")
+                        : "Carries actors, studios, the tag vocabulary and the connections between them into another library — everything except the videos, which stay where they are. Additive: nothing already there is removed.")
                 ) {
-                    toolButton("Export Actor Library", icon: "square.and.arrow.up",
+                    toolButton("Export Graph", icon: "square.and.arrow.up",
                                action: onExportActorLibrary)
                         .disabled(session.isFederated)
-                    toolButton("Import and Merge Actor Library", icon: "square.and.arrow.down",
+                    toolButton("Import & Merge Graph", icon: "square.and.arrow.down",
                                action: onImportActorLibrary)
                         .disabled(session.isFederated)
                 }

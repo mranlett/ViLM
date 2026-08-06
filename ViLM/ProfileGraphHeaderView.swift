@@ -458,6 +458,10 @@ struct ProfileGraphHeaderView: View {
                 }
                 .task { await preloadImages() }
             }
+            // Larger than the shared default because this is the one sheet
+            // whose entire purpose is looking at a photograph — sizing it like
+            // a settings pane would defeat the point of opening it.
+            .macSheet(minWidth: 900, minHeight: 700)
         }
 
         @ViewBuilder

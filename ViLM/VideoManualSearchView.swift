@@ -532,5 +532,6 @@ private struct CandidateGallery: View {
                 }
             }
         }
+        .macSheet(minWidth: 820, minHeight: 640)
     }
 }

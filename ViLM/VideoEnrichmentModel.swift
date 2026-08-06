@@ -117,6 +117,12 @@ final class VideoEnrichmentModel: ObservableObject {
     private let libraryURL: URL
     private let knownTags: Set<String>
     private var proposal: VideoMetadataProposal?
+    /// The imprint and the network, when verification could not choose between
+    /// them. Non-nil means the review is waiting on a person.
+    @Published private(set) var studioChoice: (imprint: StudioResolution.Candidate,
+                                               parent: StudioResolution.Candidate)?
+    /// Kept so the parent edge can be recorded whichever name was chosen.
+    private var studioParentPair: (child: String, parent: String)?
     /// Kept so the picker can be returned to after opening a candidate.
     private var lastCandidates: [PluginCandidate] = []
     /// One in-flight completion per filter, so a new keystroke replaces the
@@ -331,7 +337,10 @@ final class VideoEnrichmentModel: ObservableObject {
                             tags: searchTags,
                             title: searchTitle.trimmingCharacters(in: .whitespacesAndNewlines)),
                 page: page)
-            browseResults = result.candidates
+            // Where the same scene is listed twice — once by whoever made it,
+            // once by whoever licensed it later — the original comes first.
+            // Only duplicates move; the source's ranking is otherwise kept.
+            browseResults = CandidatePreference.preferOriginalProduction(result.candidates)
             browseTotal = result.total
             unresolvedFilters = result.unresolvedFilters
             browsePage = page
@@ -371,6 +380,40 @@ final class VideoEnrichmentModel: ObservableObject {
         }
     }
 
+    /// Builds the review from a proposal whose studio is already decided.
+    private func present(_ resolved: VideoMetadataProposal) {
+        proposal = resolved
+        changes = VideoEnrichmentReview.changes(for: asset, proposal: resolved,
+                                                knownTags: knownTags)
+        tagOptions = VideoEnrichmentReview.tagOptions(for: asset, proposal: resolved,
+                                                      knownTags: knownTags)
+        // Fills are pre-ticked; a conflict never is. Tags follow their own
+        // rule — only ones already in the vocabulary.
+        accepted = Set(changes.filter { $0.kind == .fill }.map(\.field))
+        acceptedTags = VideoEnrichmentReview.defaultSelection(tagOptions)
+
+        phase = (changes.isEmpty && tagOptions.isEmpty) ? .nothingToApply : .reviewing
+    }
+
+    /// Settles an open imprint-versus-network choice and rebuilds the review
+    /// around it.
+    func chooseStudio(_ candidate: StudioResolution.Candidate) {
+        guard let proposal else { return }
+        studioChoice = nil
+        present(VideoEnrichmentReview.resolvingStudio(proposal, to: candidate))
+        // A studio the operator picked deliberately is one they have vouched
+        // for, so the next video offering the same pair is decided without
+        // asking again — which is how the disambiguation stops repeating.
+        accepted.insert(VideoEnrichmentReview.Field.studio)
+    }
+
+    /// Whether a studio NAME has already been confirmed by a person or a source.
+    private func isStudioVerified(_ name: String) -> Bool {
+        guard let store = try? LibraryStore(at: libraryURL) else { return false }
+        let profile = try? store.fetchEntityProfile(for: "studio:\(name)")
+        return profile?.enrichmentState == .matched
+    }
+
     func returnToPicker() {
         guard lastCandidates.count > 1 else { return }
         phase = .choosing(lastCandidates)
@@ -384,18 +427,40 @@ final class VideoEnrichmentModel: ObservableObject {
         chosenCandidate = candidate
         do {
             let fetched = try await provider.fetch(videoId: candidate.id)
-            proposal = fetched
 
-            changes = VideoEnrichmentReview.changes(for: asset, proposal: fetched,
-                                                    knownTags: knownTags)
-            tagOptions = VideoEnrichmentReview.tagOptions(for: asset, proposal: fetched,
-                                                          knownTags: knownTags)
-            // Fills are pre-ticked; a conflict never is. Tags follow their own
-            // rule — only ones already in the vocabulary.
-            accepted = Set(changes.filter { $0.kind == .fill }.map(\.field))
-            acceptedTags = VideoEnrichmentReview.defaultSelection(tagOptions)
+            // The source names an imprint and the network above it. Which one
+            // this video carries is settled BEFORE the review is built, so
+            // every row, the merge and the confirmation all read one answer.
+            let outcome = VideoEnrichmentReview.studioResolution(
+                proposal: fetched, isVerified: isStudioVerified)
+            // Held either way: the hierarchy is a fact about the studios, not
+            // about which name won, so it is recorded even when the imprint is
+            // chosen and the network never appears on the video.
+            if let child = fetched.studio.value, let parent = fetched.studioParent.value,
+               !StudioResolution.isSameStudio(child, parent) {
+                studioParentPair = (child, parent)
+            }
 
-            phase = (changes.isEmpty && tagOptions.isEmpty) ? .nothingToApply : .reviewing
+            switch outcome {
+            case let .use(choice):
+                studioChoice = nil
+                present(VideoEnrichmentReview.resolvingStudio(fetched, to: choice))
+            case let .ask(imprint, parent):
+                // ⚠️ No default. Pre-selecting one would let a return-key
+                // reflex commit the library to a studio nobody compared.
+                studioChoice = (imprint, parent)
+                present(fetched)
+                // ⚠️ The studio row is withdrawn while the question is open.
+                // Leaving it would show the imprint as the proposed value
+                // directly beneath a section asking which studio to use — the
+                // screen answering its own question, with the answer being
+                // whichever name the source happened to put first.
+                changes.removeAll { $0.field == VideoEnrichmentReview.Field.studio }
+                accepted.remove(VideoEnrichmentReview.Field.studio)
+            case .none:
+                studioChoice = nil
+                present(fetched)
+            }
         } catch {
             phase = .failed(friendly(error))
         }
@@ -488,7 +553,21 @@ final class VideoEnrichmentModel: ObservableObject {
         if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
                                                               accepting: accepted),
            let url = LibrarySession.shared.url(for: asset.id) {
-            try? LibraryStore(at: url).confirmStudio(studio, source: providerName)
+            let store = try? LibraryStore(at: url)
+            try? store?.confirmStudio(studio, source: providerName)
+
+            // ⚠️ The hierarchy is recorded whichever name landed on the video.
+            // It is a fact about the two studios, not about this video's
+            // choice — and it is the only thing that lets browsing a network
+            // find scenes filed under its imprints.
+            if let pair = studioParentPair {
+                try? store?.confirmStudio(pair.parent, source: providerName)
+                // Cycles are refused by the store; a source that disagrees with
+                // itself about which way a hierarchy runs must not be able to
+                // wedge the graph.
+                try? store?.setStudioParent("studio:\(pair.parent)",
+                                            forStudio: "studio:\(pair.child)")
+            }
         }
 
         let merged = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,

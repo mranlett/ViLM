@@ -98,7 +98,7 @@ struct ActorLibraryExportView: View {
             let url = libraryURL
             let result = try await Task.detached(priority: .userInitiated) {
                 let store = try LibraryStore(at: url)
-                return try store.exportActorLibrary()
+                return try store.exportGraph()
             }.value
             await MainActor.run {
                 self.export = result.profiles.isEmpty ? nil : result

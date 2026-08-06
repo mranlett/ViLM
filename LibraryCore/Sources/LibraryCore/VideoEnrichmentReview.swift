@@ -282,6 +282,56 @@ public enum VideoEnrichmentReview {
         return updated
     }
 
+    // MARK: - Which studio the source meant
+
+    /// Applies the studio-level policy to what a source offered.
+    ///
+    /// A scene names both the imprint that released it and the network that
+    /// owns the imprint. `StudioResolution` decides between them; this only
+    /// turns a proposal into the two candidates it needs.
+    ///
+    /// `isVerified` answers whether a studio NAME has already been confirmed —
+    /// in practice `enrichmentState == .matched` on its profile.
+    public static func studioResolution(proposal: VideoMetadataProposal,
+                                        isVerified: (String) -> Bool)
+    -> StudioResolution.Outcome {
+        func candidate(_ name: String?, _ sourceId: String?,
+                       _ level: StudioResolution.Level) -> StudioResolution.Candidate? {
+            guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return StudioResolution.Candidate(name: name, sourceId: sourceId,
+                                              level: level, isVerified: isVerified(name))
+        }
+        return StudioResolution.resolve(
+            imprint: candidate(proposal.studio.value, proposal.studioSourceId.value, .imprint),
+            parent: candidate(proposal.studioParent.value,
+                              proposal.studioParentSourceId.value, .parent))
+    }
+
+    /// A copy of the proposal whose studio field carries the decided studio.
+    ///
+    /// ⚠️ Rewriting the proposal rather than threading the choice through
+    /// review, merge and confirm separately: those three have to agree about
+    /// which studio this video is getting, and three parameters that could
+    /// disagree is exactly how they would drift apart.
+    public static func resolvingStudio(_ proposal: VideoMetadataProposal,
+                                       to choice: StudioResolution.Candidate)
+    -> VideoMetadataProposal {
+        var resolved = proposal
+        // The source note is kept: where the name came from is still true, and
+        // it is what the review row shows to justify the change.
+        resolved.studio = ProposedField(choice.name,
+                                        sourceNote: choice.level == .parent
+                                            ? note(proposal.studioParent.sourceNote, "network")
+                                            : proposal.studio.sourceNote)
+        resolved.studioSourceId = ProposedField(choice.sourceId)
+        return resolved
+    }
+
+    private static func note(_ existing: String?, _ suffix: String) -> String? {
+        guard let existing, !existing.isEmpty else { return suffix }
+        return "\(existing) · \(suffix)"
+    }
+
     /// The studio a source supplied, when the operator accepted it.
     ///
     /// ⭐ A studio that arrived FROM the source is confirmed by definition: the

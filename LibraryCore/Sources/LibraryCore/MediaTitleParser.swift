@@ -89,6 +89,33 @@ public enum MediaTitleParser {
             }
         }
 
+        // A bare number with words on both sides — "Star Wars 4 A New Hope".
+        // Read as the volume, with the individual work behind it.
+        if let m = firstMatch(#"\s(\d{1,3})\s"#, in: text), let number = intAt(1, m, text) {
+            let (before, after) = split(text, around: m.range)
+            if let series = cleaned(before), let title = cleaned(after) {
+                return ParsedMediaTitle(seriesName: series,
+                                        seasonNumber: number,
+                                        title: title)
+            }
+        }
+
+        // ⚠️ A bare TRAILING number — "Catch 22" becomes Catch, volume 22.
+        //
+        // Knowingly wrong for titles that simply end in a digit. It is the
+        // operator's decision, on the grounds that most numbers in these titles
+        // are volume numbers and the minority is quicker to correct by hand
+        // than the majority is to enter by hand.
+        //
+        // The 999 ceiling in `intAt` is what keeps years out: "Anniversary
+        // 1999" is left alone because 1999 is not a plausible volume.
+        if let m = firstMatch(#"\s(\d{1,3})\s*$"#, in: text), let number = intAt(1, m, text) {
+            let (before, _) = split(text, around: m.range)
+            if let series = cleaned(before) {
+                return ParsedMediaTitle(seriesName: series, seasonNumber: number)
+            }
+        }
+
         return ParsedMediaTitle(title: text)
     }
 
@@ -105,15 +132,21 @@ public enum MediaTitleParser {
     // MARK: - Helpers
 
     /// Peels a trailing volume number off a series name: "Road Trip #02" is the
-    /// second volume of "Road Trip". Only a number SIGN counts — a series whose
-    /// name simply ends in a digit ("Catch 22") must not be renumbered.
+    /// second volume of "Road Trip".
+    ///
+    /// A bare trailing digit counts too — "Catch 22 Scene 3" is volume 22,
+    /// scene 3 — on the operator's decision that a number at the end of one of
+    /// these titles is a volume far more often than it is part of the name.
     private static func splitTrailingVolume(from series: String?) -> (String?, Int?) {
         guard let series else { return (nil, nil) }
-        guard let m = firstMatch(#"#\s*(\d{1,3})\s*$"#, in: series),
-              let number = intAt(1, m, series) else { return (series, nil) }
-        let (head, _) = split(series, around: m.range)
-        guard let name = cleaned(head) else { return (series, nil) }
-        return (name, number)
+        // The number sign first: unambiguous, and allows "#02" with no space.
+        for pattern in [#"#\s*(\d{1,3})\s*$"#, #"\s(\d{1,3})\s*$"#] {
+            guard let m = firstMatch(pattern, in: series),
+                  let number = intAt(1, m, series),
+                  let name = cleaned(split(series, around: m.range).0) else { continue }
+            return (name, number)
+        }
+        return (series, nil)
     }
 
     private static func firstMatch(_ pattern: String, in text: String) -> NSTextCheckingResult? {

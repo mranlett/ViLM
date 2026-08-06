@@ -362,6 +362,42 @@ public final class VideoTransferService {
                 actorsTransferred = mergeResult.newActorCount + mergeResult.updatedActorCount
                 actorPhotosTransferred = mergeResult.newPhotoCount
             }
+
+            // ⚠️ The studios and tags this video's edges will point AT.
+            //
+            // Actors were already carried; studios and tag records were not,
+            // because before the graph existed the destination only needed the
+            // text. An edge points at a row, so without these the video arrives
+            // and silently cannot be connected to its own studio or tags.
+            //
+            // Only what is MISSING is written. A destination profile is the
+            // richer one whenever it already exists — it has been enriched in
+            // that library — and overwriting it with the source's copy would
+            // trade information for uniformity.
+            for name in Set(asset.studios) where !name.isEmpty {
+                let id = "studio:\(name)"
+                let alreadyThere = (try? destinationStore.fetchEntityProfile(for: id)) ?? nil
+                if alreadyThere == nil,
+                   let profile = (try? sourceStore.fetchEntityProfile(for: id)) ?? nil {
+                    try? destinationStore.saveEntityProfile(profile)
+                }
+            }
+            if !asset.actions.isEmpty {
+                let wanted = Set(asset.actions.map(TagNormalizer.identityKey))
+                let existing = Set((try? destinationStore.fetchTagVocabulary())?
+                    .map(\.identityKey) ?? [])
+                for record in (try? sourceStore.fetchTagVocabulary()) ?? []
+                where wanted.contains(record.identityKey) && !existing.contains(record.identityKey) {
+                    try? destinationStore.saveTagRecord(record)
+                }
+            }
+
+            // The video takes its place in the destination's graph.
+            //
+            // Best-effort like the rest of this block: the video and its text
+            // have already moved intact, and a failure here costs a re-run of
+            // Connect the Graph rather than any data.
+            try? destinationStore.connectEdges(forVideo: newAssetId)
         } catch {
             // Roll the destination back so a failed move leaves no orphan.
             try? fm.removeItem(at: tempURL)

@@ -69,6 +69,9 @@ struct ActorPhotoCleanupView: View {
                 }
             }
         }
+        // Rows carry photo thumbnails side by side — the whole judgement is
+        // "are these the same picture", which needs room to be visible.
+        .macSheet(minWidth: 760, minHeight: 580)
         .onAppear { if report == nil && !isScanning { scan() } }
     }
 

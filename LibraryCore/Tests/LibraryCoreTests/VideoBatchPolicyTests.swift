@@ -119,16 +119,40 @@ extension VideoBatchPolicyTests {
         XCTAssertNotNil(VideoBatchPolicy.skipReason(for: unchanged), "but it is still skipped")
     }
 
-    /// A queued video is genuinely undecided, so it DOES come back until
-    /// someone resolves it. That is the state a manual match has to overwrite.
-    func testAQueuedVideoReturnsUntilItIsResolved() {
+    /// ⚠️ Reversed deliberately. This previously asserted that a queued video
+    /// comes back on every run.
+    ///
+    /// It cannot resolve itself: ambiguity means a person has to choose —
+    /// between two scenes sharing a fingerprint, or between an imprint and its
+    /// network — and a batch run makes neither choice. Re-examining spent a
+    /// fingerprint and a rate-limited request to reach the same dead end, so a
+    /// library accumulating ambiguities got slower every run while doing no
+    /// more work, and looked like it had forgotten where it got to.
+    ///
+    /// Nothing is stranded: these are findable under Lookup Result →
+    /// Ambiguous, and `Match Again` clears them once the missing answer —
+    /// usually a confirmed studio — exists.
+    func testAQueuedVideoIsNotExaminedAgain() {
         let queued = VideoEnrichmentReview.recordingOutcome(
             Asset(relativePath: "a.mp4", fileName: "a.mp4"),
             state: .ambiguous, source: "TestSource")
-        XCTAssertNil(VideoBatchPolicy.skipReason(for: queued))
 
-        let resolved = VideoEnrichmentReview.recordingOutcome(
-            queued, state: .matched, source: "TestSource")
-        XCTAssertNotNil(VideoBatchPolicy.skipReason(for: resolved))
+        XCTAssertNotNil(VideoBatchPolicy.skipReason(for: queued))
+    }
+
+    /// ⚠️ The states a re-run MUST still examine. Skipping one of these would
+    /// mean a video that failed on a network blip, or one never looked at,
+    /// silently never being tried again.
+    func testAnUnresolvedVideoIsStillExamined() {
+        for state in [EnrichmentState.noMatch, .needsReview] {
+            let asset = VideoEnrichmentReview.recordingOutcome(
+                Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+                state: state, source: "TestSource")
+            XCTAssertNil(VideoBatchPolicy.skipReason(for: asset),
+                         "\(state) has to come back")
+        }
+        XCTAssertNil(VideoBatchPolicy.skipReason(
+            for: Asset(relativePath: "a.mp4", fileName: "a.mp4")),
+                     "never checked has to come back")
     }
 }

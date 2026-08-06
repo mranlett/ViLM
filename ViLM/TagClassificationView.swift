@@ -47,6 +47,13 @@ struct TagClassificationView: View {
                 }
             }
         }
+        // ⚠️ Without this the sheet collapses to its title bar on macOS: a sheet
+        // sizes to its content and a List has no intrinsic height, so there is
+        // nothing to size to. Wider than the shared default because the row's
+        // segmented picker carries three full sentences, and taller because
+        // this is a worklist — scrolling a two-row window would make a
+        // 27-tag vocabulary miserable to get through.
+        .macFormSheet(minWidth: 680, minHeight: 560)
         .task { await load() }
         // Also on disappear: a sheet swiped away never presses Done, and the
         // classifications are already saved by then — the caller just would not

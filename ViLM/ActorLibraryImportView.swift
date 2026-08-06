@@ -17,7 +17,7 @@ struct ActorLibraryImportView: View {
     @State private var export: ActorLibraryExport?
     @State private var plan: ActorMergePlan?
     @State private var isApplying = false
-    @State private var result: ActorMergeResult?
+    @State private var result: GraphMergeResult?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -84,9 +84,21 @@ struct ActorLibraryImportView: View {
                     .foregroundColor(.green)
                 Text("Merge Complete")
                     .font(.title3.bold())
-                Text("\(result.newActorCount) new actor\(result.newActorCount == 1 ? "" : "s"), \(result.updatedActorCount) updated")
-                Text("\(result.newPhotoCount) new photo\(result.newPhotoCount == 1 ? "" : "s"), \(result.duplicatePhotoCount) duplicate\(result.duplicatePhotoCount == 1 ? "" : "s") skipped")
-                    .foregroundColor(.secondary)
+                Group {
+                    Text("\(result.actors.new) new actor\(result.actors.new == 1 ? "" : "s"), \(result.actors.updated) updated")
+                    Text("\(result.actors.photos) new photo\(result.actors.photos == 1 ? "" : "s")")
+                    // The rest of the graph, reported separately: these are the
+                    // parts a sync used to leave behind entirely.
+                    Text("\(result.newStudios) new studio\(result.newStudios == 1 ? "" : "s"), \(result.updatedStudios) confirmed")
+                    Text("\(result.newTags) new tag\(result.newTags == 1 ? "" : "s"), \(result.classifiedTags) classified")
+                    Text("\(result.newPerformerTags + result.newStudioParents) new connection\(result.newPerformerTags + result.newStudioParents == 1 ? "" : "s")")
+                }
+                .foregroundColor(.secondary)
+
+                if result.refusedCycles > 0 {
+                    Text("\(result.refusedCycles) studio parent\(result.refusedCycles == 1 ? "" : "s") skipped — taking them would have made a loop")
+                        .foregroundStyle(.orange)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
@@ -173,7 +185,7 @@ struct ActorLibraryImportView: View {
             let url = libraryURL
             let applied = try await Task.detached(priority: .userInitiated) {
                 let store = try LibraryStore(at: url)
-                return try store.applyActorMerge(export)
+                return try store.applyGraphMerge(export)
             }.value
             await MainActor.run {
                 self.result = applied

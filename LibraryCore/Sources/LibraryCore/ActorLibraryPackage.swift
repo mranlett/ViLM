@@ -56,6 +56,29 @@ public struct ActorLibraryExport: Codable, Sendable {
     /// an old file is never read as "everything was deleted".
     public var tombstones: [EntityTombstone] = []
 
+    // MARK: - The rest of the graph
+    //
+    // Everything below travels with the actors so a second library can hold the
+    // same graph. Videos and their edges are deliberately absent: a video lives
+    // in one library, its id is local to that library, and an edge naming one
+    // would point at nothing on the other side.
+    //
+    // ⚠️ All defaulted, so an export written before these existed still decodes
+    // — as "this file knew nothing about studios", never as "delete them".
+
+    /// Studio profiles, carrying the confirmation that makes the studio policy
+    /// work. A library that does not know a studio is verified will ask about
+    /// it again.
+    public var studios: [EntityProfile] = []
+    /// The tag vocabulary, INCLUDING each tag's kind. Without the kinds, a
+    /// receiving library treats every arriving tag as unclassified and cannot
+    /// attach any of them.
+    public var tags: [TagRecord] = []
+    /// Performer traits and studio hierarchy — the two edge kinds that name no
+    /// video and so mean the same thing in any library.
+    public var performerTags: [GraphEdgePair] = []
+    public var studioParents: [GraphEdgePair] = []
+
     public init(formatVersion: Int, exportedAt: Date, profiles: [EntityProfile],
                 photos: [ExportedPhoto], tombstones: [EntityTombstone] = []) {
         self.formatVersion = formatVersion

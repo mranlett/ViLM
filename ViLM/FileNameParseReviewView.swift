@@ -64,6 +64,10 @@ struct FileNameParseReviewView: View {
                     }
                 }
         }
+        // Wide: each row shows a filename beside what parsing it would add,
+        // and a narrow sheet truncates both halves of the comparison the
+        // screen exists to let you make.
+        .macSheet(minWidth: 760, minHeight: 560)
         .task { await scan() }
     }
 

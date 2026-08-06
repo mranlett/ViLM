@@ -251,6 +251,51 @@ struct VideoEnrichmentSheet: View {
         }
     }
 
+    // MARK: - Which studio
+
+    /// Shown only when verification could not settle it — both names confirmed,
+    /// or neither.
+    ///
+    /// ⚠️ Neither is pre-selected and no studio row appears until one is
+    /// picked. A default here would be a studio nobody compared, applied by the
+    /// same keystroke that accepts everything else.
+    private func studioChoiceSection(
+        _ choice: (imprint: StudioResolution.Candidate, parent: StudioResolution.Candidate)
+    ) -> some View {
+        Section {
+            studioOption(choice.imprint, caption: "The label that released it")
+            studioOption(choice.parent, caption: "The network that owns the label")
+        } header: {
+            Text("Which studio?")
+        } footer: {
+            Text(choice.imprint.isVerified && choice.parent.isVerified
+                 ? "Both are studios you have already confirmed, so the source cannot say which this video should carry."
+                 : "Neither has been confirmed yet. Whichever you pick is confirmed by picking it.")
+        }
+    }
+
+    private func studioOption(_ candidate: StudioResolution.Candidate,
+                              caption: String) -> some View {
+        Button {
+            model.chooseStudio(candidate)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(candidate.name).font(.body)
+                    Text(caption).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if candidate.isVerified {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityLabel("Already confirmed")
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Review
 
     private var review: some View {
@@ -301,6 +346,10 @@ struct VideoEnrichmentSheet: View {
                     Button("Search by hand instead") { model.beginBrowsing() }
                         .font(.caption)
                 }
+            }
+
+            if let choice = model.studioChoice {
+                studioChoiceSection(choice)
             }
 
             let fills = model.changes.filter { $0.kind == .fill }
@@ -445,5 +494,9 @@ private struct CandidateImageSheet: View {
                 }
             }
         }
+        // Sized to fit three of the grid's 240pt columns: this screen exists so
+        // the images can be compared, and one column at a time is not a
+        // comparison.
+        .macSheet(minWidth: 820, minHeight: 640)
     }
 }

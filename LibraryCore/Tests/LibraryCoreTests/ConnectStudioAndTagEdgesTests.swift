@@ -213,7 +213,8 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
         let result = try store.resolvePendingAssociations(
             forTag: TagNormalizer.identityKey("Unsorted"))
 
-        XCTAssertEqual(result, (0, 0))
+        XCTAssertEqual(result.materialised, 0)
+        XCTAssertEqual(result.discarded, 0)
         XCTAssertEqual(try store.edgeCount(.pendingTagAssociation), 1, "still waiting")
     }
 }
