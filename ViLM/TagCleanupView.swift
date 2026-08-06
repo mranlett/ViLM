@@ -104,9 +104,7 @@ struct TagCleanupView: View {
                 Text(errorMessage ?? "")
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 500, minHeight: 400)
-        #endif
+        .macFormSheet(minWidth: 560, minHeight: 440)
     }
     
     private func loadProfiles() {

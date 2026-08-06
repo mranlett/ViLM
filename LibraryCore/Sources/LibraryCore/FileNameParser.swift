@@ -51,10 +51,60 @@ public struct NameVocabulary: Sendable {
     public let studios: Set<String>
     public let tags: Set<String>
 
-    public init(actors: Set<String> = [], studios: Set<String> = [], tags: Set<String> = []) {
+    /// Names confirmed against an external source.
+    ///
+    /// Everything above is merely *present* in the library — including whatever
+    /// a previous parse guessed, which makes an unvalidated name evidence of
+    /// nothing more than that someone typed it once. A validated name has been
+    /// checked, so it DECIDES a token's reading where an unvalidated one only
+    /// informs it.
+    ///
+    /// Empty is the normal state for a new library, and the parser falls back
+    /// to exactly the behaviour it had before — which is what keeps it working
+    /// on a library that has confirmed nothing yet.
+    public let validatedActors: Set<String>
+    public let validatedStudios: Set<String>
+
+    public init(actors: Set<String> = [], studios: Set<String> = [], tags: Set<String> = [],
+                validatedActors: Set<String> = [], validatedStudios: Set<String> = []) {
         self.actors = Set(actors.map { $0.lowercased() })
         self.studios = Set(studios.map { $0.lowercased() })
         self.tags = Set(tags.map { $0.lowercased() })
+        self.validatedActors = Set(validatedActors.map { $0.lowercased() })
+        self.validatedStudios = Set(validatedStudios.map { $0.lowercased() })
+    }
+
+    /// Built from the library AND from what has been confirmed about it.
+    ///
+    /// A profile counts as validated when a lookup matched it. `matched` rather
+    /// than "has a source id" deliberately: the id column is recent and
+    /// populates only as records are re-matched, so requiring it would leave
+    /// the validated set empty and the lexicon useless for a year. The id is
+    /// the stronger signal and supersedes this as it fills in.
+    public init(assets: [Asset], profiles: [String: EntityProfile]) {
+        var actors = Set<String>(), studios = Set<String>(), tags = Set<String>()
+        for asset in assets {
+            actors.formUnion(asset.actors)
+            studios.formUnion(asset.studios)
+            tags.formUnion(asset.actions)
+        }
+
+        var validatedActors = Set<String>(), validatedStudios = Set<String>()
+        for (id, profile) in profiles where profile.enrichmentState == .matched {
+            // A malformed id like "actor:" would otherwise contribute an empty
+            // string, which matches an empty entry and validates nothing.
+            if id.hasPrefix("actor:") {
+                let name = String(id.dropFirst(6))
+                if !name.isEmpty { validatedActors.insert(name) }
+            }
+            if id.hasPrefix("studio:") {
+                let name = String(id.dropFirst(7))
+                if !name.isEmpty { validatedStudios.insert(name) }
+            }
+        }
+
+        self.init(actors: actors, studios: studios, tags: tags,
+                  validatedActors: validatedActors, validatedStudios: validatedStudios)
     }
 
     /// Built from what the library holds today. The vocabulary grows as records
@@ -105,6 +155,36 @@ public enum FileNameParser {
             // Every entry recognised as one kind places the whole segment.
             // A segment is a list of ONE kind of thing — mixing them would mean
             // the generator produced it, and it never does.
+            //
+            // ⭐ VALIDATED readings are tried first, because a confirmed name
+            // outranks one that is merely present. Without this, a token that
+            // is a known studio AND a name some earlier parse guessed into the
+            // actor list resolves as an actor purely because actors are checked
+            // first — order deciding what confidence should.
+            // ⚠️ `allSatisfy` is true for an empty array, so a segment that
+            // splits to nothing (all separators, e.g. ", ,") would read as
+            // "confirmed as both" and be reported as ambiguous rather than as
+            // the unreadable text it is.
+            let validActor = !entries.isEmpty
+                && entries.allSatisfy { vocabulary.validatedActors.contains($0.lowercased()) }
+            let validStudio = !entries.isEmpty
+                && entries.allSatisfy { vocabulary.validatedStudios.contains($0.lowercased()) }
+
+            if validActor && validStudio {
+                // Confirmed as both. Nothing here can settle it, and guessing
+                // would credit a video to the wrong kind of thing entirely.
+                unplaced.append((index, segment))
+                continue
+            }
+            if validActor {
+                result.actors.append(contentsOf: entries)
+                continue
+            }
+            if validStudio {
+                result.studios.append(contentsOf: entries)
+                continue
+            }
+
             if entries.allSatisfy({ vocabulary.actors.contains($0.lowercased()) }) {
                 result.actors.append(contentsOf: entries)
             } else if entries.allSatisfy({ vocabulary.studios.contains($0.lowercased()) }) {

@@ -26,6 +26,21 @@ struct AssetsGridView: View {
     @State private var isShowingHelp = false
     let libraryURL: URL?
     let refreshID: UUID
+
+    /// Whether this grid provides the window's search field.
+    ///
+    /// ⚠️ Exactly ONE view per window may declare `.searchable`. SwiftUI maps
+    /// it to a toolbar item with a fixed identifier —
+    /// `com.apple.SwiftUI.search` — and AppKit throws
+    /// `NSInternalInconsistencyException` when a second item claims it, which
+    /// crashes the app rather than degrading.
+    ///
+    /// Two grids are alive together whenever a profile page opens beside the
+    /// browse column: selecting an actor puts one in the content column and
+    /// another inside `EntityProfileRouteView` in the detail column. The
+    /// embedded one therefore declines, and the browse column keeps the search
+    /// field where it has always been.
+    var providesSearchField: Bool = true
     @Binding var filteredAssetContext: [Asset.ID]
     var onPullToRefresh: () async -> Void = {}
 
@@ -162,7 +177,7 @@ struct AssetsGridView: View {
         let filtered = assets.filter { asset in
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
-                case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .smartCollection: return true
+                case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .studioGallery, .smartCollection: return true
                 case .actor(let name): return mappedActors(for: asset).contains(name)
                 case .tag(let name):
                     // A tag can apply directly to a video, or only exist on
@@ -236,6 +251,7 @@ struct AssetsGridView: View {
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"
         case .seriesGallery: return "Series Gallery"
+        case .studioGallery: return "Studios Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
@@ -508,7 +524,8 @@ struct AssetsGridView: View {
 #endif
         .navigationTitle(sidebarSelectionTitle)
         .navigationSubtitle(isFiltered && resultViewMode == .actors ? "\(matchingActors.count) actors" : "\(displayedAssets.count) items")
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Search title, actor, tag, studio, notes…")
+        .searchableIfProvided(providesSearchField, text: $searchText,
+                              prompt: "Search title, actor, tag, studio, notes…")
 #if os(iOS)
         // Scrolling the results collapses the keyboard (search text stays),
         // so the toolbar and bottom bar are reachable mid-search.
@@ -880,6 +897,7 @@ struct AssetsGridView: View {
         case .actorGallery: return "Actors Gallery"
         case .tagGallery: return "Tags Gallery"
         case .seriesGallery: return "Series Gallery"
+        case .studioGallery: return "Studios Gallery"
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name

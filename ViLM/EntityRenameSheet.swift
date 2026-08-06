@@ -97,6 +97,10 @@ struct EntityRenameSheet: View {
             }
             .onAppear { if newName.isEmpty { newName = currentName } }
         }
+        // A single field and an explanation — narrower than the default, but it
+        // still needs the grouped style or the label and field lay out in one
+        // row wider than the sheet.
+        .macFormSheet(minWidth: 460, minHeight: 260)
     }
 
     private func rename() async {

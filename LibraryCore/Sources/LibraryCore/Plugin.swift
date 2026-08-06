@@ -284,7 +284,28 @@ public struct VideoMetadataProposal: Equatable, Sendable {
     public var seriesTitle: ProposedField<String> = .absent
     /// Who released it. Stored as a `studio:` tag rather than its own column,
     /// which is the convention the library already uses.
+    ///
+    /// ⚠️ This is the IMPRINT — the specific label a scene was released under,
+    /// which is frequently a sub-studio of a much better-known network. It is
+    /// the truth about the scene and needs no decision.
     public var studio: ProposedField<String> = .absent
+
+    /// The source's own id for that studio.
+    ///
+    /// A name is not an identity: two networks can use the same imprint name,
+    /// and an imprint can be renamed. Carrying the id is what lets a studio
+    /// hold a confirmed match rather than a spelling.
+    public var studioSourceId: ProposedField<String> = .absent
+
+    /// The network the imprint belongs to, where the source knows of one.
+    ///
+    /// ⚠️ NOT an alternative value for `studio` — both are real studios, and
+    /// the scene genuinely belongs to the imprint. Which level the operator
+    /// wants to SEE and file by is a separate, per-studio preference, and one
+    /// they answer once rather than at every scene.
+    public var studioParent: ProposedField<String> = .absent
+
+    public var studioParentSourceId: ProposedField<String> = .absent
     public var seasonNumber: ProposedField<Int> = .absent
     public var episodeNumber: ProposedField<Int> = .absent
     public var episodeTitle: ProposedField<String> = .absent

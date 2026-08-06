@@ -55,6 +55,14 @@ struct EntityProfileRouteView: View {
             missingAssetIDs: missingAssetIDs,
             libraryURL: libraryURL,
             refreshID: gridRefreshID,
+            // ⚠️ This grid must NOT claim the window's search field.
+            //
+            // On the macOS split layout a profile page opens in the detail
+            // column while the browse column still holds its own grid — two
+            // `.searchable` views in one window, both claiming the toolbar
+            // identifier `com.apple.SwiftUI.search`, which AppKit rejects by
+            // crashing. Clicking an actor in the gallery did it every time.
+            providesSearchField: false,
             filteredAssetContext: $filteredAssetContext,
             entityProfiles: entityProfiles,
             akaMap: akaMap,

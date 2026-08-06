@@ -155,6 +155,7 @@ struct BatchEntityProfileEditorView: View {
                 print("Failed to fetch unique tags/genders: \(error)")
             }
         }
+        .macFormSheet(minHeight: 480)
     }
     
     private var tagEntryPopover: some View {

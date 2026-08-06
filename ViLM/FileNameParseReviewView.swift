@@ -265,16 +265,32 @@ struct FileNameParseReviewView: View {
         do {
             var all: [Asset] = []
             var ownership: [UUID: URL] = [:]
+            var profiles: [String: EntityProfile] = [:]
             for url in libraryURLs {
                 let store = try LibraryStore(at: url)
                 let loaded = try store.fetchAllAssets()
                 for asset in loaded { ownership[asset.id] = url }
                 all += loaded
+                // Profiles are pooled for the same reason assets are, and they
+                // are what says which names have actually been CONFIRMED.
+                // Without them every name carries equal authority, so a token
+                // that is a known studio and a guessed actor resolves by check
+                // order rather than by confidence.
+                for profile in try store.fetchAllEntityProfiles() {
+                    // A name confirmed ANYWHERE is confirmed — so a matched
+                    // profile always wins, whichever library it came from.
+                    // First-wins would let an unmatched copy in one library
+                    // shadow a matched one in another and silently drop the
+                    // confirmation.
+                    if profile.enrichmentState == .matched || profiles[profile.id] == nil {
+                        profiles[profile.id] = profile
+                    }
+                }
             }
             // Pooled across every open library. A studio known only to one of
             // them still explains a filename in the other, so pooling reads
             // MORE than scanning each alone would.
-            let vocabulary = NameVocabulary(assets: all)
+            let vocabulary = NameVocabulary(assets: all, profiles: profiles)
             assets = all
             owner = ownership
             libraryCount = libraryURLs.count

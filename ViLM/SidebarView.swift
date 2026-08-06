@@ -164,6 +164,11 @@ struct SidebarView: View {
                     selection = [.seriesGallery]
                     onApplyFilters()
                 }
+
+                sidebarRow(title: "Studios Gallery", icon: "building.2.fill", isSelected: selection == [.studioGallery]) {
+                    selection = [.studioGallery]
+                    onApplyFilters()
+                }
             }
 
             // The federated session: primary + attachments in precedence
@@ -359,7 +364,7 @@ struct SidebarView: View {
                 Button(action: {
                     // Filters apply on the assets grid; drop any section
                     // selection so this always lands on the filtered grid.
-                    selection.subtract([.dashboard, .actorGallery, .tagGallery, .seriesGallery])
+                    selection.subtract([.dashboard, .actorGallery, .tagGallery, .seriesGallery, .studioGallery])
                     onApplyFilters()
                 }) {
                     Text("Apply Filters & View Assets")

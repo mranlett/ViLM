@@ -89,8 +89,12 @@ struct SettingsView: View {
                     footer: Text("Each finds records that are wrong rather than merely incomplete, shows them, and changes nothing until you say so.")
                 ) {
                     toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
+                    // `building.2.crop.circle.badge.questionmark` is not a real
+                    // SF Symbol — it logged "No symbol named …" on every render
+                    // and drew nothing, which is why this row sat oddly against
+                    // its neighbours.
                     toolButton("Fix Duplicate Studios",
-                               icon: "building.2.crop.circle.badge.questionmark",
+                               icon: "building.2",
                                action: onStudioConflicts)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
@@ -195,7 +199,7 @@ struct SettingsView: View {
                 HelpView(initialTopicID: HelpContent.settings.id)
             }
         }
-        .frame(minWidth: 300, minHeight: 300)
+        .macFormSheet()
     }
 
     // Every tool row behaves the same way: close Settings, then hand off to

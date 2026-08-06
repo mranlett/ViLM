@@ -282,6 +282,24 @@ public enum VideoEnrichmentReview {
         return updated
     }
 
+    /// The studio a source supplied, when the operator accepted it.
+    ///
+    /// ⭐ A studio that arrived FROM the source is confirmed by definition: the
+    /// source knows it exists and knows how it is spelled. That is exactly what
+    /// "a lexicon of downloaded and verified studio names" means, and it is the
+    /// only route by which a studio becomes verified — nothing looks studios up
+    /// directly, so without this a studio could never stop being unconfirmed.
+    ///
+    /// Returns nil when the studio was not accepted, so an unticked conflict
+    /// confirms nothing.
+    public static func confirmedStudio(proposal: VideoMetadataProposal,
+                                       accepting: Set<String>) -> String? {
+        guard accepting.contains(Field.studio),
+              let studio = proposal.studio.value,
+              !studio.isEmpty else { return nil }
+        return studio
+    }
+
     public static func merged(asset: Asset,
                               proposal: VideoMetadataProposal,
                               accepting: Set<String>,

@@ -52,8 +52,37 @@ final class VideoBatchMatchModel: ObservableObject {
 
     init(libraryURLs: [URL]) { self.libraryURLs = libraryURLs }
 
+    /// What the run will actually walk, for the operator to see before it does.
+    var libraryNames: [String] { libraryURLs.map { $0.lastPathComponent } }
+
     private var provider: (any VideoMetadataProvider)? {
         PluginEnvironment.registry.installedVideoProviders().first
+    }
+
+    /// Why this run cannot work, checked BEFORE offering to start it.
+    ///
+    /// ⚠️ `run()` used to `guard let provider else { return }` — pressing Start
+    /// with nothing installed did nothing at all, silently. And a provider
+    /// installed without its credential was worse than nothing: it looked
+    /// healthy, ran the whole library, and reported no matches, because every
+    /// request failed authentication and every failure was swallowed.
+    ///
+    /// "The source has no record of this video" and "I never successfully asked
+    /// the source anything" are different answers, and they had become
+    /// indistinguishable.
+    var blockedReason: String? {
+        guard let provider else {
+            return "No video metadata plugin is installed. Add one in Settings → Plugins."
+        }
+        let installer = PluginEnvironment.installer(libraryURL: libraryURLs.first)
+        switch installer.unusableReason(for: provider) {
+        case .missingCredential(let name):
+            return "\(name) needs its API key before it can match anything. Add it in Settings → Plugins."
+        case .noProvider:
+            return "No video metadata plugin is installed. Add one in Settings → Plugins."
+        case nil:
+            return nil
+        }
     }
 
     func cancel() { cancelled = true }
@@ -69,6 +98,15 @@ final class VideoBatchMatchModel: ObservableObject {
         noMatches.removeAll { $0.asset.id == assetId }
         failures.removeAll { $0.asset.id == assetId }
     }
+
+    /// Abandoned after this many consecutive failures.
+    ///
+    /// A run whose every request fails is not finding nothing — it is not
+    /// asking. Grinding through 2,104 videos to report that is worse than
+    /// useless: it costs half a second of fingerprinting each, and it ends with
+    /// a screen that looks exactly like "the source has never heard of your
+    /// library". Ten in a row is well past coincidence.
+    private static let consecutiveFailureLimit = 10
 
     func run() async {
         guard let provider else { return }
@@ -93,7 +131,11 @@ final class VideoBatchMatchModel: ObservableObject {
         for libraryURL in libraryURLs {
             guard let store = try? LibraryStore(at: libraryURL),
                   let assets = try? store.fetchAllAssets() else { continue }
-            total += assets.count
+            // ⚠️ `total` is NOT accumulated here. It is counted in full above,
+            // before the run starts. Adding to it again made the progress read
+            // "N of 2×count" — the bar could never pass halfway, and the figure
+            // did not match the library. The comment above describes exactly
+            // this fix; the line it was meant to replace was left behind.
 
             for asset in assets {
                 if cancelled { break }
@@ -189,6 +231,14 @@ final class VideoBatchMatchModel: ObservableObject {
             guard !fields.isEmpty else {
                 appliedAsset = asset
                 return .applied(route: .fingerprint, fields: [], tags: [])
+            }
+
+            // Same as the per-video path: a studio the source supplied verifies
+            // the studio itself, which is the only route by which one ever
+            // stops being unconfirmed.
+            if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
+                                                                  accepting: fields) {
+                try? store.confirmStudio(studio, source: provider.displayName)
             }
 
             appliedAsset = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,

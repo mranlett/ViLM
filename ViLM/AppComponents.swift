@@ -449,3 +449,64 @@ struct FlowLayout: Layout {
     }
 }
 
+
+// MARK: - macOS Form sheets
+
+extension View {
+    /// The house treatment for a `Form`-based sheet on macOS.
+    ///
+    /// ⚠️ Both halves are needed, and both were missing across six screens.
+    ///
+    /// `Form` defaults to `.automatic`, which on macOS is NOT the grouped
+    /// layout these screens were written for: section headers render as
+    /// ordinary inline text, rows lose their grouping, footers stop wrapping,
+    /// and labels and fields lay out in one wide row. Sheets then size to that
+    /// content, so a too-narrow frame pushes the fields off the right edge and
+    /// leaves the labels right-aligned against nothing.
+    ///
+    /// Deliberately a shared modifier rather than the same two lines copied
+    /// into each screen: this was found twice by an operator, in two different
+    /// screens, with four more carrying the identical defect unnoticed. One
+    /// rule means the next `Form` added gets it for free instead of becoming
+    /// the seventh.
+    ///
+    /// No-op on iOS, where `Form` is already grouped and a fixed minimum width
+    /// would be wider than the device.
+    @ViewBuilder
+    func macFormSheet(minWidth: CGFloat = 620,
+                      minHeight: CGFloat = 520) -> some View {
+        #if os(macOS)
+        self
+            .formStyle(.grouped)
+            .frame(minWidth: minWidth, idealWidth: minWidth + 60,
+                   minHeight: minHeight, idealHeight: minHeight + 140)
+        #else
+        self
+        #endif
+    }
+}
+
+// MARK: - Search field ownership
+
+extension View {
+    /// Applies `.searchable` only when this view owns the window's search field.
+    ///
+    /// ⚠️ SwiftUI gives every `.searchable` the SAME toolbar item identifier,
+    /// `com.apple.SwiftUI.search`. A window may therefore have exactly one, and
+    /// AppKit raises `NSInternalInconsistencyException` — a crash, not a
+    /// warning — when a second is added.
+    ///
+    /// A plain `if` around the modifier changes the view's type between the two
+    /// branches, which resets its state; this keeps one type and varies only
+    /// whether the modifier is applied.
+    @ViewBuilder
+    func searchableIfProvided(_ provided: Bool,
+                              text: Binding<String>,
+                              prompt: String) -> some View {
+        if provided {
+            self.searchable(text: text, placement: .toolbar, prompt: prompt)
+        } else {
+            self
+        }
+    }
+}

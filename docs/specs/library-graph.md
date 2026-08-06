@@ -355,8 +355,10 @@ ALTER TABLE entity_profiles ADD COLUMN uid TEXT;           -- opaque, every row
 ALTER TABLE entity_profiles ADD COLUMN entity_type TEXT;   -- actor | studio | tag | series
 ALTER TABLE entity_profiles ADD COLUMN display_name TEXT;  -- was encoded in the id
 
+ALTER TABLE entity_profiles ADD COLUMN identity_key TEXT;  -- folded, Swift-computed
+
 CREATE UNIQUE INDEX entity_lookup
-    ON entity_profiles (entity_type, IFNULL(tag_kind,''), display_name);
+    ON entity_profiles (entity_type, identity_key);
 ```
 ⚠️ **The index is over (entity type, kind, name) — not over the name.** A unique index on name alone would reject D3's split, where two tags share a display name and differ only by kind. This is what reconciles D2's lookup index with D3.
 ⚠️ **v28 re-keys every edge table.** `video_performer`, `video_studio`, `video_tag`, `performer_tag`, `studio_parent`, `pending_tag_association` **and ****`deleted_entities`** all reference nodes and are re-pointed to `uid` in the same migration. Re-keying profiles without the edges orphans the entire graph — and leaving `deleted_entities` behind silently resurrects every deletion on the next federation sync, which is the exact failure that table exists to prevent (D9).
@@ -412,6 +414,59 @@ Stating this matters because the two layers fail differently: a database constra
 | Reclassification lock (T14) | **Application** | Must enumerate the blocking edges to be actionable |
 | Provenance precedence (T17) | **Application**, in the merge | It is a policy, not an invariant |
 ⚠️ **"Single write boundary" is a requirement, not a description.** Today the parser, the enrichment merge, the CSV import and the editor each write tags independently. T5 is only enforceable once they share one.
+## D10 — A studio hierarchy is two nodes and a preference, not one name
+> ⚠️ **Added 2026-08-05 after approval.** Needs confirmation into the baseline.
+**Measured against the live source**, for one scene the operator supplied:
+|  |  |
+| --- | --- |
+| `studio.name` | the imprint that released it — what the source returns |
+| `studio.parent.name` | the network — what the operator has recorded |
+| both ids | present, and **previously never fetched** — the query asked only for `name` |
+So the app proposed replacing the operator's correct value with a narrower one, every time, and had no way to know a parent existed.
+### ⭐ The mistake is treating this as "which one is the studio"
+Both are real studios. The imprint genuinely released the scene — that is not in doubt and is not a matter of preference. What varies is **which level of the hierarchy the operator wants to see and file by**, and that is a display and naming question, not a fact about the video.
+**Human Operator:** *"Maybe when we bring down two different studios — a studio name and a parent name — the user should select which they prefer in a disambiguation."*
+**Modelled as:**
+|  |  |
+| --- | --- |
+| Video **released by** Studio | points at the **imprint**. It is the truth, and it never needs a decision |
+| Studio **parent of** Studio | the hierarchy, from the source's own ids |
+| **Preferred level** | an attribute of the studio: file and display this one by itself, or by its parent |
+⭐ **This is why it belongs in Phase D rather than being settled now.** With only a name field there is one slot and the two values fight over it; with edges, both are recorded and the preference decides only what is *shown*. Nothing is lost either way, and the operator can change their mind without re-matching anything.
+⚠️ **Asked once per studio, not once per video.** A network's level is a property of the network. Re-asking on every scene would be a disagreement that never resolves — which is exactly what it does today.
+### ✅ The correction is proactive, not a bulk edit
+**Human Operator, 2026-08-05:** *"Don't reset values — the refreshed download process with studio disambiguation will handle that reset in a proactive manner."*
+The library currently holds **imprint** names where the operator would file by network. The obvious fix — strip them and re-derive — is rejected: it destroys correct data on the chance the re-run replaces it, and leaves the library worse if the re-run does not finish.
+⭐ **Instead the existing disagreement becomes the disambiguation.** A re-match already surfaces studio as a conflict; with the hierarchy present that row stops being "accept or decline a worse name" and becomes "which level do you file this network by". The answer is remembered per studio, so it is asked **once** rather than at every scene — which is exactly what makes today's version feel like a nuisance.
+**Consequences:**
+|  |  |
+| --- | --- |
+| The match-status reset clears **only** bookkeeping | state, source, source id, link, timestamp. No value a match wrote is touched |
+| Existing studio values stay put | they are corrected as each video is re-matched, never in bulk |
+| A library part-way through | holds a mixture of levels, and is fully usable throughout |
+⚠️ **Order matters.** Running the reset before the disambiguation exists re-queues the whole library to be matched by the same rules that produced the imprints. The reset is the LAST step of this work, not the first.
+### Not every studio disagreement is a decision
+**Human Operator, 2026-08-05:** *"If the disambiguation is something like this — separating two words that I'd smooshed together — AND the proposed new studio is a previously approved and verified studio, we should automatically accept it."*
+Most studio "disagreements" are the same studio spelled without a space: `SomeStudioName` against `Some Studio Name`. Asking a person to confirm that is not a decision, it is a chore — and a queue full of chores is how the real decisions get rubber-stamped.
+| Condition | Behaviour |
+| --- | --- |
+| Differs only by **whitespace or case**, **and** the proposal is a **verified** studio | **applied automatically**, reported but not asked |
+| Anything else | asked |
+⚠️ **BOTH halves are required.** Ignoring spacing alone is more aggressive than the case-folding used elsewhere — two genuinely different studios could in principle differ only by a space. Requiring the incoming one to be *verified* is what makes it safe: the source has confirmed that studio exists under that spelling.
+💡 This is the same rule the case-insensitive comparison already applies, extended one step: **a difference that carries no information is not a disagreement.**
+### ⚠️ Production and redistribution are two different studios, both real
+**Human Operator:** *"Sometimes there is an initial production by a verified studio then a redistribution by a different verified studio. In this case, human selection."*
+This is **not** the imprint/network case. Neither studio is above the other; both genuinely relate to the scene, in different roles.
+❓ **Open — this does not fit the current model.** `video_studio` has a primary key on `video_id`: **one studio per video**, enforced by the schema, on the stated ground that "a scene has one releasing studio". The case above says a scene can have two, distinguished by ROLE rather than by hierarchy.
+Three ways out, and they are different work:
+|  |  |
+| --- | --- |
+| **Choose one, per the operator** | keeps the model, loses the other studio. What was asked for, and the cheapest |
+| **Add a role to the edge** | `produced by` / `distributed by`. Expresses the truth, and the primary key becomes (video, role) |
+| **Treat redistribution as provenance** | one studio, and the other recorded as how the copy was obtained |
+**Recommended: choose one for now**, and record this as the case that would justify a role if it turns out to be common. Adding a role changes the cardinality rule the schema currently enforces, which is not a change to make on one example. **Needs a decision when this work starts.**
+❓ **Open — what is the default before anyone chooses?** Recommended: **the parent where one exists**, because that is the level the operator already files by and it makes the common case silent. Needs confirmation.
+💡 **Not a disagreement at all in the review sheet.** `changes` compares case-insensitively, so once the preferred level matches what is recorded the row disappears rather than being resolved every time.
 ## D9 — The library is not static
 > ⚠️ **AMENDMENT, 2026-08-05, after approval.** Added at the Human Operator's direction; needs confirmation that it is accepted into the approved baseline (Art. II).
 **Human Operator:** *"The inventory of videos is not static. Videos will be deleted but actors shouldn't be automatically removed (that is a manual decision). New video files will be added and will need to enter the review and enrichment processes."*
@@ -450,7 +505,7 @@ scanned -> kind declared -> parsed against the lexicons -> matched -> relocated
 - **T3 — A match survives.** After acceptance, the source id, state and timestamp are readable from a freshly-opened store.
 - **T4 — A match is not re-searched, and failure is handled.** With a stored source id, a second pass fetches by id and issues no name search — asserted against a provider double that **fails the test if a search is attempted**. The same double must also exercise, as distinct cases: the id no longer existing at the source, a network failure, a rate-limit response, and a malformed payload. In every one, the stored match and the local record survive unchanged and the failure is reported — a lookup that cannot complete must never downgrade a settled match.
 - **T5 — Attribute tags cannot reach a video.** Every write path — parser, enrichment merge, CSV import, manual edit — rejects an attribute tag on a video and an action tag on a performer.
-- **T6 — Unclassified tags attach to nothing.** Creating a Video→Tag or Performer→Tag edge whose tag has `kind == unclassified` fails, and the failure names the tag. A migration that promotes a name to an unclassified node therefore leaves zero edges behind it, and the count of unclassified nodes is reported as a worklist rather than silently tolerated. 
+- **T6 — Unclassified tags form no EDGE.** Creating a Video→Tag or Performer→Tag edge whose tag has `kind == unclassified` fails, and the failure names the tag. ⚠️ **This governs EDGES, and applies only once ****`pending_tag_association`**** exists to hold the link.** Before that — see C3 — an unclassified tag is *allowed* on write, because refusing it would discard the operator's input with nowhere to stage it. The two are the same rule at different phases, not a contradiction: never wire the graph by guessing, and never lose what a person typed. A migration that promotes a name to an unclassified node therefore leaves zero edges behind it, and the count of unclassified nodes is reported as a worklist rather than silently tolerated. 
 - **T7 — Renaming a node moves no edges.** After a rename, every edge that pointed at the node still does, and nothing else changed.
 - **T8 — An alias is not a second node.** A video credited under an alias resolves to the same performer node as the canonical name.
 - **T9 — Cardinality is enforced.** A video cannot acquire a second releasing studio.
@@ -516,5 +571,35 @@ scanned -> kind declared -> parsed against the lexicons -> matched -> relocated
 | 7 | **Two folders, not one.** A privacy boundary must stay visible on disk. | ✅ Decided |
 **8. Every value carries its source** — `download` > `operator` > `filename`, modelled as one provenance map rather than parallel per-field properties (D7). ✅ **Decided.**
 **All decisions are resolved. No open questions remain.**
+## What building it corrected
+> Recorded 2026-08-05, after Phases A–C. Each of these is a place the spec was **wrong** and implementation proved it — kept as corrections rather than quietly rewritten, so the reasoning survives.
+### C1 — A tag is a table, not an `EntityProfile`
+D1 said tags become `EntityProfile` nodes because that record is documented as generic. **They did not.**
+`EntityProfile` is at 23 stored properties, the Swift type-checker's practical limit — adding one field has already broken three construction sites with an error naming neither the field nor reliably the file. A tag needs exactly three things: identity, display name, kind. Putting it in an actor-shaped record would give every tag a bio, a birth date and a career span.
+⭐ **"Node" means a thing with stable identity, not an ****`EntityProfile`**** row.** Studios *did* become `EntityProfile` rows in Phase C — they genuinely have a logo, links and an external identity — and that asymmetry is correct rather than inconsistent.
+### C2 — ⚠️ Identity must not depend on a mutable attribute
+The schema section specified the tag index as unique over **(entity type, kind, name)**, so a tag could later split into two nodes sharing a name.
+**That is a modelling error, and a test caught it immediately.** Classifying a tag changed its key, so it *inserted a second row* rather than updating the first — leaving one tag simultaneously unclassified and classified.
+**Corrected:** the folded name alone is the key; kind is an attribute. Splitting one name across two kinds needs two genuinely distinct identities, which is what opaque node ids provide. No tag in the measured vocabulary needs it.
+### C3 — 🚨 `unclassified` must be ALLOWED on write, until edges exist
+D3 says an unclassified tag attaches to nothing. **Enforcing that deadlocks the app:** a tag cannot be attached until it is classified, and cannot be classified until it exists — so no new tag could ever be created. With no edges and no staging table yet, a refusal would simply discard what the operator typed.
+**The rule that actually protects the graph is narrower:**
+|  |  |
+| --- | --- |
+| Vocabulary says it describes the **other** node | **refused** — knowingly mis-wiring |
+| Vocabulary has **no kind** for it | **allowed**, and reported to the worklist |
+| Already on the record | not re-judged — the 31 videos carrying attribute tags stay editable |
+D3's stricter rule becomes correct the moment `pending_tag_association` exists, because the link is then preserved rather than lost. **Until then it costs data.**
+### C4 — "Validated" means `matched`, not "has a source id"
+D5 defines a verified studio as one matched to an external studio id. **For the parser lexicon that definition is unusable today:** the id column is recent and populates only as records are re-matched, so the validated set would be empty and the lexicon useless until a full re-match campaign.
+`enrichmentState == .matched` gives **1,337 validated performers immediately**. The id is the stronger signal and supersedes this as it fills in.
+⚠️ **The strict definition is retained where being wrong is expensive** — naming a folder. A parser reading a token wrongly is correctable; a directory tree built from an unconfirmed name is 2,101 files to undo.
+### C5 — The parser was already vocabulary-first
+The parsing spec's D2 resolved that **position** is the primary signal and vocabulary only confirms. `FileNameParser.parse` has always checked vocabulary first and used position only as a tie-breaker for what vocabulary could not place.
+So D5's amendment was closer to the code than the spec it amended. What genuinely changed is that **validated** names now outrank merely-present ones — previously a token that was a confirmed studio *and* a guessed actor resolved as an actor purely because actors are checked first. **Order was deciding what confidence should.**
+### C6 — ⚠️ Folding identity in one place is not enough
+The operator found this by using the app: two casings of one tag rendered as two cards, because **every listing surface derives its own set from raw strings and never asks the vocabulary.**
+Folding had to be applied at the vocabulary, the gallery, the filter builder, the filter criteria, and the grid's own tag matching — **five places, each a separate patch.** Sites remain unfolded, and the studio filter has the same latent defect.
+⭐ **This is the Epic's thesis demonstrated rather than asserted.** The case collision was never the defect; it was a symptom of the join key being a display name. Edges are what make all five sites correct without any of them knowing folding exists. The remaining sites were deliberately left unpatched — at the Human Operator's direction — rather than adding more spot fixes to remove later.
 ## Evidence
 Schema and code read at v23 on 2026-08-05, commit `adb457a`. Candidate-collapse figures (233 → 4 on a performer pair plus studio; 11 of 18 single-performer queries over 100) and the library measurements (2,101 videos, 1,386 performers, 1,204 with full birth dates) are carried from the plugin and naming specs and were measured 2026-08-03/04. Runtime confirmation of V1 and V2 against the attached library is outstanding.

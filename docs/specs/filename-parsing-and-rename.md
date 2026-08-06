@@ -29,7 +29,9 @@ Same contract as enrichment: produce a **reviewable diff**, apply on confirmatio
 ### D2 — ⭐ AMENDED: the lexicon decides when it exists; position decides when it does not
 **Human Operator, 2026-08-05:** *"This system prioritizes studios (which we have a lexicon of downloaded and verified studio names) as folder and actors (which we have a lexicon of validated and matched actor names in our library). These validated lists should be data sources in our renamer and parser."*
 The previous version resolved **position first, vocabulary second**, reasoned explicitly from *"a new or un-curated library has neither vocabulary"* — without which the parser would work best on the libraries that least need it.
-**That reasoning is still correct and is not what changes.** The amendment:
+⚠️ **CORRECTION, 2026-08-05, from reading the code.** D2 described position-first as though it were the implementation. **It never was.** `FileNameParser.parse` has always checked vocabulary first and used position only as a tie-breaker for segments vocabulary could not place. The spec and the code have disagreed since this was written.
+What genuinely changed in Phase C is narrower and more useful: **validated names now outrank merely-present ones.** Previously every string in the library carried equal authority, so a token that was a confirmed studio *and* sat in the actor list — because an earlier parse guessed it there — resolved as an actor purely because actors are checked first. **Order was deciding what confidence should.**
+**The generality reasoning is still correct and is not what changes.** The amendment:
 | Situation | Primary signal |
 | --- | --- |
 | A validated lexicon exists and the token resolves to a node | **the lexicon decides** |

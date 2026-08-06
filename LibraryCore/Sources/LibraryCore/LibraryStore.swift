@@ -402,6 +402,89 @@ public class LibraryStore {
             }
         }
 
+        // v27 — the edges.
+        //
+        // Until now the graph was stored as prefixed display-name STRINGS in a
+        // JSON array on each asset, so "which videos feature this performer"
+        // meant loading every asset and string-matching. The join key was a
+        // name, which is why renaming needed a global mechanism, why aliases
+        // are a special case everywhere, and why one tag under two casings
+        // became two things.
+        //
+        // ⚠️ One table per edge kind rather than one polymorphic table: each
+        // carries a DIFFERENT cardinality, and a shared table can enforce none
+        // of them. `video_studio`'s primary key on `video_id` alone is what
+        // makes "a scene has one releasing studio" structural rather than a
+        // rule someone has to remember.
+        //
+        // ⚠️ Edges reference the ids that exist TODAY — `assets.id`, and
+        // `entity_profiles.id` in its `prefix:Name` form. Opaque node ids are a
+        // separate, later migration, and it re-points every table here. Waiting
+        // for it would mean no edges at all until the largest migration in the
+        // project lands.
+        //
+        // ⚠️ Nothing is written here. Creating the tables is additive and
+        // reversible; filling them is a separate, gated step, and the legacy
+        // strings stay authoritative until it has been verified.
+        migrator.registerMigration("v27") { db in
+            try db.create(table: "video_performer") { t in
+                t.column("video_id", .text).notNull()
+                    .references("assets", onDelete: .cascade)
+                t.column("performer_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+                t.primaryKey(["video_id", "performer_id"])
+            }
+
+            // PK on video_id alone: a second releasing studio cannot be
+            // inserted, so the studio-conflict audit has nothing left to find.
+            try db.create(table: "video_studio") { t in
+                t.column("video_id", .text).notNull().primaryKey()
+                    .references("assets", onDelete: .cascade)
+                t.column("studio_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+            }
+
+            try db.create(table: "video_tag") { t in
+                t.column("video_id", .text).notNull()
+                    .references("assets", onDelete: .cascade)
+                t.column("tag_id", .text).notNull()
+                    .references("tags", onDelete: .cascade)
+                t.primaryKey(["video_id", "tag_id"])
+            }
+
+            try db.create(table: "performer_tag") { t in
+                t.column("performer_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+                t.column("tag_id", .text).notNull()
+                    .references("tags", onDelete: .cascade)
+                t.primaryKey(["performer_id", "tag_id"])
+            }
+
+            // A studio with no row here IS a root studio. Absence means root;
+            // there is deliberately no NULL-parent row to interpret.
+            //
+            // Cascading on the parent removes the HIERARCHY row, not the child
+            // profile — so deleting a network promotes its imprints to roots
+            // rather than deleting them with it.
+            try db.create(table: "studio_parent") { t in
+                t.column("studio_id", .text).notNull().primaryKey()
+                    .references("entity_profiles", onDelete: .cascade)
+                t.column("parent_studio_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+            }
+
+            // NOT an edge. Where a tag was found before anyone said what it
+            // describes, so the link survives until it can become one.
+            // Invisible to every graph query.
+            try db.create(table: "pending_tag_association") { t in
+                t.column("video_id", .text).notNull()
+                    .references("assets", onDelete: .cascade)
+                t.column("tag_id", .text).notNull()
+                    .references("tags", onDelete: .cascade)
+                t.primaryKey(["video_id", "tag_id"])
+            }
+        }
+
         // v20 — deletions recorded as facts.
         //
         // Sync unions what each library holds, so an absence is indistinguishable
@@ -712,6 +795,537 @@ public class LibraryStore {
         try asset.insert(db)
     }
 
+    // MARK: - Connecting: strings to edges
+
+    /// What connecting performers would do, counted before anything is written.
+    public struct ConnectPlan: Equatable, Sendable {
+        /// Credits found in the legacy strings.
+        public let associations: Int
+        /// Distinct names among them that have no profile row, and so cannot be
+        /// pointed at. Reported rather than created: inventing a person from a
+        /// string is exactly what the parser is forbidden to do.
+        public let missingProfiles: [String]
+        /// Edges that already exist and would not be duplicated.
+        public let alreadyConnected: Int
+
+        public var connectable: Int { associations - alreadyConnected }
+    }
+
+    /// Builds `video_performer` edges from the `actor:` strings.
+    ///
+    /// ⚠️ ADDITIVE AND NON-DESTRUCTIVE. The strings are read, never written and
+    /// never removed — they stay authoritative until a separate, gated step
+    /// retires them. Running this changes what the graph CAN answer, not what
+    /// it says.
+    ///
+    /// Idempotent: an existing edge is left alone, so a re-run after adding
+    /// videos connects only the new ones.
+    ///
+    /// ⚠️ A credit naming someone with no profile row is SKIPPED and reported.
+    /// Creating the profile here would mint a person from a string that a
+    /// filename parse may well have guessed — the one thing the parser itself
+    /// is not allowed to do, and it must not happen by a side door.
+    @discardableResult
+    public func connectPerformerEdges(dryRun: Bool = false) throws -> ConnectPlan {
+        let assets = try fetchAllAssets()
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+
+        var associations = 0
+        var missing = Set<String>()
+        var wanted: [(UUID, String)] = []
+
+        for asset in assets {
+            // Set: a video crediting the same performer twice is one credit.
+            for name in Set(asset.actors) where !name.isEmpty {
+                associations += 1
+                let id = "actor:\(name)"
+                if known.contains(id) { wanted.append((asset.id, id)) } else { missing.insert(name) }
+            }
+        }
+
+        let existing = try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM video_performer") ?? 0
+        }
+
+        if !dryRun {
+            try dbQueue.write { db in
+                for (videoId, performerId) in wanted {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO video_performer (video_id, performer_id)
+                        VALUES (?, ?)
+                        """, arguments: [videoId.uuidString, performerId])
+                }
+            }
+        }
+
+        return ConnectPlan(associations: associations,
+                           missingProfiles: missing.sorted(),
+                           alreadyConnected: existing)
+    }
+
+    /// Whether the edges reproduce what the strings say, for every video.
+    ///
+    /// ⚠️ The gate on retiring the strings. Counting edges alone would pass a
+    /// migration that connected the right NUMBER of things to the wrong videos,
+    /// so this compares per video and returns the ones that disagree.
+    public func performerEdgeDisagreements() throws -> [UUID] {
+        let assets = try fetchAllAssets()
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+
+        var disagreeing: [UUID] = []
+        for asset in assets {
+            // Only credits that COULD become edges are compared: a name with no
+            // profile is a known, reported gap, not a disagreement.
+            let expected = Set(asset.actors.map { "actor:\($0)" }).intersection(known)
+            let actual = Set(try performerIds(forVideo: asset.id))
+            if expected != actual { disagreeing.append(asset.id) }
+        }
+        return disagreeing
+    }
+
+    /// What connecting studios would do, and what stands in the way.
+    public struct StudioConnectPlan: Equatable, Sendable {
+        public let associations: Int
+        public let missingProfiles: [String]
+        public let alreadyConnected: Int
+        /// ⚠️ Videos carrying MORE THAN ONE studio. These cannot be connected:
+        /// `video_studio` permits one per video, so the schema now refuses what
+        /// the strings were happy to hold. They are skipped and listed.
+        public let conflicted: [UUID]
+
+        public var connectable: Int { associations - alreadyConnected }
+        public var isBlocked: Bool { !conflicted.isEmpty }
+    }
+
+    /// Builds `video_studio` edges from the `studio:` strings.
+    ///
+    /// ⚠️ THE CONFLICT AUDIT BECOMES A GATE HERE. A scene has one releasing
+    /// studio, and the primary key says so — so a video the strings gave two
+    /// cannot be represented at all. Those videos are skipped and reported
+    /// rather than one studio being picked arbitrarily: choosing for the
+    /// operator would silently discard a fact nobody checked.
+    ///
+    /// Everything else behaves as the performer step: additive, idempotent,
+    /// strings untouched, unknown studios reported rather than invented.
+    @discardableResult
+    public func connectStudioEdges(dryRun: Bool = false) throws -> StudioConnectPlan {
+        let assets = try fetchAllAssets()
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+
+        var associations = 0
+        var missing = Set<String>()
+        var conflicted: [UUID] = []
+        var wanted: [(UUID, String)] = []
+
+        for asset in assets {
+            let studios = Set(asset.studios.filter { !$0.isEmpty })
+            guard !studios.isEmpty else { continue }
+            guard studios.count == 1, let name = studios.first else {
+                conflicted.append(asset.id)
+                continue
+            }
+            associations += 1
+            let id = "studio:\(name)"
+            if known.contains(id) { wanted.append((asset.id, id)) } else { missing.insert(name) }
+        }
+
+        let existing = try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM video_studio") ?? 0
+        }
+
+        if !dryRun {
+            try dbQueue.write { db in
+                for (videoId, studioId) in wanted {
+                    try db.execute(sql: """
+                        INSERT INTO video_studio (video_id, studio_id) VALUES (?, ?)
+                        ON CONFLICT(video_id) DO UPDATE SET studio_id = excluded.studio_id
+                        """, arguments: [videoId.uuidString, studioId])
+                }
+            }
+        }
+
+        return StudioConnectPlan(associations: associations,
+                                 missingProfiles: missing.sorted(),
+                                 alreadyConnected: existing,
+                                 conflicted: conflicted)
+    }
+
+    /// Videos whose studio edge disagrees with their strings.
+    ///
+    /// Videos carrying two studios are excluded: they are a known, reported
+    /// blocker rather than a disagreement, and counting them here would mean
+    /// verification could never pass while one existed.
+    public func studioEdgeDisagreements() throws -> [UUID] {
+        let assets = try fetchAllAssets()
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+
+        var disagreeing: [UUID] = []
+        for asset in assets {
+            let studios = Set(asset.studios.filter { !$0.isEmpty })
+            guard studios.count == 1, let name = studios.first else { continue }
+            let expected = known.contains("studio:\(name)") ? "studio:\(name)" : nil
+            if try studioId(forVideo: asset.id) != expected { disagreeing.append(asset.id) }
+        }
+        return disagreeing
+    }
+
+    /// What connecting tags would do, split by what each tag turned out to be.
+    public struct TagConnectPlan: Equatable, Sendable {
+        /// Video associations that became real edges — action or video-attribute.
+        public let videoEdges: Int
+        /// Performer associations that became real edges.
+        public let performerEdges: Int
+        /// Associations staged because nobody has said what the tag describes.
+        public let pending: Int
+        /// ⚠️ PERFORMER attributes found on VIDEOS. Not edges, and deliberately
+        /// not staged either: the decision is that enrichment corrects these per
+        /// performer as each video is matched, because an attribute read off a
+        /// video is a guess about which of its cast it describes.
+        public let attributeTagsOnVideos: Int
+        /// Tags used by a video but absent from the vocabulary. Promotion should
+        /// be run first; reported rather than created so the two steps stay
+        /// separately checkable.
+        public let unknownTags: [String]
+    }
+
+    /// Builds `video_tag` and `performer_tag` edges from the tag strings.
+    ///
+    /// ⚠️ The kind decides the destination, and there are four outcomes rather
+    /// than two:
+    ///
+    /// | tag kind on a VIDEO | result |
+    /// | --- | --- |
+    /// | action, video-attribute | a `video_tag` edge |
+    /// | performer-attribute | **nothing** — left for enrichment to correct |
+    /// | unclassified | a pending association, so the link survives |
+    /// | unknown to the vocabulary | reported |
+    ///
+    /// Additive, idempotent, and the strings are untouched.
+    @discardableResult
+    public func connectTagEdges(dryRun: Bool = false,
+                                available: [TagKind] = TagKind.seed) throws -> TagConnectPlan {
+        let assets = try fetchAllAssets()
+        let profiles = try fetchAllEntityProfiles()
+        let vocabulary = Dictionary(
+            try fetchTagVocabulary().map { ($0.identityKey, $0) }, uniquingKeysWith: { a, _ in a })
+
+        var videoEdges: [(UUID, String)] = []
+        var performerEdges: [(String, String)] = []
+        var pending: [(UUID, String)] = []
+        var attributeOnVideo = 0
+        var unknown = Set<String>()
+
+        for asset in assets {
+            for name in Set(asset.actions) where !name.isEmpty {
+                let key = TagNormalizer.identityKey(name)
+                guard let record = vocabulary[key] else { unknown.insert(name); continue }
+                guard let kind = record.resolvedKind(from: available) else {
+                    pending.append((asset.id, key)); continue
+                }
+                if kind.canAttach(to: .video) {
+                    videoEdges.append((asset.id, key))
+                } else {
+                    // A performer attribute sitting on a video. Left alone.
+                    attributeOnVideo += 1
+                }
+            }
+        }
+
+        for profile in profiles where profile.id.hasPrefix("actor:") {
+            for name in Set(profile.tags) where !name.isEmpty {
+                let key = TagNormalizer.identityKey(name)
+                guard let record = vocabulary[key] else { unknown.insert(name); continue }
+                guard let kind = record.resolvedKind(from: available) else { continue }
+                if kind.canAttach(to: .performer) { performerEdges.append((profile.id, key)) }
+            }
+        }
+
+        if !dryRun {
+            try dbQueue.write { db in
+                for (videoId, tagId) in videoEdges {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO video_tag (video_id, tag_id) VALUES (?, ?)
+                        """, arguments: [videoId.uuidString, tagId])
+                }
+                for (performerId, tagId) in performerEdges {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO performer_tag (performer_id, tag_id) VALUES (?, ?)
+                        """, arguments: [performerId, tagId])
+                }
+                for (videoId, tagId) in pending {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO pending_tag_association (video_id, tag_id)
+                        VALUES (?, ?)
+                        """, arguments: [videoId.uuidString, tagId])
+                }
+            }
+        }
+
+        return TagConnectPlan(videoEdges: videoEdges.count,
+                              performerEdges: performerEdges.count,
+                              pending: pending.count,
+                              attributeTagsOnVideos: attributeOnVideo,
+                              unknownTags: unknown.sorted())
+    }
+
+    /// Turns a tag's staged associations into edges, now that it has a kind.
+    ///
+    /// The other half of `pending_tag_association`: a parser finding that was
+    /// held rather than lost is redeemed here. An association whose kind turns
+    /// out to describe the other node type is DISCARDED and counted — that is
+    /// the attribute-on-a-video case, and inventing an edge for it is exactly
+    /// what the taxonomy exists to stop.
+    ///
+    /// - Returns: how many became edges, and how many were dropped.
+    @discardableResult
+    public func resolvePendingAssociations(forTag tagId: String,
+                                           available: [TagKind] = TagKind.seed)
+    throws -> (materialised: Int, discarded: Int) {
+        let record = try fetchTagVocabulary().first { $0.identityKey == tagId }
+        guard let kind = record?.resolvedKind(from: available) else { return (0, 0) }
+
+        let videoIds: [String] = try dbQueue.read { db in
+            try String.fetchAll(db, sql:
+                "SELECT video_id FROM pending_tag_association WHERE tag_id = ?", arguments: [tagId])
+        }
+        guard !videoIds.isEmpty else { return (0, 0) }
+
+        let becomesEdge = kind.canAttach(to: .video)
+        try dbQueue.write { db in
+            if becomesEdge {
+                for videoId in videoIds {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO video_tag (video_id, tag_id) VALUES (?, ?)
+                        """, arguments: [videoId, tagId])
+                }
+            }
+            try db.execute(sql: "DELETE FROM pending_tag_association WHERE tag_id = ?",
+                           arguments: [tagId])
+        }
+        return becomesEdge ? (videoIds.count, 0) : (0, videoIds.count)
+    }
+
+    // MARK: - Resetting match status
+
+    /// What a reset would affect, counted before anything is written.
+    ///
+    /// Separate from performing it because this is destructive over the whole
+    /// library, and a number you can read beforehand is the difference between
+    /// a decision and a surprise.
+    public struct MatchResetPlan: Equatable, Sendable {
+        /// Videos the source matched. Re-deriving these costs a re-run.
+        public let matched: Int
+        /// Videos a PERSON ruled out. Re-deriving these is impossible —
+        /// nothing but the operator knows they looked.
+        public let ruledOut: Int
+        /// Searched but unresolved: no match, ambiguous, needs review.
+        public let unresolved: Int
+
+        public var clearable: Int { matched + unresolved }
+        public var total: Int { matched + ruledOut + unresolved }
+    }
+
+    public func planMatchReset() throws -> MatchResetPlan {
+        try dbQueue.read { db in
+            func count(_ clause: String) throws -> Int {
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM assets WHERE \(clause)") ?? 0
+            }
+            return MatchResetPlan(
+                matched: try count("enrichment_state = 'matched'"),
+                ruledOut: try count("enrichment_state = 'unmatchable'"),
+                unresolved: try count("""
+                    enrichment_state IS NOT NULL
+                    AND enrichment_state NOT IN ('matched', 'unmatchable')
+                    """))
+        }
+    }
+
+    /// Clears the record of having been matched, so videos return to the queue.
+    ///
+    /// ⚠️ Clears ONLY the match bookkeeping — state, source, source id, link and
+    /// timestamp. Every value a match ever wrote is left exactly as it is:
+    /// release date, cast, studio, title, tags. Those are the library's
+    /// records, not the match's, and re-deriving them is what the re-run is
+    /// for. A reset that emptied them would be a data loss dressed as a retry.
+    ///
+    /// ⚠️ `includingRuledOut` defaults to FALSE, and should stay false unless
+    /// there is a reason. `unmatchable` means a person looked and concluded the
+    /// source has no record — the one state a machine never assigns. Clearing
+    /// it returns those videos to a queue they were deliberately removed from,
+    /// and nothing can re-derive the judgement.
+    ///
+    /// Written in SQL rather than by loading every asset: this runs over the
+    /// whole library, and decoding two thousand records to null five columns is
+    /// a cost with nothing to show for it.
+    ///
+    /// - Returns: how many rows were cleared.
+    @discardableResult
+    public func resetMatchStatus(includingRuledOut: Bool = false) throws -> Int {
+        try dbQueue.write { db in
+            let keepRuledOut = includingRuledOut
+                ? ""
+                : "AND enrichment_state IS NOT 'unmatchable'"
+            try db.execute(sql: """
+                UPDATE assets SET
+                    enrichment_state = NULL,
+                    enrichment_source = NULL,
+                    enrichment_source_id = NULL,
+                    enrichment_url = NULL,
+                    enrichment_checked_at = NULL
+                WHERE enrichment_state IS NOT NULL \(keepRuledOut)
+                """)
+            return db.changesCount
+        }
+    }
+
+    // MARK: - Graph edges
+    //
+    // ⚠️ Every one of these can THROW on a constraint, and that is the point.
+    // A second studio on a video, a duplicate edge, a studio as its own parent
+    // — the schema refuses them, so callers get an error instead of the graph
+    // quietly acquiring something impossible.
+
+    /// Credits a performer on a video. Idempotent: crediting twice is one edge.
+    public func linkPerformer(_ performerId: String, toVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO video_performer (video_id, performer_id) VALUES (?, ?)
+                """, arguments: [videoId.uuidString, performerId])
+        }
+    }
+
+    /// Sets the releasing studio, REPLACING any existing one.
+    ///
+    /// A scene has one releasing studio, so this is an assignment rather than
+    /// an addition — and the primary key means a caller cannot accidentally
+    /// make it an addition.
+    public func setStudio(_ studioId: String, forVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_studio (video_id, studio_id) VALUES (?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET studio_id = excluded.studio_id
+                """, arguments: [videoId.uuidString, studioId])
+        }
+    }
+
+    /// Attaches a tag to a video. `tagId` is the folded identity key.
+    public func linkTag(_ tagId: String, toVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO video_tag (video_id, tag_id) VALUES (?, ?)
+                """, arguments: [videoId.uuidString, tagId])
+        }
+    }
+
+    public func linkTag(_ tagId: String, toPerformer performerId: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO performer_tag (performer_id, tag_id) VALUES (?, ?)
+                """, arguments: [performerId, tagId])
+        }
+    }
+
+    /// Records that `studioId` belongs to `parentId`.
+    ///
+    /// ⚠️ Refuses a cycle — a studio that would become its own ancestor. Not
+    /// expressible as a SQLite constraint, and without it a parent-studio
+    /// filter recurses forever.
+    public func setStudioParent(_ parentId: String, forStudio studioId: String) throws {
+        guard studioId != parentId else { throw GraphEdgeError.cycle(path: [studioId]) }
+
+        var seen = [studioId]
+        var current: String? = parentId
+        while let id = current {
+            if seen.contains(id) { throw GraphEdgeError.cycle(path: seen + [id]) }
+            seen.append(id)
+            current = try dbQueue.read { db in
+                try String.fetchOne(db, sql:
+                    "SELECT parent_studio_id FROM studio_parent WHERE studio_id = ?",
+                    arguments: [id])
+            }
+        }
+
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO studio_parent (studio_id, parent_studio_id) VALUES (?, ?)
+                ON CONFLICT(studio_id) DO UPDATE SET parent_studio_id = excluded.parent_studio_id
+                """, arguments: [studioId, parentId])
+        }
+    }
+
+    /// Stages a tag found with no edge context — not an edge, and invisible to
+    /// every graph query until someone says what the tag describes.
+    public func addPendingTagAssociation(_ tagId: String, forVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO pending_tag_association (video_id, tag_id) VALUES (?, ?)
+                """, arguments: [videoId.uuidString, tagId])
+        }
+    }
+
+    // MARK: Reading the graph
+
+    public func performerIds(forVideo videoId: UUID) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT performer_id FROM video_performer WHERE video_id = ? ORDER BY performer_id
+                """, arguments: [videoId.uuidString])
+        }
+    }
+
+    public func studioId(forVideo videoId: UUID) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT studio_id FROM video_studio WHERE video_id = ?",
+                                arguments: [videoId.uuidString])
+        }
+    }
+
+    public func tagIds(forVideo videoId: UUID) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql:
+                "SELECT tag_id FROM video_tag WHERE video_id = ? ORDER BY tag_id",
+                arguments: [videoId.uuidString])
+        }
+    }
+
+    /// Videos featuring a performer — one query, where it used to be a scan of
+    /// every asset in the library with the names compared by hand.
+    public func videoIds(forPerformer performerId: String) throws -> [UUID] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql:
+                "SELECT video_id FROM video_performer WHERE performer_id = ?",
+                arguments: [performerId])
+        }.compactMap(UUID.init(uuidString:))
+    }
+
+    /// A studio and every studio beneath it, so a filter on a network finds the
+    /// imprints that belong to it.
+    public func studioIdWithDescendants(_ studioId: String) throws -> [String] {
+        var found = [studioId]
+        var frontier = [studioId]
+        while !frontier.isEmpty {
+            let children: [String] = try dbQueue.read { db in
+                try String.fetchAll(db, sql: """
+                    SELECT studio_id FROM studio_parent
+                    WHERE parent_studio_id IN (\(frontier.map { _ in "?" }.joined(separator: ",")))
+                    """, arguments: StatementArguments(frontier))
+            }
+            // A cycle cannot be created through setStudioParent, but a database
+            // edited by hand is not bound by that — so the walk stops rather
+            // than looping.
+            frontier = children.filter { !found.contains($0) }
+            found.append(contentsOf: frontier)
+        }
+        return found
+    }
+
+    /// Counts, for asserting a migration reproduced what the strings said.
+    public func edgeCount(_ kind: GraphEdgeKind) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(kind.rawValue)") ?? 0
+        }
+    }
+
     // MARK: - Tag vocabulary
 
     public func fetchTagVocabulary() throws -> [TagRecord] {
@@ -746,6 +1360,70 @@ public class LibraryStore {
             for record in new { try record.insert(db) }
         }
         return new
+    }
+
+    /// Gives every studio the library uses a profile row, so it can be looked
+    /// up, confirmed, and eventually drive a folder name.
+    ///
+    /// Studios were bare strings: 241 of them, and not one had a row. A string
+    /// cannot carry an external identity or a lookup verdict, so no studio
+    /// could ever be *verified* — which is what the naming convention needs
+    /// before it can put one in a folder name.
+    ///
+    /// Unlike tags, a studio needs no new table: `EntityProfile` already
+    /// carries an id, a source, a source id and an enrichment state, and a
+    /// studio genuinely has a logo and links worth keeping. Promotion is
+    /// therefore additive and costs no schema change.
+    ///
+    /// Additive and idempotent — an existing profile is never overwritten, so a
+    /// re-run cannot undo a match or a correction. Returns what was created.
+    /// ⚠️ Queried in SQL, not by decoding the library.
+    ///
+    /// The first version fetched every `Asset` and every `EntityProfile` to
+    /// work this out — 2,104 rows decoded, each parsing a JSON tag array, plus
+    /// 1,366 profiles — and it ran on every profile reload, for every attached
+    /// library. That is a full library scan on a hot path, and it made the app
+    /// unusable with the external drive attached.
+    ///
+    /// `json_each` gets the distinct studios directly, and the anti-join means
+    /// the common case — nothing new — touches almost nothing.
+    @discardableResult
+    public func promoteStudioProfiles() throws -> [String] {
+        let missing: [String] = try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT DISTINCT j.value
+                FROM assets, json_each(assets.tags) j
+                WHERE j.value LIKE 'studio:_%'
+                  AND j.value NOT IN (SELECT id FROM entity_profiles)
+                ORDER BY j.value
+                """)
+        }
+        guard !missing.isEmpty else { return [] }
+
+        try dbQueue.write { db in
+            for id in missing {
+                try saveEntityProfile(EntityProfile(id: id), in: db)
+            }
+        }
+        return missing
+    }
+
+    /// Records that a studio came from an external source, and is therefore
+    /// verified.
+    ///
+    /// Idempotent and non-destructive: an existing profile keeps everything it
+    /// already had — bio, links, a source id from a richer lookup — and only
+    /// gains the verdict. A studio already `matched` is left entirely alone, so
+    /// re-accepting the same studio on a second video costs a read.
+    public func confirmStudio(_ name: String, source: String?) throws {
+        let id = "studio:\(name)"
+        var profile = try fetchEntityProfile(for: id) ?? EntityProfile(id: id)
+        guard profile.enrichmentState != .matched else { return }
+
+        profile.enrichmentState = .matched
+        profile.enrichmentSource = source
+        profile.enrichmentCheckedAt = Date()
+        try saveEntityProfile(profile)
     }
 
     public func fetchAllAssets() throws -> [Asset] {

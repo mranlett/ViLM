@@ -174,7 +174,21 @@ Options, roughly in increasing order of change:
 2. Move the icon above the text so the label gets the full cell width
 3. Widen the grid cell / reduce columns
 4. Redesign the card for a text-first hierarchy
-✅  **Open — needs the real distribution.** The right answer depends on how long tags actually get and how many are affected. **Measure the tag vocabulary first** (the operator has estimated it stays under ~30 in practice); designing for a 40-character tag that does not exist would be wasted work.
+✅ **RESOLVED 2026-08-05 — measured, then redesigned (option 4).**
+The distribution the decision was waiting for, from 30 tags in the live library:
+| Name length | Tags |
+| --- | --- |
+| ≤ 7 characters | 17 |
+| **8–18 characters** | **13 — 43% truncated** |
+| longest | 18 |
+Combined with the recorded decision that a provider vocabulary runs "ten thousand long", options 1–3 were tuning for the shortest names in the smallest possible vocabulary. **Option 4 was taken.**
+⭐ **Three things were removed rather than shrunk**, each costing width the name needed while telling the reader nothing the card did not already say:
+- the leading icon — duplicated the scope the label states
+- the scope **word** beside the count — the second copy of the same fact
+- the chevron — the whole cell is the tap target in a grid
+The name now takes the full cell width across two lines and **shrinks before it truncates**: a long tag rendered small is readable, a truncated one is a *different tag*. The grid moved from two fixed columns to adaptive — the fixed pair produced ≈170pt cells, which is exactly where "about seven characters" came from.
+⚠️ **Operator-verified.** The same treatment was applied to the new Studios Gallery, whose names run long for the same reason.
+*(Superseded, retained:)* ❓ ~~**Open — needs the real distribution.**~~ The right answer depends on how long tags actually get and how many are affected. **Measure the tag vocabulary first** (the operator has estimated it stays under ~30 in practice); designing for a 40-character tag that does not exist would be wasted work.
   **Decision - **The current tag vocabulary is quite short but an external provider's tag database is ten thousand long. We need to be ready for LOTS of tags
 ---
 ## R6 — Tag page's Actors tab lists the wrong actors

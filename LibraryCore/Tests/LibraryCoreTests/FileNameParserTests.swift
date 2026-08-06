@@ -142,6 +142,115 @@ final class FileNameParserTests: XCTestCase {
 
     // MARK: - Vocabulary
 
+    // MARK: - Validated names outrank merely-present ones (Phase C)
+
+    /// The defect this closes: a token that is a confirmed STUDIO and also sits
+    /// in the actor list — because an earlier parse guessed it there — resolved
+    /// as an actor purely because actors are checked first. Order was deciding
+    /// what confidence should.
+    func testAConfirmedStudioBeatsAGuessedActor() {
+        let vocabulary = NameVocabulary(
+            actors: ["Example Studio"],          // a previous parse put it here
+            studios: ["Example Studio"],
+            validatedStudios: ["Example Studio"] // but the source confirmed it
+        )
+
+        let parsed = FileNameParser.parse(fileName: "Example Studio.mp4",
+                                          vocabulary: vocabulary)
+
+        XCTAssertEqual(parsed.studios, ["Example Studio"])
+        XCTAssertTrue(parsed.actors.isEmpty, "a confirmed studio is not an actor")
+    }
+
+    func testAConfirmedActorBeatsAGuessedStudio() {
+        let vocabulary = NameVocabulary(
+            actors: ["Alice Example"],
+            studios: ["Alice Example"],
+            validatedActors: ["Alice Example"]
+        )
+
+        let parsed = FileNameParser.parse(fileName: "Alice Example.mp4",
+                                          vocabulary: vocabulary)
+
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+        XCTAssertTrue(parsed.studios.isEmpty)
+    }
+
+    /// Confirmed as both is not resolvable by confidence either — and guessing
+    /// would credit a video to the wrong kind of thing entirely.
+    func testConfirmedAsBothIsReportedNotGuessed() {
+        let vocabulary = NameVocabulary(
+            actors: ["Ambiguous"], studios: ["Ambiguous"],
+            validatedActors: ["Ambiguous"], validatedStudios: ["Ambiguous"]
+        )
+
+        let parsed = FileNameParser.parse(fileName: "Ambiguous.mp4",
+                                          vocabulary: vocabulary)
+
+        XCTAssertTrue(parsed.actors.isEmpty)
+        XCTAssertTrue(parsed.studios.isEmpty)
+        XCTAssertEqual(parsed.unrecognised, ["Ambiguous"])
+    }
+
+    /// A library that has confirmed nothing must parse exactly as before —
+    /// which is what keeps the parser useful on a day-one library.
+    func testAnEmptyValidatedSetChangesNothing() {
+        let vocabulary = NameVocabulary(actors: ["Alice Example"],
+                                        studios: ["Example Studio"])
+
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example - Example Studio.mp4", vocabulary: vocabulary)
+
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+        XCTAssertEqual(parsed.studios, ["Example Studio"])
+    }
+
+    /// ⚠️ `allSatisfy` is true for an empty array, so a segment that splits to
+    /// nothing would read as "confirmed as both" and be reported as ambiguous
+    /// rather than as the unreadable text it is.
+    func testASegmentThatSplitsToNothingIsNotAmbiguous() {
+        let vocabulary = NameVocabulary(validatedActors: ["Alice Example"],
+                                        validatedStudios: ["Example Studio"])
+
+        let parsed = FileNameParser.parse(fileName: "Alice Example - , - Example Studio.mp4",
+                                          vocabulary: vocabulary)
+
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+        XCTAssertEqual(parsed.studios, ["Example Studio"])
+        XCTAssertFalse(parsed.actors.contains(""), "no empty name is ever placed")
+    }
+
+    /// A malformed profile id must not validate the empty string.
+    func testAMalformedProfileIdValidatesNothing() {
+        let vocabulary = NameVocabulary(
+            assets: [],
+            profiles: ["actor:": EntityProfile(id: "actor:", enrichmentState: .matched),
+                       "studio:": EntityProfile(id: "studio:", enrichmentState: .matched)])
+
+        XCTAssertTrue(vocabulary.validatedActors.isEmpty)
+        XCTAssertTrue(vocabulary.validatedStudios.isEmpty)
+    }
+
+    /// Validation is read from profiles that a lookup matched.
+    func testValidatedNamesComeFromMatchedProfiles() {
+        let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: ["actor:Alice Example", "studio:Example Studio"])
+        let profiles = [
+            "actor:Alice Example": EntityProfile(id: "actor:Alice Example",
+                                                 enrichmentState: .matched),
+            "studio:Example Studio": EntityProfile(id: "studio:Example Studio",
+                                                   enrichmentState: .noMatch)
+        ]
+
+        let vocabulary = NameVocabulary(assets: [asset], profiles: profiles)
+
+        XCTAssertTrue(vocabulary.validatedActors.contains("alice example"))
+        XCTAssertFalse(vocabulary.validatedStudios.contains("example studio"),
+                       "a lookup that found nothing is not a validation")
+        XCTAssertTrue(vocabulary.studios.contains("example studio"),
+                      "but it is still present in the library")
+    }
+
     func testVocabularyIsBuiltFromTheLibrary() {
         let vocab = NameVocabulary(assets: [
             Asset(relativePath: "a.mp4", fileName: "a.mp4",

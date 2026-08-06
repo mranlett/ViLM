@@ -178,9 +178,8 @@ struct EntityProfileEditorView: View {
                 editorForm
             }
         }
-#if os(macOS)
-        .frame(minWidth: 400, minHeight: 650)
-#endif
+        // Taller than the default: this form has the most fields in the app.
+        .macFormSheet(minHeight: 650)
     }
 
     private var editorForm: some View {

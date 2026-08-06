@@ -80,6 +80,33 @@ final class VideoEnrichmentModel: ObservableObject {
     @Published private(set) var browseResults: [PluginCandidate] = []
     @Published private(set) var browseTotal: Int = 0
     @Published private(set) var browsePage: Int = 1
+
+    /// How many results a full page holds.
+    ///
+    /// The provider does not declare it, so it is inferred as the largest page
+    /// seen — a final short page must not shrink it. Needed because "showing 25
+    /// of 235" is the same sentence on page 1 and page 5, which tells the
+    /// operator nothing about where they are.
+    @Published private(set) var browsePageSize: Int = 0
+
+    /// The 1-based range of results currently on screen, or nil before a
+    /// search has returned anything.
+    var browseRange: ClosedRange<Int>? {
+        guard !browseResults.isEmpty else { return nil }
+        let size = max(browsePageSize, browseResults.count)
+        let first = (browsePage - 1) * size + 1
+        return first...(first + browseResults.count - 1)
+    }
+
+    /// Whether another page exists.
+    ///
+    /// Derived from the range's end rather than from `page × results.count`,
+    /// which under-counts on a short page and can leave "Next" enabled at the
+    /// end of a list or disabled before it.
+    var hasNextBrowsePage: Bool {
+        guard let range = browseRange else { return false }
+        return range.upperBound < browseTotal
+    }
     @Published private(set) var isBrowsing = false
     @Published private(set) var browseError: String?
     /// The file's own running time, so a row can say how far off it is. The
@@ -213,6 +240,7 @@ final class VideoEnrichmentModel: ObservableObject {
         browseResults = []
         browseTotal = 0
         browsePage = 1
+        browsePageSize = 0
         browseError = nil
         phase = .browsing
     }
@@ -307,6 +335,8 @@ final class VideoEnrichmentModel: ObservableObject {
             browseTotal = result.total
             unresolvedFilters = result.unresolvedFilters
             browsePage = page
+            // Largest page wins: a short final page is not the page size.
+            browsePageSize = max(browsePageSize, result.candidates.count)
         } catch {
             // Surfaced rather than swallowed: an unresolvable performer name is
             // the most likely failure and the operator can fix it immediately.
@@ -451,6 +481,16 @@ final class VideoEnrichmentModel: ObservableObject {
         }
         // `offeredTags` scopes removal to what was actually shown, so an
         // unticked tag is removed and an untouched one is never affected.
+        // A studio the source supplied is a studio the source knows exists, so
+        // accepting it verifies the studio itself — not just this video's tag.
+        // Nothing else confirms a studio, so without this one write a studio
+        // stays "unconfirmed" forever however many videos credit it.
+        if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
+                                                              accepting: accepted),
+           let url = LibrarySession.shared.url(for: asset.id) {
+            try? LibraryStore(at: url).confirmStudio(studio, source: providerName)
+        }
+
         let merged = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
                                                   accepting: accepted, acceptedTags: acceptedTags,
                                                   offeredTags: tagOptions.map(\.name))

@@ -151,6 +151,33 @@ public final class PluginInstaller: @unchecked Sendable {
 
     public func cacheSize(pluginId: String) -> Int { cache.size(pluginId: pluginId) }
     public func purgeCache(pluginId: String) { cache.purge(pluginId: pluginId) }
+    /// Why a plugin cannot be used right now, or nil when it can.
+    ///
+    /// ⚠️ Exists because "installed" and "usable" are different states, and
+    /// nothing checked the difference at the point of use. A plugin enabled
+    /// without its credential looked perfectly healthy: the batch matcher
+    /// offered a Start button, ran to completion over the whole library, and
+    /// reported no matches — because every request failed authentication and
+    /// every failure was swallowed as "nothing found".
+    ///
+    /// The distinction the operator needs is "the source has no record of this
+    /// video" versus "I never asked the source anything", and those had become
+    /// indistinguishable.
+    public enum Unusable: Equatable, Sendable {
+        /// No plugin provides this capability at all.
+        case noProvider
+        /// Installed and enabled, but its credential was never supplied.
+        case missingCredential(pluginName: String)
+    }
+
+    /// Checks a specific plugin is ready to be called.
+    public func unusableReason(for plugin: any Plugin) -> Unusable? {
+        guard plugin.credentialRequirement == .none || hasCredential(pluginId: plugin.id) else {
+            return .missingCredential(pluginName: plugin.displayName)
+        }
+        return nil
+    }
+
     public func hasCredential(pluginId: String) -> Bool {
         !(credentials.credential(for: pluginId) ?? "").isEmpty
     }

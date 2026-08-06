@@ -34,6 +34,7 @@ enum HelpContent {
         actorGallery,
         tagGallery,
         seriesGallery,
+        studioGallery,
         videoDetails,
         actorProfile,
         playlists,
@@ -234,6 +235,20 @@ enum HelpContent {
                   description: "Add a profile photo and gallery photos (by pasting an image URL), bio, home page, gender, hair color, birth year, country of origin (this adds a flag emoji automatically), tags, and aliases (AKAs) used to automatically match old filenames to this actor."),
             .init(label: "Filmography",
                   description: "Every video featuring this actor, shown as a grid — tap one to open it."),
+        ]
+    )
+
+    static let studioGallery = HelpTopic(
+        id: "studioGallery",
+        title: "Studios Gallery",
+        summary: "Groups your videos by the studio that released them. Tap a studio to see everything it put out.",
+        items: [
+            .init(label: "Studio cards",
+                  description: "Each card shows a studio and how many of your videos it released. Tap a card to open that studio's page."),
+            .init(label: "\"Unconfirmed\"",
+                  description: "A studio is confirmed once a lookup has matched it to an online source. Unconfirmed ones are marked, because only a confirmed studio can be trusted to name a folder when files are organised on disk — a misspelling would otherwise become a folder you'd have to undo by hand."),
+            .init(label: "Fixing a studio",
+                  description: "Rename a studio from its page, or use Settings → Find Videos With Two Studios if a video ended up credited to more than one. A scene has a single releasing studio, so two is always a mistake worth correcting."),
         ]
     )
 

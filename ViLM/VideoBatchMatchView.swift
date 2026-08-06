@@ -56,11 +56,23 @@ struct VideoBatchMatchView: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         if !model.isRunning && !model.finished {
+                            // Disabled rather than allowed-then-silent: a run
+                            // that cannot authenticate looks identical to a
+                            // library the source has never heard of.
                             Button("Start") { Task { await model.run() } }
+                                .disabled(model.blockedReason != nil)
                         }
                     }
                 }
         }
+        // ⚠️ macOS sheets size to their content, and `List` has no intrinsic
+        // height — so when the screen switched from the running VStack to the
+        // results List, the sheet collapsed to a title bar and a Close button.
+        // The report was rendering correctly the whole time; there was simply
+        // no room to draw it, which read as "the run reported nothing".
+        #if os(macOS)
+        .frame(minWidth: 460, idealWidth: 520, minHeight: 420, idealHeight: 560)
+        #endif
     }
 
     @ViewBuilder
@@ -69,6 +81,14 @@ struct VideoBatchMatchView: View {
             running
         } else if model.finished {
             results
+        } else if let blocked = model.blockedReason {
+            // Said up front, where the Start button is, rather than discovered
+            // after a full pass over the library produced nothing.
+            ContentUnavailableView {
+                Label("Nothing to match with", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(blocked)
+            }
         } else {
             ContentUnavailableView {
                 Label("Match every video", systemImage: "sparkle.magnifyingglass")
@@ -83,12 +103,28 @@ struct VideoBatchMatchView: View {
             ProgressView(value: Double(model.report.examined), total: Double(max(model.total, 1)))
                 .frame(maxWidth: 340)
             Text("\(model.report.examined) of \(model.total)").font(.headline)
+            // Says WHICH libraries are being scanned. A run that silently
+            // included a second library read as "it is scanning the same files
+            // over and over" — the count was right and the explanation was
+            // invisible. Naming them makes that immediate instead of a mystery.
+            if model.libraryNames.count > 1 {
+                Text("scanning \(model.libraryNames.count) libraries: \(model.libraryNames.joined(separator: ", "))")
+                    .font(.caption).foregroundStyle(.orange)
+                    .multilineTextAlignment(.center).frame(maxWidth: 340)
+            }
             Text(model.current).font(.caption).foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle).frame(maxWidth: 340)
+            // ⚠️ ALL FIVE, always — `examined` is their sum, so showing three
+            // of them made the figures fail to add up and hid the one category
+            // that says something is wrong. A run reporting "111 examined, 47
+            // no match" left 64 videos unaccounted for, and they were failures.
             HStack(spacing: 14) {
                 tally("applied", model.report.applied, .green)
                 tally("queued", model.report.queued, .orange)
                 tally("no match", model.report.noMatch, .secondary)
+                tally("skipped", model.report.skipped, .secondary)
+                tally("failed", model.report.failed,
+                      model.report.failed > 0 ? .red : .secondary)
             }
             // Fingerprinting reads the whole file, so this is minutes not
             // seconds. Saying so stops it looking stalled.

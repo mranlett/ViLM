@@ -21,6 +21,7 @@ enum SidebarItem: Hashable {
     case actorGallery
     case tagGallery
     case seriesGallery
+    case studioGallery
     case actor(String)
     case tag(String)
     case studio(String)
@@ -501,6 +502,14 @@ struct ContentView: View {
                 assets: assets,
                 sidebarSelection: $sidebarSelection,
                 libraryURL: selectedLibraryURL,
+                onPullToRefresh: refreshLibrary
+            )
+        } else if sidebarSelection.contains(.studioGallery) {
+            StudioGalleryView(
+                assets: assets,
+                sidebarSelection: $sidebarSelection,
+                libraryURL: selectedLibraryURL,
+                entityProfiles: entityProfiles,
                 onPullToRefresh: refreshLibrary
             )
         } else {
@@ -1285,6 +1294,25 @@ struct ContentView: View {
                 var fileNamesUnion = Set<String>()
                 for libURL in openURLs {
                     let store = try LibraryStore(at: libURL)
+                    // A studio is a string until it has a profile, and a string
+                    // can never carry a lookup result — so an unpromoted studio
+                    // can never be confirmed, and an unconfirmed studio cannot
+                    // drive a folder name.
+                    //
+                    // ⚠️ ONCE PER LIBRARY PER SESSION. This sits on a hot path:
+                    // profiles reload from eleven call sites plus the general
+                    // "library data changed" notification, so running it every
+                    // time meant a database round-trip per attached library on
+                    // every refresh. New studios only ever arrive through an
+                    // edit or a match, both of which end in a reload — so the
+                    // next launch picks them up, and nothing is lost by not
+                    // re-checking continuously.
+                    //
+                    // Failure is not fatal: the library still opens and the
+                    // studios stay unpromoted until next launch.
+                    if await LibrarySession.shared.markStudiosPromoted(libURL) {
+                        try? store.promoteStudioProfiles()
+                    }
                     let profiles = try store.fetchAllEntityProfiles()
                     layers.append(Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) }))
                     let dir = libURL.appendingPathComponent(".catalog/profiles")

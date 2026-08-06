@@ -97,3 +97,23 @@ extension TagKind {
         return candidates.count == 1 ? candidates.first : nil
     }
 }
+
+// MARK: - Edge kinds
+
+/// The graph's edge tables, named once so a count or a check cannot be
+/// misspelled into silently querying nothing.
+public enum GraphEdgeKind: String, CaseIterable, Sendable {
+    case videoPerformer = "video_performer"
+    case videoStudio = "video_studio"
+    case videoTag = "video_tag"
+    case performerTag = "performer_tag"
+    case studioParent = "studio_parent"
+    /// Not an edge — staging for a tag whose kind nobody has stated yet.
+    case pendingTagAssociation = "pending_tag_association"
+}
+
+public enum GraphEdgeError: Error, Equatable {
+    /// A studio that would become its own ancestor. Carries the path so the
+    /// message can say which chain closed the loop.
+    case cycle(path: [String])
+}

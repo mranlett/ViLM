@@ -45,19 +45,54 @@ final class LibrarySession: ObservableObject {
     /// owned by the SESSION and released only on detach — never by a view.
     private var scopedAttachments: Set<URL> = []
 
+    /// Libraries whose studios have already been given profiles this session.
+    ///
+    /// Session-scoped rather than persisted: promotion is idempotent and cheap
+    /// once, and a fresh launch re-checking is exactly the behaviour wanted.
+    private var studiosPromoted: Set<URL> = []
+
+    /// Claims the promotion for `url`, returning true only for the first caller.
+    ///
+    /// Returns a decision rather than exposing the set, so the check and the
+    /// claim cannot drift apart — two reloads racing would otherwise both read
+    /// "not yet" and both run.
+    @discardableResult
+    func markStudiosPromoted(_ url: URL) -> Bool {
+        studiosPromoted.insert(url).inserted
+    }
+
     private init() {}
 
     var isFederated: Bool { !attachedURLs.isEmpty }
 
     /// Every open library, primary first, then attachments in precedence order.
-    var allURLs: [URL] { (primaryURL.map { [$0] } ?? []) + attachedURLs }
+    ///
+    /// ⚠️ DE-DUPLICATED, order preserved. If a library were ever both primary
+    /// and attached, every caller that walks this list would visit it twice —
+    /// the batch matcher would scan each of its videos a second time, the
+    /// filename reader would double-count, and totals would read double the
+    /// library. Guarding at attach time is not enough: `setPrimary` does not
+    /// check whether its new primary is already an attachment, and a caller
+    /// cannot be expected to know that.
+    var allURLs: [URL] {
+        var seen = Set<URL>()
+        return ((primaryURL.map { [$0] } ?? []) + attachedURLs)
+            .filter { seen.insert($0).inserted }
+    }
 
     /// Called from every path that opens/switches the active library.
     /// Idempotent; switching primaries ends the session — every attachment
     /// is detached (scopes released, connections dropped) because attachments
     /// belong to a session, not to the app.
     func setPrimary(_ url: URL?) {
-        guard primaryURL != url else { return }
+        guard primaryURL != url else {
+            // Same primary, but it may ALSO be sitting in the attachment list
+            // — opening a library that was already attached would otherwise
+            // leave it open twice, and every list-walking caller would process
+            // it twice.
+            if let url, attachedURLs.contains(url) { detach(url) }
+            return
+        }
         for attached in attachedURLs.reversed() {
             detach(attached)
         }
@@ -85,6 +120,9 @@ final class LibrarySession: ObservableObject {
     func detach(_ url: URL) {
         guard let index = attachedURLs.firstIndex(of: url) else { return }
         attachedURLs.remove(at: index)
+        // Detaching ends this library's session, so a later re-attach must be
+        // able to promote again — studios may have been added while it was away.
+        studiosPromoted.remove(url)
         if scopedAttachments.remove(url) != nil {
             url.stopAccessingSecurityScopedResource()
         }

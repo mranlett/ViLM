@@ -24,6 +24,94 @@ final class TagVocabularyPersistenceTests: XCTestCase {
                                     fileName: "a.mp4", tags: tags))
     }
 
+    // MARK: - Studio confirmation
+
+    /// Nothing looks studios up directly, so a studio arriving from a video
+    /// match is the ONLY route by which one becomes verified. Without this a
+    /// studio stays "unconfirmed" forever, however many videos credit it.
+    func testAcceptingAStudioFromASourceConfirmsIt() throws {
+        try insert(["studio:Example Studio"])
+        try store.promoteStudioProfiles()
+
+        var proposal = VideoMetadataProposal()
+        proposal.studio = ProposedField("Example Studio")
+        let studio = try XCTUnwrap(VideoEnrichmentReview.confirmedStudio(
+            proposal: proposal, accepting: [VideoEnrichmentReview.Field.studio]))
+        try store.confirmStudio(studio, source: "TestSource")
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "studio:Example Studio"))
+        XCTAssertEqual(profile.enrichmentState, .matched)
+        XCTAssertEqual(profile.enrichmentSource, "TestSource")
+    }
+
+    /// An unticked studio confirms nothing.
+    func testADeclinedStudioIsNotConfirmed() {
+        var proposal = VideoMetadataProposal()
+        proposal.studio = ProposedField("Example Studio")
+
+        XCTAssertNil(VideoEnrichmentReview.confirmedStudio(proposal: proposal,
+                                                           accepting: []))
+    }
+
+    /// Re-accepting the same studio on a second video must not clobber a
+    /// richer profile built by an earlier lookup.
+    func testConfirmingAnAlreadyMatchedStudioChangesNothing() throws {
+        try store.saveEntityProfile(EntityProfile(id: "studio:Example Studio",
+                                                  bio: "kept",
+                                                  enrichmentState: .matched,
+                                                  enrichmentSourceId: "studio-7"))
+
+        try store.confirmStudio("Example Studio", source: "AnotherSource")
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "studio:Example Studio"))
+        XCTAssertEqual(profile.bio, "kept")
+        XCTAssertEqual(profile.enrichmentSourceId, "studio-7")
+    }
+
+    // MARK: - Studio lexicon (Phase C)
+
+    func testStudiosGainProfileRows() throws {
+        try insert(["studio:Example Studio", "actor:Alice Example"])
+        try insert(["studio:Other Studio"])
+
+        let created = try store.promoteStudioProfiles()
+
+        XCTAssertEqual(created, ["studio:Example Studio", "studio:Other Studio"])
+        let ids = Set(try store.fetchAllEntityProfiles().map(\.id))
+        XCTAssertTrue(ids.contains("studio:Example Studio"))
+    }
+
+    /// ⚠️ A re-run must never overwrite a confirmed match — the whole point of
+    /// promoting studios is that they can eventually carry one.
+    func testPromotingStudiosNeverOverwritesAnExistingProfile() throws {
+        try insert(["studio:Example Studio"])
+        try store.saveEntityProfile(EntityProfile(id: "studio:Example Studio",
+                                                  enrichmentState: .matched,
+                                                  enrichmentSourceId: "studio-99"))
+
+        let created = try store.promoteStudioProfiles()
+
+        XCTAssertTrue(created.isEmpty)
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "studio:Example Studio"))
+        XCTAssertEqual(profile.enrichmentState, .matched)
+        XCTAssertEqual(profile.enrichmentSourceId, "studio-99")
+    }
+
+    /// A studio with a row but no verdict is present, not validated — so it
+    /// informs the parser without deciding for it.
+    func testAPromotedStudioIsNotYetValidated() throws {
+        try insert(["studio:Example Studio"])
+        try store.promoteStudioProfiles()
+
+        let profiles = Dictionary(uniqueKeysWithValues:
+            try store.fetchAllEntityProfiles().map { ($0.id, $0) })
+        let vocabulary = NameVocabulary(assets: try store.fetchAllAssets(),
+                                        profiles: profiles)
+
+        XCTAssertTrue(vocabulary.studios.contains("example studio"))
+        XCTAssertTrue(vocabulary.validatedStudios.isEmpty)
+    }
+
     func testPromotionDiscoversTheLibrarysTags() throws {
         try insert(["tag:Climbing", "actor:Alice Example"])
         try insert(["tag:Outdoors"])

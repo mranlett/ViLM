@@ -26,10 +26,24 @@ struct VideoManualSearchView: View {
     @State private var newTag = ""
     @State private var expanded: PluginCandidate?
 
+    // Two independent axes, because they answer different questions:
+    // "give the candidates more room" and "let me choose by picture".
+    // Persisted — a preference about how you recognise a scene does not change
+    // between videos, and re-setting it on every match would be its own chore.
+    @AppStorage("videoMatchCompactFilters") private var compactFilters = false
+    @AppStorage("videoMatchLargeImages") private var largeImages = false
+
     var body: some View {
         VStack(spacing: 0) {
-            subjectGrid
-            filters
+            // Collapsed away entirely rather than merely shrunk: the subject
+            // strip and the filter fields together take most of a phone screen,
+            // and once a search has run they are reference material, not the
+            // thing being looked at.
+            if !compactFilters {
+                subjectGrid
+                filters
+            }
+            viewControls
             Divider()
             results
         }
@@ -39,6 +53,52 @@ struct VideoManualSearchView: View {
                 onChoose(candidate)
             }
         }
+    }
+
+    /// Always visible, including while the filters are collapsed — otherwise
+    /// there is no way back to them.
+    private var viewControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                compactFilters.toggle()
+            } label: {
+                Label(compactFilters ? "Show filters" : "Hide filters",
+                      systemImage: compactFilters ? "chevron.down" : "chevron.up")
+            }
+
+            // When the filters are hidden, say what is still being applied.
+            // A search silently narrowed by a filter you cannot see is the
+            // fastest way to conclude the source has nothing.
+            if compactFilters, !activeFilterSummary.isEmpty {
+                Text(activeFilterSummary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                largeImages.toggle()
+            } label: {
+                Label(largeImages ? "List" : "Large images",
+                      systemImage: largeImages ? "list.bullet" : "square.grid.2x2")
+            }
+        }
+        .font(.caption)
+        .buttonStyle(.borderless)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+    }
+
+    private var activeFilterSummary: String {
+        var parts: [String] = []
+        if !model.searchPerformers.isEmpty { parts.append(model.searchPerformers.joined(separator: ", ")) }
+        let studio = model.searchStudio.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !studio.isEmpty { parts.append(studio) }
+        if !model.searchTags.isEmpty { parts.append(model.searchTags.joined(separator: ", ")) }
+        let title = model.searchTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { parts.append("“\(title)”") }
+        return parts.joined(separator: " · ")
     }
 
     /// The same context strip the editing screens use.
@@ -229,19 +289,108 @@ struct VideoManualSearchView: View {
                     ? ""
                     : "Any filter will do — a studio on its own works when you don't know the cast. Adding one tag to it usually cuts hundreds of scenes down to a handful."))
         } else {
-            List {
-                Section {
-                    ForEach(model.browseResults) { candidate in
-                        row(candidate)
-                    }
-                } header: {
-                    Text("Showing \(model.browseResults.count) of \(model.browseTotal)")
-                } footer: {
-                    if model.browseTotal > model.browseResults.count {
-                        pager
+            if largeImages {
+                imageGrid
+            } else {
+                List {
+                    Section {
+                        ForEach(model.browseResults) { candidate in
+                            row(candidate)
+                        }
+                    } header: {
+                        Text(showingLabel)
+                    } footer: {
+                        if model.hasNextBrowsePage || model.browsePage > 1 { pager }
                     }
                 }
             }
+        }
+    }
+
+    /// ⚠️ Says WHICH results these are, not merely how many.
+    ///
+    /// "Showing 25 of 235" is the same sentence on page 1 and page 5, so it
+    /// answered a question nobody was asking while hiding the one they were.
+    private var showingLabel: String {
+        guard let range = model.browseRange else {
+            return "Showing \(model.browseResults.count) of \(model.browseTotal)"
+        }
+        return range.lowerBound == range.upperBound
+            ? "Showing \(range.lowerBound) of \(model.browseTotal)"
+            : "Showing \(range.lowerBound)–\(range.upperBound) of \(model.browseTotal)"
+    }
+
+    /// Picture-first: a big still, and only enough text to break a tie.
+    ///
+    /// Recognising a scene is a visual act — the name a source gives it is
+    /// often not the name you know it by, and a 104pt still is too small to
+    /// recognise anything from. Tapping an image opens the full gallery;
+    /// tapping the caption chooses, so a mis-tap looks rather than commits.
+    private var imageGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
+                ForEach(model.browseResults) { candidate in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button { expanded = candidate } label: {
+                            ZStack(alignment: .bottomTrailing) {
+                                largeThumbnail(candidate)
+                                if candidate.imageURLs.count > 1 {
+                                    Text("\(candidate.imageURLs.count)")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(.black.opacity(0.6), in: Capsule())
+                                        .foregroundStyle(.white)
+                                        .padding(6)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        Button { onChoose(candidate) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(candidate.title)
+                                    .font(.caption).fontWeight(.medium)
+                                    .lineLimit(2).multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                durationLine(candidate)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            VStack(spacing: 8) {
+                Text(showingLabel).font(.caption).foregroundStyle(.secondary)
+                if model.hasNextBrowsePage || model.browsePage > 1 { pager }
+            }
+            .padding()
+        }
+    }
+
+    @ViewBuilder
+    private func largeThumbnail(_ candidate: PluginCandidate) -> some View {
+        // Prefers the full-size image: the small one is what made picture-led
+        // selection impossible in the first place.
+        if let url = candidate.fullImageURL ?? candidate.thumbnailURL {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Rectangle().fill(Color.secondary.opacity(0.15))
+            }
+            .frame(height: 150)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(height: 150)
+                .frame(maxWidth: .infinity)
+                .overlay(Image(systemName: "film").foregroundColor(.secondary))
         }
     }
 
@@ -252,9 +401,11 @@ struct VideoManualSearchView: View {
             Spacer()
             Text("Page \(model.browsePage)").font(.caption).foregroundColor(.secondary)
             Spacer()
+            // Derived from the range's end, not from page × results-on-page,
+            // which under-counts whenever a page comes back short and could
+            // disable Next before the list had actually run out.
             Button("Next") { Task { await model.runBrowse(page: model.browsePage + 1) } }
-                .disabled(model.isBrowsing
-                          || model.browsePage * model.browseResults.count >= model.browseTotal)
+                .disabled(model.isBrowsing || !model.hasNextBrowsePage)
         }
         .font(.caption)
     }

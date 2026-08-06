@@ -51,6 +51,7 @@ struct PluginSettingsView: View {
         }
         .navigationTitle("Plugins")
         .id(revision)
+        .macFormSheet(minHeight: 460)
     }
 
     private func row(for plugin: any Plugin) -> some View {
