@@ -1488,6 +1488,40 @@ public class LibraryStore {
         }
     }
 
+    /// The whole `video_studio` edge in one read.
+    ///
+    /// The audit asks about every video, and doing that through
+    /// `studioId(forVideo:)` is one query per video — 2,104 of them on the
+    /// drive library, each taking the read lock. One table scan instead.
+    public func studioIdsByVideo() throws -> [UUID: String] {
+        try dbQueue.read { db in
+            var result: [UUID: String] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT video_id, studio_id FROM video_studio") {
+                guard let id = UUID(uuidString: row["video_id"]) else { continue }
+                result[id] = row["studio_id"]
+            }
+            return result
+        }
+    }
+
+    /// Everything wrong with this library's studios.
+    ///
+    /// Gathers what `StudioAudit` needs and hands it over. The reads are all
+    /// whole-table on purpose: the audit's questions are about the library
+    /// entire, and asking them per record is what made an earlier version of
+    /// `promoteStudioProfiles` unusable with the external drive attached.
+    public func auditStudios() throws -> [StudioCheck] {
+        let profiles = try fetchAllEntityProfiles()
+        return StudioAudit.run(StudioAudit.Input(
+            assets: try fetchAllAssets(),
+            profileIds: Set(profiles.map(\.id)),
+            confirmedStudioIds: Set(profiles
+                .filter { $0.id.hasPrefix("studio:") && $0.enrichmentState == .matched }
+                .map(\.id)),
+            studioIdByVideo: try studioIdsByVideo(),
+            parentPairs: try studioParentPairs()))
+    }
+
     public func tagIds(forVideo videoId: UUID) throws -> [String] {
         try dbQueue.read { db in
             try String.fetchAll(db, sql:
@@ -1503,6 +1537,70 @@ public class LibraryStore {
             try String.fetchAll(db, sql:
                 "SELECT video_id FROM video_performer WHERE performer_id = ?",
                 arguments: [performerId])
+        }.compactMap(UUID.init(uuidString:))
+    }
+
+    /// Videos per studio, keyed by node id, counted from the TAGS.
+    ///
+    /// ⚠️ Deliberately not from `video_studio`. These counts sit beside links
+    /// that pivot the grid, and the grid filters on the `studio:` string — so
+    /// counting edges would print a number the very next click contradicts.
+    /// The edge is the better representation and the string is what is
+    /// displayed; until writes move to the edge, the display must agree with
+    /// itself.
+    public func studioVideoCounts() throws -> [String: Int] {
+        try dbQueue.read { db in
+            var counts: [String: Int] = [:]
+            for row in try Row.fetchAll(db, sql: """
+                SELECT j.value AS studio, COUNT(DISTINCT assets.id) AS n
+                FROM assets, json_each(assets.tags) j
+                WHERE j.value LIKE 'studio:_%'
+                GROUP BY j.value
+                """) {
+                counts[row["studio"]] = row["n"]
+            }
+            return counts
+        }
+    }
+
+    /// A studio's network, its sibling imprints and its own imprints.
+    public func studioLineage(for studioId: String) throws -> StudioLineage {
+        StudioLineage.build(for: studioId,
+                            pairs: try studioParentPairs(),
+                            videoCounts: try studioVideoCounts())
+    }
+
+    /// The imprints directly beneath a network — one level, not the whole tree.
+    ///
+    /// Lifted out of `studioIdWithDescendants` so a profile page can ask what a
+    /// studio's children are without walking every generation under it. The
+    /// page shows one level; the walk exists for filtering.
+    public func childStudioIds(of studioId: String) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT studio_id FROM studio_parent
+                WHERE parent_studio_id = ? ORDER BY studio_id
+                """, arguments: [studioId])
+        }
+    }
+
+    /// The network a studio belongs to, if one is recorded.
+    public func parentStudioId(of studioId: String) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql:
+                "SELECT parent_studio_id FROM studio_parent WHERE studio_id = ?",
+                arguments: [studioId])
+        }
+    }
+
+    /// Videos released by a studio — the studio counterpart of
+    /// `videoIds(forPerformer:)`, which did not exist because `video_studio`
+    /// was only ever queried in the video direction.
+    public func videoIds(forStudio studioId: String) throws -> [UUID] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql:
+                "SELECT video_id FROM video_studio WHERE studio_id = ?",
+                arguments: [studioId])
         }.compactMap(UUID.init(uuidString:))
     }
 

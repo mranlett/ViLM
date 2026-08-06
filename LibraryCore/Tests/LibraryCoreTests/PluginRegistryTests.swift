@@ -56,6 +56,24 @@ private struct DoubleVideoProvider: VideoMetadataProvider {
 
 /// Implements BOTH provider protocols — the "combined capability" case the epic
 /// anticipates in its plugin inventory.
+private struct DoubleStudioProvider: StudioMetadataProvider {
+    let id: String
+    let displayName: String
+    var summary = "A test double."
+    var capabilities: Set<PluginCapability> { [.studioMetadata] }
+    var credentialRequirement: CredentialRequirement = .none
+
+    func search(name: String) async throws -> [PluginCandidate] {
+        [PluginCandidate(id: "\(id)-1", title: name)]
+    }
+
+    func fetch(studioId: String) async throws -> StudioMetadataProposal {
+        var p = StudioMetadataProposal()
+        p.parentName = .init("Example Network")
+        return p
+    }
+}
+
 private struct DoubleCombinedProvider: ActorMetadataProvider, VideoMetadataProvider {
     let id = "double.combined"
     let displayName = "Combined Double"
@@ -194,12 +212,26 @@ final class PluginRegistryTests: XCTestCase {
         let (registry, store, creds) = makeRegistry()
         registry.register(DoubleActorProvider(id: "a", displayName: "A"))
         registry.register(DoubleVideoProvider(id: "v", displayName: "V"))
+        registry.register(DoubleStudioProvider(id: "s", displayName: "S"))
         store.setEnabled(true, pluginId: "a")
         store.setEnabled(true, pluginId: "v")
+        store.setEnabled(true, pluginId: "s")
         creds.setCredential("secret", for: "v")
 
         XCTAssertEqual(registry.installedActorProviders().map(\.id), ["a"])
         XCTAssertEqual(registry.installedVideoProviders().map(\.id), ["v"])
+        XCTAssertEqual(registry.installedStudioProviders().map(\.id), ["s"])
+    }
+
+    /// A source that can answer about scenes but not companies is a real shape,
+    /// so a library with no studio provider must simply have none rather than
+    /// falling back to one that cannot answer.
+    func testAStudioProviderIsAbsentUntilRegistered() {
+        let (registry, store, _) = makeRegistry()
+        registry.register(DoubleActorProvider(id: "a", displayName: "A"))
+        store.setEnabled(true, pluginId: "a")
+
+        XCTAssertTrue(registry.installedStudioProviders().isEmpty)
     }
 
     func testOnePluginMayImplementBothProviderProtocols() {
@@ -270,7 +302,8 @@ final class PluginRegistryTests: XCTestCase {
     }
 
     func testCapabilitiesAndCredentialRequirementsAreEnumerable() {
-        XCTAssertEqual(Set(PluginCapability.allCases), [.videoMetadata, .actorMetadata])
+        XCTAssertEqual(Set(PluginCapability.allCases),
+                       [.videoMetadata, .actorMetadata, .studioMetadata])
         XCTAssertEqual(Set(CredentialRequirement.allCases), [.none, .apiKey, .token])
     }
 }

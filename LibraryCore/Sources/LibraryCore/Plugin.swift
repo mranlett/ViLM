@@ -24,6 +24,7 @@ public enum CredentialRequirement: String, Equatable, Sendable, CaseIterable {
 public enum PluginCapability: String, Equatable, Sendable, CaseIterable {
     case videoMetadata
     case actorMetadata
+    case studioMetadata
 }
 
 /// Identity and description. Everything the Settings screen needs to render a
@@ -282,6 +283,45 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     public init() {}
 }
 
+/// Everything a plugin may propose about a studio.
+///
+/// Deliberately short. A studio is a company, and the fields that make an actor
+/// record useful — a birth date, a career span, a hair colour — describe a
+/// person and nothing else. The one thing here that an actor has no equivalent
+/// of is the hierarchy, and it is the reason this type exists.
+public struct StudioMetadataProposal: Equatable, Sendable {
+    /// The source's own identifier for this studio.
+    ///
+    /// ⚠️ A name is not an identity. Two networks can use the same imprint
+    /// name, and an imprint can be renamed — so carrying the id is what lets a
+    /// studio hold a confirmed match rather than a spelling.
+    public var sourceId: ProposedField<String> = .absent
+    /// The source's canonical spelling.
+    public var name: ProposedField<String> = .absent
+    public var bio: ProposedField<String> = .absent
+    /// Former names and alternative spellings.
+    public var akas: ProposedField<[String]> = .absent
+
+    /// The network that owns this imprint, where the source knows of one.
+    ///
+    /// ⚠️ Confirming an imprint therefore asserts a SECOND node and an edge —
+    /// one lookup yielding two studios and a `studio_parent` row. That is the
+    /// point of matching studios directly rather than waiting for videos.
+    public var parentName: ProposedField<String> = .absent
+    public var parentSourceId: ProposedField<String> = .absent
+
+    /// The studio's logo.
+    ///
+    /// ⚠️ Never applied by an unattended run — see `StudioBatchPolicy`. It is
+    /// the studio's equivalent of an actor photo, and wrong in the same
+    /// immediately visible way on every screen the studio appears on.
+    public var logoURL: ProposedField<URL> = .absent
+    public var homePage: ProposedField<String> = .absent
+    public var externalLinks: ProposedField<[EntityLink]> = .absent
+
+    public init() {}
+}
+
 /// Everything a plugin may propose about a video.
 public struct VideoMetadataProposal: Equatable, Sendable {
     public var title: ProposedField<String> = .absent
@@ -363,6 +403,21 @@ public enum PluginError: Error, Equatable, Sendable {
 public protocol ActorMetadataProvider: Plugin {
     func search(name: String) async throws -> [PluginCandidate]
     func fetch(actorId: String) async throws -> ActorMetadataProposal
+}
+
+/// Looks a studio up directly, rather than learning about it in passing.
+///
+/// ⚠️ This exists because until now studio facts arrived ONLY as a by-product
+/// of matching a video. A library could therefore know a studio's parent for
+/// the imprints it happened to have matched and nothing about the rest, and the
+/// only way to fill the gap was to re-match every video — an enormous amount of
+/// work to answer a question about a few hundred companies.
+///
+/// A source that can search scenes can almost always search studios too; the
+/// capability was simply never asked for.
+public protocol StudioMetadataProvider: Plugin {
+    func search(name: String) async throws -> [PluginCandidate]
+    func fetch(studioId: String) async throws -> StudioMetadataProposal
 }
 
 public protocol VideoMetadataProvider: Plugin {

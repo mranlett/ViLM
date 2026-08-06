@@ -52,7 +52,14 @@ struct ActorBatchMatchView: View {
             EntityProfileEditorView(libraryURL: queued.libraryURL,
                                     entityId: queued.profile.id,
                                     profile: queued.profile,
-                                    onSave: { _ in reviewing = nil })
+                                    onSave: { _ in
+                                        // Saving is acting on it, so it leaves
+                                        // the queue. Without this an actor
+                                        // matched here stayed on the "need you
+                                        // to choose" list all session.
+                                        model.removeFromQueue(queued.profile.id)
+                                        reviewing = nil
+                                    })
         }
     }
 

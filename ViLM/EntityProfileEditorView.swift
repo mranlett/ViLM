@@ -117,6 +117,17 @@ struct EntityProfileEditorView: View {
         case newLinkUrl
     }
     @FocusState private var focusedField: Field?
+
+    /// Whether this form is editing a company rather than a person.
+    ///
+    /// ⚠️ `EntityProfile` is one record for actors, studios, tags and series,
+    /// so this form offered a studio a gender, a hair colour and a birth year —
+    /// the same defect the profile page had, one layer down and reached through
+    /// its own menu.
+    private var isStudio: Bool { entityId.hasPrefix("studio:") }
+
+    /// What this record is, for labels that would otherwise say "actor".
+    private var noun: String { isStudio ? "studio" : "actor" }
     
     init(libraryURL: URL?, entityId: String, profile: EntityProfile?, embedsInNavigationStack: Bool = true, onSave: @escaping (EntityProfile) -> Void) {
         self.libraryURL = libraryURL
@@ -192,13 +203,21 @@ struct EntityProfileEditorView: View {
                     let others = LibrarySession.shared.otherLibraries(containingProfile: entityId)
                     Section {
                         Label(
-                            "This actor also exists in \(others.count) other open librar\(others.count == 1 ? "y" : "ies"). Edits here apply to “\(LibrarySession.shared.fullLabel(for: owner))” only.",
+                            "This \(noun) also exists in \(others.count) other open librar\(others.count == 1 ? "y" : "ies"). Edits here apply to “\(LibrarySession.shared.fullLabel(for: owner))” only.",
                             systemImage: "info.circle")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     }
                 }
-                if let provider = installedActorProvider {
+                // ⚠️ Actors only. `ActorEnrichmentSheet` searches the source's
+                // PERFORMERS, so offering it on a studio would look up a
+                // company name against a list of people and either find
+                // nothing or, worse, find a person who happens to share it.
+                //
+                // Studios are matched by Match All Studios, which uses the
+                // studio provider. Per-studio enrichment from this sheet is not
+                // built; the button is absent rather than misleading.
+                if !isStudio, let provider = installedActorProvider {
                     Section {
                         Button {
                             isShowingEnrichment = true
@@ -212,7 +231,8 @@ struct EntityProfileEditorView: View {
                     }
                 }
 
-                Section(header: Text("Photo Gallery").font(.headline)) {
+                // A studio's images are logos, not photographs of anyone.
+                Section(header: Text(isStudio ? "Logos" : "Photo Gallery").font(.headline)) {
                     HStack {
                         TextField("https://...", text: $newGalleryUrl)
                             .autocorrectionDisabled()
@@ -299,8 +319,12 @@ struct EntityProfileEditorView: View {
                         #endif
                         .focused($focusedField, equals: .homePage)
                         .submitLabel(.next)
-                        .onSubmit { focusedField = .gender }
-                    
+                        // ⚠️ Skips the three hidden fields for a studio.
+                        // Focusing a field that is not on screen strands the
+                        // keyboard on nothing and the chain dead-ends.
+                        .onSubmit { focusedField = isStudio ? .country : .gender }
+
+                    if !isStudio {
                     VStack(alignment: .leading) {
                         TextField("Gender", text: $gender)
                             .focused($focusedField, equals: .gender)
@@ -347,8 +371,12 @@ struct EntityProfileEditorView: View {
                             .submitLabel(.next)
                             .onSubmit { focusedField = .country }
                     }
-                    
-                    TextField("Country of Origin", text: $countryOfOrigin)
+                    }
+
+                    // Country stays for both: a studio has one, and it means
+                    // the same thing.
+                    TextField(isStudio ? "Country" : "Country of Origin",
+                              text: $countryOfOrigin)
                         .focused($focusedField, equals: .country)
                         .submitLabel(.next)
                         .onSubmit { focusedField = .bio }
@@ -558,7 +586,7 @@ struct EntityProfileEditorView: View {
                 }
             }
             .padding()
-            .navigationTitle("Edit Profile")
+            .navigationTitle(isStudio ? "Edit Studio" : "Edit Profile")
             .sheet(isPresented: $isShowingEnrichment) {
                 if let provider = installedActorProvider {
                     ActorEnrichmentSheet(

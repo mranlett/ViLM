@@ -134,6 +134,10 @@ public final class PluginRegistry: @unchecked Sendable {
         installed.compactMap { $0 as? any VideoMetadataProvider }
     }
 
+    public func installedStudioProviders() -> [any StudioMetadataProvider] {
+        installed.compactMap { $0 as? any StudioMetadataProvider }
+    }
+
     public func installed(capability: PluginCapability) -> [any Plugin] {
         installed.filter { $0.capabilities.contains(capability) }
     }

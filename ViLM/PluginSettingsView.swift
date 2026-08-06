@@ -177,7 +177,12 @@ struct PluginDetailView: View {
         var parts: [String] = []
         if plugin.capabilities.contains(.videoMetadata) { parts.append("Videos") }
         if plugin.capabilities.contains(.actorMetadata) { parts.append("Actors") }
-        return parts.isEmpty ? "Nothing" : parts.joined(separator: " and ")
+        if plugin.capabilities.contains(.studioMetadata) { parts.append("Studios") }
+        // "Videos, Actors and Studios" rather than "Videos and Actors and
+        // Studios" — three capabilities exist now, and the two-item join only
+        // read correctly while there were two.
+        guard parts.count > 1 else { return parts.first ?? "Nothing" }
+        return parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
     }
 
     private var credentialTitle: String {
@@ -185,9 +190,16 @@ struct PluginDetailView: View {
     }
 
     private var privacyNotice: String {
-        let what = plugin.capabilities.contains(.videoMetadata)
-            ? (plugin.capabilities.contains(.actorMetadata) ? "video titles and actor names" : "video titles")
-            : "actor names"
+        // Built from the capabilities rather than branched: the nested
+        // conditional this replaced could only describe two of them, so a
+        // studio-capable plugin would have claimed to send something else.
+        var sends: [String] = []
+        if plugin.capabilities.contains(.videoMetadata) { sends.append("video titles") }
+        if plugin.capabilities.contains(.actorMetadata) { sends.append("actor names") }
+        if plugin.capabilities.contains(.studioMetadata) { sends.append("studio names") }
+        let what = sends.count > 1
+            ? sends.dropLast().joined(separator: ", ") + " and " + sends[sends.count - 1]
+            : (sends.first ?? "nothing")
         let attributable = plugin.credentialRequirement == .none
             ? "The request is anonymous."
             : "Requests are authenticated, so they are attributable to your account with that source."

@@ -24,7 +24,9 @@ struct SettingsView: View {
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
     var onBatchMatchActors: (() -> Void)?
+    var onBatchMatchStudios: (() -> Void)?
     var onStudioConflicts: (() -> Void)?
+    var onStudioAudit: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
@@ -88,6 +90,18 @@ struct SettingsView: View {
                     toolButton("3 · Match All Actors",
                                icon: "person.crop.circle.badge.checkmark",
                                action: onBatchMatchActors)
+                    // Last of the four because it benefits from the others
+                    // having run: a studio with no videos left carrying two
+                    // names has nothing ambiguous to confirm.
+                    // ⚠️ `building.2.crop.circle`, NOT a `.badge.checkmark`
+                    // variant. The `person.crop.circle.badge.checkmark` used
+                    // above exists; the building equivalent does not, and
+                    // SwiftUI renders a missing symbol as nothing at all — so
+                    // this row silently lost its icon and sat offset from its
+                    // three neighbours.
+                    toolButton("4 · Match All Studios",
+                               icon: "building.2.crop.circle",
+                               action: onBatchMatchStudios)
                 }
 
                 Section(
@@ -132,6 +146,17 @@ struct SettingsView: View {
                                icon: "square.on.square.dashed", action: onFindDuplicates)
                     toolButton("File Name Audit",
                                icon: "doc.text.magnifyingglass", action: onAuditFileName)
+                        .disabled(session.isFederated)
+                    // Single-library for the same reason Connect the Graph is:
+                    // half of what it checks is edges, and an edge cannot span
+                    // two libraries.
+                    // `checklist` rather than a building: the other two studio
+                    // rows in Settings already take `building.2` and
+                    // `building.2.crop.circle`, and three near-identical
+                    // buildings in one Settings screen is three rows nobody can
+                    // tell apart at a glance.
+                    toolButton("Studio Health",
+                               icon: "checklist", action: onStudioAudit)
                         .disabled(session.isFederated)
                 }
 

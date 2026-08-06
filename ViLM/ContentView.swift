@@ -25,6 +25,16 @@ enum SidebarItem: Hashable {
     case actor(String)
     case tag(String)
     case studio(String)
+    /// A studio and every imprint beneath it.
+    ///
+    /// ⚠️ A separate case rather than making `.studio` family-aware. Sidebar
+    /// selections combine with `allSatisfy` — they AND — so the obvious
+    /// approach of inserting each descendant as its own `.studio` item asks for
+    /// videos belonging to EVERY studio in the family at once, which is zero.
+    /// Making `.studio` itself family-aware would silently change what every
+    /// existing studio page shows and what every saved filter means, and would
+    /// remove the ability to ask the narrower question at all.
+    case studioFamily(String)
     case series(String)
     case smartCollection(String, String) // id, name
 }
@@ -92,6 +102,12 @@ struct ContentView: View {
     @State private var isShowingBatchMatch = false
     @State private var isShowingActorBatchMatch = false
     @State private var isShowingStudioConflicts = false
+    @State private var isShowingStudioBatchMatch = false
+    @State private var isShowingStudioAudit = false
+    /// The repair a studio finding asked for, run once the audit sheet has
+    /// actually closed. Presenting a sheet while another is dismissing is how
+    /// the second one silently fails to appear.
+    @State private var pendingStudioFix: (() -> Void)?
     @State private var isShowingGraphConnect = false
     @State private var isShowingMatchReset = false
     @State private var isShowingDuplicateDetection = false
@@ -233,7 +249,9 @@ struct ContentView: View {
                     onReadFilenames: { isShowingReadFilenames = true },
                     onBatchMatchVideos: { isShowingBatchMatch = true },
                     onBatchMatchActors: { isShowingActorBatchMatch = true },
+                    onBatchMatchStudios: { isShowingStudioBatchMatch = true },
                     onStudioConflicts: { isShowingStudioConflicts = true },
+                    onStudioAudit: { isShowingStudioAudit = true },
                     onConnectGraph: { isShowingGraphConnect = true },
                     onResetMatches: { isShowingMatchReset = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
@@ -317,6 +335,20 @@ struct ContentView: View {
                 let urls = LibrarySession.shared.allURLs
                 if !urls.isEmpty {
                     StudioConflictCleanupView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingStudioBatchMatch) {
+                let urls = LibrarySession.shared.allURLs
+                if !urls.isEmpty {
+                    StudioBatchMatchView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingStudioAudit, onDismiss: {
+                pendingStudioFix?()
+                pendingStudioFix = nil
+            }) {
+                if let url = selectedLibraryURL {
+                    StudioAuditView(libraryURL: url, onFix: studioAuditDidRequestFix)
                 }
             }
             .sheet(isPresented: $isShowingBatchMatch) {
@@ -664,6 +696,33 @@ struct ContentView: View {
     private func deferUntilSettingsDismissed(_ action: @escaping () -> Void) {
         pendingSettingsDeepLink = action
         isShowingSettings = false
+    }
+
+    /// Sends a studio finding to the tool that resolves it.
+    ///
+    /// Stored rather than run: the audit sheet is still on screen at this
+    /// point, and opening the destination now would present a sheet on top of
+    /// one that is closing — which does nothing at all. `onDismiss` runs it.
+    ///
+    private func studioAuditDidRequestFix(_ fix: StudioFix) {
+        switch fix {
+        case .matchStudios:
+            pendingStudioFix = { isShowingStudioBatchMatch = true }
+        case .fixDuplicateStudios:
+            pendingStudioFix = { isShowingStudioConflicts = true }
+        case .repairTagSpelling:
+            pendingStudioFix = { isShowingTagCaseCleanup = true }
+        case .connectTheGraph:
+            pendingStudioFix = { isShowingGraphConnect = true }
+        case .matchAgain:
+            pendingStudioFix = { isShowingMatchReset = true }
+        case .removeOrphanedProfiles:
+            pendingStudioFix = { isShowingTagCleanup = true }
+        // Two findings have no repair tool. The audit says so on the row
+        // rather than offering a button that goes nowhere.
+        case .none:
+            pendingStudioFix = nil
+        }
     }
 
     // MARK: - Quick Actions

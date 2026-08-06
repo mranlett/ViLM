@@ -56,6 +56,22 @@ final class ActorBatchMatchModel: ObservableObject {
 
     func cancel() { cancelled = true }
 
+    /// Takes an actor off the run's lists once the operator has acted on it.
+    ///
+    /// ⚠️ Added 2026-08-06. `VideoBatchMatchModel` has always had this and the
+    /// actor screen never did, so an actor matched from the queue stayed on the
+    /// "need you to choose" list for the rest of the session — settled
+    /// everywhere except the screen that asked the question. The same defect
+    /// was reported against the studio run.
+    ///
+    /// Clears the other lists too: one record can sit in more than one, and
+    /// half-removing it is how a row comes back with no explanation.
+    func removeFromQueue(_ profileId: String) {
+        queue.removeAll { $0.profile.id == profileId }
+        noMatches.removeAll { $0.profile.id == profileId }
+        failures.removeAll { $0.profile.id == profileId }
+    }
+
     func run() async {
         guard let provider else { return }
         isRunning = true

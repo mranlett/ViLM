@@ -110,6 +110,18 @@ struct AssetsGridView: View {
     @State private var videosHiddenByFilter: Int = 0
     // Seasons the user has collapsed in the grouped series view (nil season = Int.min).
     @State private var collapsedSeasons: Set<Int> = []
+
+    /// Every studio name in the selected family — the studio itself plus each
+    /// imprint beneath it.
+    ///
+    /// ⚠️ Resolved once per selection change, not per asset. `studio_parent` is
+    /// walked to find descendants, and doing that inside the filter would run a
+    /// tree walk for every video in the library on every keystroke.
+    @State private var familyStudios: Set<String> = []
+    /// Imprints the user has collapsed in the family view.
+    @State private var collapsedImprints: Set<String> = []
+    /// The root `familyStudios` was resolved for, so the walk is not repeated.
+    @State private var resolvedFamilyRoot: String?
     // A–Z letter strip over display titles ("#" = non-letter starts).
     @State private var alphaFilter: Character? = nil
 
@@ -161,6 +173,9 @@ struct AssetsGridView: View {
     }
 
     private func recomputeDisplayedAssets() {
+        // Must run first: the filter reads `familyStudios`, so resolving it
+        // afterwards would filter one pass against the previous studio's family.
+        recomputeFamilyStudios()
         displayedAssets = computeFilteredAssets()
         filteredAssetContext = displayedAssets.map(\.id)
         // Recomputed here rather than per render: this is a second pass over
@@ -198,6 +213,11 @@ struct AssetsGridView: View {
                             .contains { TagNormalizer.identityKey($0) == wanted } ?? false
                     }
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
+                // The studio itself plus every imprint beneath it. The set is
+                // resolved once per selection (see `familyStudios`) rather than
+                // walking `studio_parent` per asset.
+                case .studioFamily:
+                    return asset.studios.contains { familyStudios.contains($0) }
                 case .series(let name): return asset.videoName == name
                 }
             }
@@ -255,6 +275,9 @@ struct AssetsGridView: View {
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
+        // Named so the title says which question is being asked — the same
+        // studio shows two different sets of videos under the two cases.
+        case .studioFamily(let name): return "\(name) & imprints"
         case .series(let name): return name
         case .smartCollection(_, let name): return name
         }
@@ -328,6 +351,8 @@ struct AssetsGridView: View {
                 } else if displayedAssets.isEmpty {
                     emptyStateView // Use the helper view here
                         .padding(.top, 100)
+                } else if showImprintSections {
+                    imprintSectionedGrid
                 } else if showSeasonSections {
                     seasonSectionedGrid
                 } else {
@@ -802,6 +827,115 @@ struct AssetsGridView: View {
         return HelpContent.allAssets.id
     }
 
+    // MARK: - Studio family grouping
+
+    /// The studio family currently selected, if any.
+    private var selectedStudioFamily: String? {
+        guard sidebarSelection.count == 1, let first = sidebarSelection.first,
+              case .studioFamily(let name) = first else { return nil }
+        return name
+    }
+
+    /// Resolves the family for the current selection.
+    ///
+    /// ⚠️ Memoised on the root. This runs from `recomputeDisplayedAssets`,
+    /// which fires on every search keystroke and filter change — re-walking
+    /// `studio_parent` each time would put a database read on the typing path.
+    ///
+    /// Falls back to the studio alone when the graph cannot be read, so the
+    /// page shows that studio's videos rather than nothing at all — an empty
+    /// grid would read as "this network has no videos", which is a stronger and
+    /// wronger claim than showing only what is certain.
+    private func recomputeFamilyStudios() {
+        guard let root = selectedStudioFamily else {
+            familyStudios = []
+            resolvedFamilyRoot = nil
+            return
+        }
+        guard root != resolvedFamilyRoot else { return }
+        resolvedFamilyRoot = root
+        // A different studio's sections have nothing to do with this one's.
+        collapsedImprints = []
+        guard let libraryURL,
+              let ids = try? LibraryStore(at: libraryURL)
+                .studioIdWithDescendants("studio:\(root)") else {
+            familyStudios = [root]
+            return
+        }
+        familyStudios = Set(ids.map {
+            $0.hasPrefix("studio:") ? String($0.dropFirst(7)) : $0
+        })
+    }
+
+    /// The family's videos, split by which studio in it released them.
+    ///
+    /// Grouped in `LibraryCore` — the ordering and the two-studio rule are
+    /// decisions, and decisions belong where they can be tested.
+    private var imprintSections: [StudioFamilyGrouping.Section] {
+        guard let root = selectedStudioFamily else { return [] }
+        return StudioFamilyGrouping.sections(assets: displayedAssets,
+                                             root: root,
+                                             family: familyStudios)
+    }
+
+    /// Split by imprint only when it adds something: more than one studio in
+    /// the family actually carries videos. A network whose imprints are all
+    /// empty is just a studio, and a single section with a header is worse than
+    /// no header.
+    private var showImprintSections: Bool {
+        selectedStudioFamily != nil && imprintSections.count > 1
+    }
+
+    private var imprintSectionedGrid: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(imprintSections) { section in
+                let isCollapsed = collapsedImprints.contains(section.id)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if isCollapsed {
+                            collapsedImprints.remove(section.id)
+                        } else {
+                            collapsedImprints.insert(section.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(section.studio)
+                            .font(.headline)
+                        if section.studio == selectedStudioFamily {
+                            // Otherwise the network's own releases and its
+                            // imprints' look like peers, and the page stops
+                            // saying which studio you are actually on.
+                            Text("this studio")
+                                .font(.caption2)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.18), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("\(section.assets.count) video\(section.assets.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.top, 8)
+                }
+                .buttonStyle(.plain)
+
+                if !isCollapsed {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(section.assets) { asset in
+                            interactiveGridItem(for: asset)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Season grouping
 
     private struct SeasonSection: Identifiable {
@@ -901,6 +1035,7 @@ struct AssetsGridView: View {
         case .actor(let name): return name
         case .tag(let name): return name
         case .studio(let name): return name
+        case .studioFamily(let name): return "\(name) & imprints"
         case .series(let name): return name
         case .smartCollection(_, let name): return name
         }

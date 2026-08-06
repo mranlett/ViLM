@@ -14,6 +14,10 @@ struct ProfileGraphHeaderView: View {
     
     @State private var entityProfile: EntityProfile?
     @State private var tagVocabulary: [TagRecord] = []
+    /// Loaded only for a studio page. `nil` means "not looked up yet"; an empty
+    /// lineage means "looked, and nothing is recorded" — two different things,
+    /// and the page says something different about each.
+    @State private var studioLineage: StudioLineage?
     @State private var isShowingEditor = false
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
@@ -52,6 +56,40 @@ struct ProfileGraphHeaderView: View {
         return uniqueEntities(from: series, excluding: currentSelectionName(for: "series"))
     }
     
+    /// Whether this page is about a company rather than a person.
+    ///
+    /// Studios reused the actor layout wholesale, so a studio page showed a
+    /// gender, a hair colour, a birth date and a career span — four fields that
+    /// describe a person and nothing else — and said nothing about the one
+    /// relationship a studio actually has.
+    private var isStudio: Bool {
+        switch currentSelection {
+        case .studio, .studioFamily: return true
+        default: return false
+        }
+    }
+
+    /// Whether the page is currently showing the imprints' videos too.
+    private var isShowingFamily: Bool {
+        if case .studioFamily = currentSelection { return true }
+        return false
+    }
+
+    /// Best-effort, and only needed when the page is a studio.
+    ///
+    /// ⚠️ Failure is silent and leaves an EMPTY lineage rather than `nil`. The
+    /// page distinguishes "not loaded" from "nothing recorded", and a failed
+    /// read that stayed `nil` would leave the block invisible instead of saying
+    /// there is no network yet.
+    private func fetchStudioLineage() {
+        guard isStudio, let libraryURL, let id = currentEntityId else {
+            studioLineage = nil
+            return
+        }
+        studioLineage = (try? LibraryStore(at: libraryURL).studioLineage(for: id))
+            ?? StudioLineage(parent: nil, siblings: [], children: [])
+    }
+
     /// Best-effort, and only needed when the page is a tag. An empty vocabulary
     /// simply means the tag reads as "Not yet classified", which is true.
     private func fetchTagVocabulary() {
@@ -114,7 +152,9 @@ struct ProfileGraphHeaderView: View {
     private var currentName: String? {
         switch currentSelection {
         case .actor(let name): return name
-        case .studio(let name): return name
+        // Both cases are the same studio — only the videos below differ — so
+        // the identity block, lineage and edit menu must behave identically.
+        case .studio(let name), .studioFamily(let name): return name
         case .tag(let name): return name
         case .series(let name): return name
         default: return nil
@@ -219,6 +259,34 @@ struct ProfileGraphHeaderView: View {
                 }
             }
 
+            // Whether this studio has been confirmed against a source.
+            //
+            // It belongs here rather than only in the gallery because it is not
+            // decoration: an unconfirmed studio cannot break the tie when a
+            // video offers both an imprint and its network (StudioResolution),
+            // and only a confirmed one may drive a folder name.
+            if isStudio, let profile = entityProfile {
+                let confirmed = profile.enrichmentState == .matched
+                HStack(spacing: 8) {
+                    Label(confirmed ? "Confirmed" : "Not yet confirmed",
+                          systemImage: confirmed ? "checkmark.seal.fill" : "questionmark.circle")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(confirmed
+                                    ? Color.accentColor.opacity(0.18)
+                                    : Color.orange.opacity(0.18),
+                                    in: Capsule())
+                        .foregroundStyle(confirmed ? Color.accentColor : .orange)
+
+                    if confirmed, let source = profile.enrichmentSource {
+                        Text("via \(source)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+
             if let profile = entityProfile, !profile.akas.isEmpty {
                 Text("AKA: \(profile.akas.joined(separator: ", "))")
                     .font(.subheadline)
@@ -235,21 +303,29 @@ struct ProfileGraphHeaderView: View {
                                 .overlay(
                                     image
                                         .resizable()
-                                        .scaledToFill(),
-                                    alignment: .top
+                                        // ⚠️ Fit, not fill, for a studio. A
+                                        // portrait fills a square well because
+                                        // a face is centred in it; a wordmark
+                                        // is wide, and filling crops it to the
+                                        // middle few letters.
+                                        .aspectRatio(contentMode: isStudio ? .fit : .fill),
+                                    alignment: isStudio ? .center : .top
                                 )
                         } placeholder: {
                             ZStack {
-                                Circle().fill(Color.secondary.opacity(0.2))
-                                Image(systemName: "person.fill").font(.system(size: 40)).foregroundColor(.secondary)
+                                portraitShape.fill(Color.secondary.opacity(0.2))
+                                Image(systemName: isStudio ? "building.2.fill" : "person.fill")
+                                    .font(.system(size: 40)).foregroundColor(.secondary)
                                 if profile.photoUrl != nil {
                                     ProgressView()
                                 }
                             }
                         }
                         .frame(width: 80, height: 80)
-                        .contentShape(Circle())
-                        .clipShape(Circle())
+                        // A logo is a wordmark, not a face. Circle-cropping one
+                        // clips the ends off the name it consists of.
+                        .contentShape(portraitShape)
+                        .clipShape(portraitShape)
                     }
                     .buttonStyle(.plain)
                     
@@ -269,14 +345,23 @@ struct ProfileGraphHeaderView: View {
                             .accessibilityLabel("Rated \(rating) of 5 stars")
                         }
 
-                        let metadataStrings: [String] = [
+                        // ⚠️ Every one of these describes a PERSON, so a studio
+                        // gets none of them. `EntityProfile` is one record for
+                        // both, and a company that has somehow acquired a hair
+                        // colour should not advertise it.
+                        //
+                        // Country is the exception worth keeping: a studio has
+                        // one, and it means the same thing.
+                        let metadataStrings: [String] = (isStudio ? [
+                            profile.countryOfOrigin.map { "Country: \($0)" }
+                        ] : [
                             profile.gender.map { "Gender: \($0)" },
                             profile.hairColor.map { "Hair Color: \($0)" },
                             // resolvedBirthYear rather than birthYear: a record
                             // that carries only a full date still shows a year.
                             profile.resolvedBirthYear.map { "Birth Year: \($0)" },
                             profile.countryOfOrigin.map { "Country: \($0)" }
-                        ].compactMap { $0 }
+                        ]).compactMap { $0 }
 
                         if !metadataStrings.isEmpty {
                             Text(metadataStrings.joined(separator: " • "))
@@ -291,7 +376,10 @@ struct ProfileGraphHeaderView: View {
                         // Every part of it is computed from stored years, so the
                         // "years active" figure moves on its own each year
                         // instead of going stale.
-                        if let career = profile.careerDisplay {
+                        //
+                        // ⚠️ Never for a studio: it reads "aged 24 at career
+                        // start" off fields that describe a person.
+                        if !isStudio, let career = profile.careerDisplay {
                             Label(career, systemImage: "calendar")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -345,13 +433,24 @@ struct ProfileGraphHeaderView: View {
                 }
             }
             
-            if !relatedStudios.isEmpty {
+            if isStudio {
+                studioLineageSection
+            }
+
+            // ⚠️ Not on a studio page. There it listed studios CO-OCCURRING on
+            // the same videos, which after Fix Duplicate Studios is very nearly
+            // a definition of the two-studio defect — so it presented a data
+            // error as a relationship. Lineage above is the real answer.
+            if !isStudio, !relatedStudios.isEmpty {
                 tagSection(title: "Studios", items: relatedStudios, color: .purple) { item in
                     .studio(item)
                 }
             }
             if !relatedActors.isEmpty {
-                tagSection(title: "Co-Actors", items: relatedActors, color: .blue) { item in
+                // "Co-Actors" is true on an actor page and wrong on a studio
+                // page: these people are not the studio's co-anything.
+                tagSection(title: isStudio ? "Actors" : "Co-Actors",
+                           items: relatedActors, color: .blue) { item in
                     .actor(item)
                 }
             }
@@ -374,6 +473,12 @@ struct ProfileGraphHeaderView: View {
         .padding(.horizontal)
         .onAppear { fetchProfile() }
         .onChange(of: currentSelection) { old, new in fetchProfile() }
+        // ⚠️ Match All Studios writes `studio_parent` and posts this. Without
+        // it, a studio page open at the time keeps saying "no network recorded
+        // yet" after the run that recorded one — which is exactly the message
+        // the empty state exists to avoid being wrong about.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSNotification.Name("ReloadAssets"))) { _ in fetchProfile() }
         .sheet(isPresented: $isShowingEditor) {
             if let id = currentEntityId {
                 EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: ownerRawProfile(for: id), onSave: saveProfile)
@@ -406,6 +511,100 @@ struct ProfileGraphHeaderView: View {
         }
     }
     
+    /// The one relationship a studio genuinely owns: who owns it, what it owns,
+    /// and what else its network owns.
+    ///
+    /// ⚠️ Degrades to a sentence rather than an empty box. `studio_parent`
+    /// starts unpopulated, so "nothing recorded" is the common state, and three
+    /// blank groups would read as a broken page instead of an unfinished
+    /// library.
+    @ViewBuilder
+    private var studioLineageSection: some View {
+        if let lineage = studioLineage {
+            if lineage.isEmpty {
+                Label("No network recorded yet — Match All Studios can find it.",
+                      systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let parent = lineage.parent {
+                        lineageRow(title: "Part of", relatives: [parent], color: .purple)
+                    }
+                    if !lineage.children.isEmpty {
+                        lineageRow(title: "Imprints", relatives: lineage.children, color: .purple)
+                        includeImprintsToggle(lineage)
+                    }
+                    if !lineage.siblings.isEmpty {
+                        lineageRow(title: "Alongside", relatives: lineage.siblings, color: .purple)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Switches the grid below between this studio's own releases and the whole
+    /// family's, split by imprint.
+    ///
+    /// ⚠️ Shown only when the studio actually has imprints. On a leaf imprint
+    /// it would be a control that visibly does nothing, and the lineage block
+    /// is where the operator has just been told there are none.
+    ///
+    /// Flips the pinned selection rather than filtering here: the grid owns
+    /// what it shows, and this view only says which question to ask.
+    @ViewBuilder
+    private func includeImprintsToggle(_ lineage: StudioLineage) -> some View {
+        if let name = currentName {
+            let total = lineage.children.reduce(0) { $0 + $1.videoCount }
+            Toggle(isOn: Binding(
+                get: { isShowingFamily },
+                set: { on in
+                    sidebarSelection = [on ? .studioFamily(name) : .studio(name)]
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Include imprints")
+                        .font(.subheadline)
+                    Text("\(total) more video\(total == 1 ? "" : "s") across \(lineage.children.count) imprint\(lineage.children.count == 1 ? "" : "s"), grouped separately below")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .padding(.top, 2)
+        }
+    }
+
+    /// A lineage row. Each entry carries its video count, because a bare list
+    /// of company names is trivia — the count is what makes it worth a tap.
+    private func lineageRow(title: String,
+                            relatives: [StudioLineage.Relative],
+                            color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
+            FlowLayout(spacing: 6) {
+                ForEach(relatives) { relative in
+                    let label = "\(relative.name) · \(relative.videoCount)"
+                    #if os(iOS)
+                    TagBubble(label: label, color: color,
+                              navRoute: .entityProfile(category: "studio",
+                                                       name: relative.name))
+                    #else
+                    TagBubble(label: label, color: color, onPivot: {
+                        sidebarSelection = [.studio(relative.name)]
+                    })
+                    #endif
+                }
+            }
+        }
+    }
+
+    /// Circle for a face, rounded rectangle for a logo.
+    private var portraitShape: AnyShape {
+        isStudio ? AnyShape(RoundedRectangle(cornerRadius: 10)) : AnyShape(Circle())
+    }
+
     struct IdentifiableString: Identifiable {
         let id: String
     }
@@ -680,16 +879,21 @@ struct ProfileGraphHeaderView: View {
     
     // Framed as an invitation to explore, not a set of active filters.
     private var exploreSubtitle: String {
+        // A studio page no longer lists other studios — it lists its network
+        // and its imprints — so promising "studios" here would describe a
+        // section that is deliberately not there.
+        let kinds = isStudio ? "Network, imprints, actors, and tags"
+                             : "Actors, studios, and tags"
         if let name = currentName, !name.isEmpty {
-            return "Actors, studios, and tags connected to \(name)"
+            return "\(kinds) connected to \(name)"
         }
-        return "Actors, studios, and tags"
+        return kinds
     }
     
     private var currentEntityId: String? {
         switch currentSelection {
         case .actor(let name): return "actor:\(name)"
-        case .studio(let name): return "studio:\(name)"
+        case .studio(let name), .studioFamily(let name): return "studio:\(name)"
         case .tag(let name): return "tag:\(name)"
         case .series(let name): return "series:\(name)"
         default: return nil
@@ -698,13 +902,14 @@ struct ProfileGraphHeaderView: View {
     
     private var isEditableEntity: Bool {
         switch currentSelection {
-        case .actor, .studio: return true
+        case .actor, .studio, .studioFamily: return true
         default: return false
         }
     }
     
     private func fetchProfile() {
         fetchTagVocabulary()
+        fetchStudioLineage()
         guard libraryURL != nil, let id = currentEntityId else { return }
         do {
             // DISPLAY is the merged view across every open library that has
