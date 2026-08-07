@@ -272,6 +272,63 @@ extension LibraryStore {
         }
     }
 
+    /// The missing-identity worklist, with a route back for each entry.
+    ///
+    /// ⚠️ Counts videos across BOTH representations. Most of a library is still
+    /// carried by `actor:` tag strings, so reading edges alone would report
+    /// "0 videos" for nearly every gap — and "0 videos" is exactly what makes
+    /// one look unrecoverable. The screen would then tell the operator to fix
+    /// by hand what a single refresh would have fixed.
+    public func identityGaps() throws -> IdentityGapReport {
+        let (entities, _) = try nodesMatchedWithoutAnEdge()
+        guard !entities.isEmpty else { return IdentityGapReport(gaps: []) }
+        let wanted = Set(entities)
+
+        var videos: [String: Set<UUID>] = [:]
+        var matchedVideos: [String: Set<UUID>] = [:]
+
+        // Edges.
+        let performerRows: [(String, String)] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT performer_id, video_id FROM video_performer")
+                .map { ($0["performer_id"], $0["video_id"]) }
+        }
+        let studioRows: [(String, String)] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT studio_id, video_id FROM video_studio")
+                .map { ($0["studio_id"], $0["video_id"]) }
+        }
+        let matchedIds: Set<String> = try dbQueue.read { db in
+            Set(try String.fetchAll(db, sql:
+                "SELECT id FROM assets WHERE enrichment_state = 'matched'"))
+        }
+        for (node, video) in performerRows + studioRows where wanted.contains(node) {
+            guard let uuid = UUID(uuidString: video) else { continue }
+            videos[node, default: []].insert(uuid)
+            if matchedIds.contains(video) { matchedVideos[node, default: []].insert(uuid) }
+        }
+
+        // Strings, which are still where most of the library lives.
+        for asset in try fetchAllAssets() {
+            let isMatched = asset.enrichmentState == .matched
+            for name in Set(asset.actors) {
+                let id = "actor:\(name)"
+                guard wanted.contains(id) else { continue }
+                videos[id, default: []].insert(asset.id)
+                if isMatched { matchedVideos[id, default: []].insert(asset.id) }
+            }
+            for name in Set(asset.studios) {
+                let id = "studio:\(name)"
+                guard wanted.contains(id) else { continue }
+                videos[id, default: []].insert(asset.id)
+                if isMatched { matchedVideos[id, default: []].insert(asset.id) }
+            }
+        }
+
+        return IdentityGapAudit.report(.init(
+            missing: entities,
+            videosByNode: videos.mapValues(\.count),
+            matchedVideosByNode: matchedVideos.mapValues(\.count)))
+    }
+
     /// Creates match edges from the identity columns, for everything that has
     /// one and no edge yet.
     ///

@@ -99,6 +99,7 @@ struct ContentView: View {
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
+    @State private var isShowingIdentityGaps = false
     @State private var isShowingTagCaseCleanup = false
     @State private var isShowingReadFilenames = false
     @State private var isShowingBatchMatch = false
@@ -253,6 +254,7 @@ struct ContentView: View {
                     onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                     onAliasSplits: { isShowingAliasSplits = true },
                     onRefreshMatched: { isShowingVideoRefresh = true },
+                    onIdentityGaps: { isShowingIdentityGaps = true },
                     onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                     onReadFilenames: { isShowingReadFilenames = true },
                     onBatchMatchVideos: { isShowingBatchMatch = true },
@@ -413,6 +415,15 @@ struct ContentView: View {
                     TagCaseCleanupView(libraryURL: url) {
                         reloadUnionAssets()
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingIdentityGaps) {
+                if let url = selectedLibraryURL {
+                    // ⭐ Hands the operator straight to the tool that fixes the
+                    // recoverable half, rather than naming it and leaving them
+                    // to find it.
+                    IdentityGapView(libraryURL: url,
+                                    onRefreshVideos: { isShowingVideoRefresh = true })
                 }
             }
             .sheet(isPresented: $isShowingVideoRefresh) {

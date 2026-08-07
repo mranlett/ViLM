@@ -22,6 +22,7 @@ struct SettingsView: View {
     var onActorPhotoCleanup: (() -> Void)?
     var onAliasSplits: (() -> Void)?
     var onRefreshMatched: (() -> Void)?
+    var onIdentityGaps: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
@@ -180,6 +181,10 @@ struct SettingsView: View {
                     // Cross-record checks: a video's date against a performer's
                     // birth date or recorded career. Finds data that is WRONG,
                     // where the others find data that is missing.
+                    toolButton("Missing Identities",
+                               icon: "person.crop.circle.badge.questionmark",
+                               action: onIdentityGaps)
+                        .disabled(session.isFederated)
                     toolButton("Impossible Data",
                                icon: "exclamationmark.magnifyingglass", action: onGraphAudit)
                         .disabled(session.isFederated)
