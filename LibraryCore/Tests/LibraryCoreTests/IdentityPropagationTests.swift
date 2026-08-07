@@ -60,15 +60,24 @@ final class IdentityPropagationTests: XCTestCase {
         XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.method, .linked)
     }
 
-    /// The performer becomes properly matched, so no later tool asks again.
-    func testAnIdentifiedPerformerIsNoLongerMissingAnEdge() throws {
+    /// The performer gains a usable identity — and stays on the enrichment
+    /// worklist, because nothing has fetched their bio or photos yet.
+    ///
+    /// ⚠️ This test originally asserted `enrichmentState == .matched`, which
+    /// was wrong: `skipReason` skips that state, so the actor matcher would
+    /// have passed over every performer a video identified, leaving them
+    /// permanently without details. Identity and enrichment are different
+    /// questions — see `IdentityIsNotEnrichmentTests`.
+    func testAnIdentifiedPerformerGainsAUsableIdentity() throws {
         try actor("Alice"); try actor("Bob")
 
         try store.propagateIdentities(cast, source: "A Source", videoMethod: .fingerprint)
 
-        XCTAssertTrue(try store.nodesMatchedWithoutAnEdge().entities.isEmpty)
-        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Alice")?.enrichmentState,
-                       .matched)
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Alice"))
+        XCTAssertEqual(profile.enrichmentSourceId, "p-1",
+                       "the next lookup is a fetch, not a search")
+        XCTAssertNil(profile.enrichmentState, "no lookup has run for the ACTOR")
+        XCTAssertFalse(try store.matches(forEntity: "actor:Alice").isEmpty)
     }
 
     // MARK: - 🚨 Only from a strong match
@@ -211,5 +220,101 @@ final class SettledMatchIdentityTests: XCTestCase {
             source: "A Source", videoMethod: .title), 0)
         XCTAssertFalse(MatchMethod.title.propagatesIdentity)
         XCTAssertFalse(MatchMethod.backfill.propagatesIdentity)
+    }
+}
+
+/// 🚨 Identity is not enrichment.
+///
+/// The operator's expectation: a video match hands down the performer's unique
+/// id, so the bulk actor match can fetch them directly with no disambiguation.
+/// Correct — but the first implementation broke the second half of it.
+///
+/// `confirmEntityMatch` sets `enrichmentState = .matched`, which means "a
+/// lookup ran and concluded", and `ActorBatchPolicy.skipReason` skips anything
+/// in that state. So a performer identified by a video would have been SKIPPED
+/// by Match All Actors: identified, and permanently without a bio, photos,
+/// birth date or career span.
+final class IdentityIsNotEnrichmentTests: XCTestCase {
+
+    private var directory: URL!
+    private var store: LibraryStore!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory,
+                                                withIntermediateDirectories: true)
+        store = try LibraryStore(at: directory)
+    }
+
+    override func tearDownWithError() throws {
+        store = nil
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func actor(_ name: String) throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:\(name)"))
+    }
+
+    /// ⭐ The identity lands, and the actor stays on the enrichment worklist.
+    func testAPropagatedIdentityDoesNotMarkThePerformerEnriched() throws {
+        try actor("Alice")
+
+        try store.propagateIdentities([ProposedCredit(name: "Alice", sourceId: "p-1")],
+                                      source: "A Source", videoMethod: .fingerprint)
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Alice"))
+        XCTAssertEqual(profile.enrichmentSourceId, "p-1", "the identity is recorded")
+        XCTAssertNil(profile.enrichmentState,
+                     "but no lookup has run, so nothing may claim one did")
+        XCTAssertNil(ActorBatchPolicy.skipReason(for: profile),
+                     "so the actor matcher still processes them")
+    }
+
+    /// The same for the settled-match recovery path.
+    func testRecoveredIdentitiesAlsoLeaveTheStateAlone() throws {
+        try actor("Alice")
+
+        try store.propagateIdentitiesFromSettledMatch(
+            [ProposedCredit(name: "Alice", sourceId: "p-1")], source: "A Source")
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Alice"))
+        XCTAssertEqual(profile.enrichmentSourceId, "p-1")
+        XCTAssertNil(profile.enrichmentState)
+    }
+
+    /// The match edge is still written — the identity is a real graph fact.
+    func testTheIdentityEdgeIsStillRecorded() throws {
+        try actor("Alice")
+
+        try store.propagateIdentities([ProposedCredit(name: "Alice", sourceId: "p-1")],
+                                      source: "A Source", videoMethod: .fingerprint)
+
+        XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.method, .linked)
+    }
+
+    /// ⚠️ A performer the operator has genuinely matched keeps that state — the
+    /// identity path must not downgrade a real enrichment.
+    func testAnAlreadyEnrichedPerformerKeepsTheirState() throws {
+        var p = EntityProfile(id: "actor:Alice")
+        p.enrichmentState = .matched
+        p.enrichmentSourceId = "chosen"
+        try store.saveEntityProfile(p)
+
+        try store.propagateIdentities([ProposedCredit(name: "Alice", sourceId: "p-1")],
+                                      source: "A Source", videoMethod: .fingerprint)
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Alice"))
+        XCTAssertEqual(profile.enrichmentState, .matched)
+        XCTAssertEqual(profile.enrichmentSourceId, "chosen")
+    }
+
+    /// A studio confirmed BY a video match is different: that IS a conclusion
+    /// about the studio, so it keeps setting the state.
+    func testConfirmingAStudioStillMarksItMatched() throws {
+        try store.confirmStudio("Example Network", source: "A Source", sourceId: "s-1")
+
+        XCTAssertEqual(try store.fetchEntityProfile(for: "studio:Example Network")?
+                        .enrichmentState, .matched)
     }
 }

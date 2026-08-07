@@ -215,28 +215,45 @@ final class ActorBatchMatchModel: ObservableObject {
         let name = displayName(profile)
         guard !name.isEmpty else { return .skipped(reason: "no name") }
 
-        let candidates: [PluginCandidate]
-        do {
-            candidates = try await provider.search(name: name)
-        } catch {
-            return .failed(friendly(error))
-        }
-        guard !candidates.isEmpty else { return .noMatch }
+        // ⭐ An identity the library already holds settles it outright.
+        //
+        // 🚨 This used to search by name unconditionally, so a performer whose
+        // id was already known — because a matched video's source record linked
+        // straight to them — was searched for again and re-disambiguated.
+        // Where two people share a name, that re-guess could land on the wrong
+        // one AFTER the right one was already established.
+        //
+        // A known id is a fetch, not a search: no candidates, nothing to
+        // disambiguate, and nothing to queue.
+        let resolvedId: String
+        if let known = profile.enrichmentSourceId?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !known.isEmpty {
+            resolvedId = known
+        } else {
+            let candidates: [PluginCandidate]
+            do {
+                candidates = try await provider.search(name: name)
+            } catch {
+                return .failed(friendly(error))
+            }
+            guard !candidates.isEmpty else { return .noMatch }
 
         // ⚠️ More than one is a QUESTION, not a match. Two people share a name
         // often enough that picking the first is how a bio lands on the wrong
         // person — and the match would then be recorded, so nothing brings it
         // back for review.
-        guard ActorBatchPolicy.isDecisive(candidateCount: candidates.count),
-              let hit = candidates.first else {
-            queue.append(QueuedActor(profile: profile, candidates: candidates,
-                                     libraryURL: libraryURL))
-            return .queued(candidateCount: candidates.count)
+            guard ActorBatchPolicy.isDecisive(candidateCount: candidates.count),
+                  let hit = candidates.first else {
+                queue.append(QueuedActor(profile: profile, candidates: candidates,
+                                         libraryURL: libraryURL))
+                return .queued(candidateCount: candidates.count)
+            }
+            resolvedId = hit.id
         }
 
         let proposal: ActorMetadataProposal
         do {
-            proposal = try await provider.fetch(actorId: hit.id)
+            proposal = try await provider.fetch(actorId: resolvedId)
         } catch {
             return .failed(friendly(error))
         }
@@ -249,7 +266,7 @@ final class ActorBatchMatchModel: ObservableObject {
                                            accepting: fields)
         // The chosen record's id IS the match. Keeping it turns every later
         // lookup from a re-search by name into a fetch.
-        merged.enrichmentSourceId = hit.id
+        merged.enrichmentSourceId = resolvedId
         appliedProfile = merged
         return .applied(fields: Array(fields))
     }

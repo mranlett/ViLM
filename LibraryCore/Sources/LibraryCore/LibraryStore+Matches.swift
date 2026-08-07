@@ -81,6 +81,30 @@ extension LibraryStore {
         }
     }
 
+    /// Records WHO a node is, without claiming its metadata has been fetched.
+    ///
+    /// 🚨 The distinction that matters. `confirmEntityMatch` sets
+    /// `enrichmentState = .matched`, which means "a lookup ran and concluded" —
+    /// and `ActorBatchPolicy.skipReason` skips anything in that state. So
+    /// learning a performer's identity from a video match, and recording it as
+    /// `.matched`, would make `Match All Actors` skip them: identified, and
+    /// permanently without a bio, photos, birth date or career span.
+    ///
+    /// ⭐ Identity and enrichment are different questions. Knowing WHICH record
+    /// a performer is does not mean their details have been downloaded — it
+    /// means the next lookup can go straight to it.
+    func recordDiscoveredIdentity(_ entityId: String, source: String,
+                                  sourceId: String, method: MatchMethod) throws {
+        guard var profile = try fetchEntityProfile(for: entityId) else { return }
+        if (profile.enrichmentSourceId ?? "").isEmpty {
+            profile.enrichmentSourceId = sourceId
+            try saveEntityProfile(profile)
+        }
+        try recordMatch(NodeMatch(nodeId: entityId, source: source,
+                                  sourceId: sourceId, method: method),
+                        isVideo: false)
+    }
+
     /// The same for a video.
     public func confirmVideoMatch(_ videoId: UUID, source: String,
                                   sourceId: String?, method: MatchMethod) throws {
@@ -121,8 +145,11 @@ extension LibraryStore {
             guard try matches(forEntity: entityId)
                     .first(where: { $0.source == source }) == nil else { continue }
 
-            try confirmEntityMatch(entityId, source: source,
-                                   sourceId: sourceId, method: .linked)
+            // ⚠️ Identity only — the state is left alone. Marking these
+            // `.matched` would make `Match All Actors` skip them, so a
+            // performer identified by a video would never gain a bio or photos.
+            try recordDiscoveredIdentity(entityId, source: source,
+                                         sourceId: sourceId, method: .linked)
             written += 1
         }
         return written
@@ -160,8 +187,11 @@ extension LibraryStore {
             guard known.contains(entityId) else { continue }
             guard try matches(forEntity: entityId)
                     .first(where: { $0.source == source }) == nil else { continue }
-            try confirmEntityMatch(entityId, source: source,
-                                   sourceId: sourceId, method: .linked)
+            // ⚠️ Identity only — the state is left alone. Marking these
+            // `.matched` would make `Match All Actors` skip them, so a
+            // performer identified by a video would never gain a bio or photos.
+            try recordDiscoveredIdentity(entityId, source: source,
+                                         sourceId: sourceId, method: .linked)
             written += 1
         }
         return written
