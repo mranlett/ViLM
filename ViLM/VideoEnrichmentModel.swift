@@ -461,6 +461,28 @@ final class VideoEnrichmentModel: ObservableObject {
         matchRoute = "Reviewing the record this video is matched to"
         matchMethod = nil
         await fetchAndReview(sourceId, provider: provider)
+
+        // ⭐ The picture, which is what actually settles whether this is the
+        // right video. `artwork(videoId:)` has been in the provider protocol —
+        // and implemented — the whole time, and core never called it.
+        //
+        // ⚠️ Fetched AFTER the review is on screen, not before. It is a second
+        // request, and the operator should be reading the disagreement while it
+        // arrives rather than waiting on an image to see any of it.
+        guard case .reviewing = phase else { return }
+        guard let art = try? await provider.artwork(videoId: sourceId), !art.isEmpty else { return }
+        let urls = art.map(\.url)
+        // ⚠️ nil rather than "". The card renders `if let subtitle`, so an
+        // empty string is a blank line under the title rather than no line.
+        let details = [proposal?.studio.value, proposal?.releaseDate.value]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        chosenCandidate = PluginCandidate(
+            id: sourceId,
+            title: proposal?.title.value ?? proposal?.seriesTitle.value ?? asset.fileName,
+            subtitle: details.isEmpty ? nil : details,
+            thumbnailURL: urls.first,
+            fullImageURL: urls.first,
+            imageURLs: urls)
     }
 
     func choose(_ candidate: PluginCandidate) async {
