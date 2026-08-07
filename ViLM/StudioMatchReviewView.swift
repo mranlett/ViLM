@@ -341,7 +341,8 @@ struct StudioMatchReviewView: View {
         // dangling parent — one of the defects Studio Health reports.
         if accepted.contains(StudioBatchPolicy.Field.parent),
            let parent = proposal.parentName.value, !parent.isEmpty {
-            try? store.confirmStudio(parent, source: provider?.displayName)
+            try? store.confirmStudio(parent, source: provider?.displayName,
+                                     sourceId: proposal.parentSourceId.value)
             try? store.setStudioParent("studio:\(parent)", forStudio: updated.id)
         }
 

@@ -555,14 +555,20 @@ final class VideoEnrichmentModel: ObservableObject {
                                                               asset: asset),
            let url = LibrarySession.shared.url(for: asset.id) {
             let store = try? LibraryStore(at: url)
-            try? store?.confirmStudio(studio, source: providerName)
+            try? store?.confirmStudio(
+                studio, source: providerName,
+                sourceId: StudioResolution.isSameStudio(studio, proposal.studio.value ?? "")
+                    ? proposal.studioSourceId.value
+                    : (StudioResolution.isSameStudio(studio, proposal.studioParent.value ?? "")
+                        ? proposal.studioParentSourceId.value : nil))
 
             // ⚠️ The hierarchy is recorded whichever name landed on the video.
             // It is a fact about the two studios, not about this video's
             // choice — and it is the only thing that lets browsing a network
             // find scenes filed under its imprints.
             if let pair = studioParentPair {
-                try? store?.confirmStudio(pair.parent, source: providerName)
+                try? store?.confirmStudio(pair.parent, source: providerName,
+                                          sourceId: proposal.studioParentSourceId.value)
                 // Cycles are refused by the store; a source that disagrees with
                 // itself about which way a hierarchy runs must not be able to
                 // wedge the graph.

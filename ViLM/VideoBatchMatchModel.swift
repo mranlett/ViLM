@@ -315,7 +315,8 @@ final class VideoBatchMatchModel: ObservableObject {
             // re-matched.
             if let child = fetched.studio.value, let parent = fetched.studioParent.value,
                !StudioResolution.isSameStudio(child, parent) {
-                try? store.confirmStudio(parent, source: provider.displayName)
+                try? store.confirmStudio(parent, source: provider.displayName,
+                                         sourceId: fetched.studioParentSourceId.value)
                 // Cycles are refused by the store, so a source disagreeing with
                 // itself about which way a hierarchy runs cannot wedge it.
                 try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")
@@ -332,7 +333,16 @@ final class VideoBatchMatchModel: ObservableObject {
             if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
                                                                   accepting: fields,
                                                                   asset: asset) {
-                try? store.confirmStudio(studio, source: provider.displayName)
+                // ⚠️ The id only where the confirmed name IS the imprint the
+                // source named. `confirmedStudio` can return the parent, and
+                // stamping the imprint's id onto the network would point a
+                // confirmed match at the wrong studio.
+                try? store.confirmStudio(
+                    studio, source: provider.displayName,
+                    sourceId: StudioResolution.isSameStudio(studio, proposal.studio.value ?? "")
+                        ? proposal.studioSourceId.value
+                        : (StudioResolution.isSameStudio(studio, proposal.studioParent.value ?? "")
+                            ? proposal.studioParentSourceId.value : nil))
             }
 
             guard !fields.isEmpty else {

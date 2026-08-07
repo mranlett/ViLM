@@ -2253,13 +2253,39 @@ public class LibraryStore {
     /// already had — bio, links, a source id from a richer lookup — and only
     /// gains the verdict. A studio already `matched` is left entirely alone, so
     /// re-accepting the same studio on a second video costs a read.
-    public func confirmStudio(_ name: String, source: String?) throws {
+    /// Marks a studio confirmed, recording the source's own id for it.
+    ///
+    /// 🚨 `sourceId` used to be absent entirely. A studio confirmed as a side
+    /// effect of matching a video got its state, its source and a timestamp —
+    /// and not the one thing that makes a LATER lookup possible. The value was
+    /// available the whole time: the proposal carries `studioSourceId` and the
+    /// review already resolves it; it was dropped at this boundary.
+    ///
+    /// 🚨 That was worse than a missing field, because `StudioBatchPolicy`
+    /// skips anything already `.matched` — so the only tool that would have
+    /// supplied the id refused to look at those studios. The door closed behind
+    /// them. Hence the second change: an already-matched studio with NO id may
+    /// still learn one.
+    ///
+    /// ⚠️ It may never learn a DIFFERENT one. Replacing an id this library
+    /// holds would silently re-point a confirmed match at another studio, which
+    /// is the overrule every other write path here refuses.
+    public func confirmStudio(_ name: String, source: String?,
+                              sourceId: String? = nil) throws {
         let id = "studio:\(name)"
         var profile = try fetchEntityProfile(for: id) ?? EntityProfile(id: id)
-        guard profile.enrichmentState != .matched else { return }
+
+        let missingId = profile.enrichmentSourceId?.isEmpty ?? true
+        if profile.enrichmentState == .matched {
+            guard missingId, let sourceId, !sourceId.isEmpty else { return }
+            profile.enrichmentSourceId = sourceId
+            try saveEntityProfile(profile)
+            return
+        }
 
         profile.enrichmentState = .matched
         profile.enrichmentSource = source
+        if let sourceId, !sourceId.isEmpty { profile.enrichmentSourceId = sourceId }
         profile.enrichmentCheckedAt = Date()
         try saveEntityProfile(profile)
     }

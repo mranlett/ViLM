@@ -300,10 +300,52 @@ enum HelpContent {
                   description: "A one-time cleanup for older videos that have season/episode info typed as plain text (like \"2 Episode 12\") instead of in the dedicated Season and Episode fields. It reads that old text, guesses the season and episode numbers, and lets you review and confirm before anything changes."),
             .init(label: "Tag & Actor Cleanup",
                   description: "Merges duplicate tags or actors (e.g. combining \"Sci-Fi\" and \"SciFi\"), and finds actor/tag/studio profiles that no longer have any videos attached, so you can remove them."),
-            .init(label: "Export Actor Library For Merge",
-                  description: "Packages up all of your actors' bios, details, and photos into a single file you can save anywhere (like iCloud Drive). Meant for moving enriched actor information between two copies of your library — for example, a \"portable\" library you've been working on and your main one."),
-            .init(label: "Import and Merge Actor Library",
-                  description: "Reads a file created by \"Export Actor Library For Merge\" and merges it into this library. Actors that don't exist yet are added. Actors that already exist have their bio and details fully replaced by the imported version, but photos are only ever added — you'll never lose a photo you already had, and it shows you exactly what will change before anything is applied."),
+            .init(label: "Back Up & Restore",
+                  description: "Saves a copy of your library's catalog — every video's details, your actors, tags, playlists and scene markers — to a file you choose, and restores from one later. It backs up the records, not the video files themselves, so a backup is small and quick. Restoring merges rather than replaces, so a backup taken before a mistake can be used to recover without discarding everything you've done since."),
+
+            // MARK: Add Metadata — the numbered run, in order
+            .init(label: "Read Filenames Into Catalogue",
+                  description: "Step 1. Reads what your filenames already say — actors, series, season and episode, studio, tags — and fills those into each video's fields. Filenames usually know more than the records do, so doing this first gives every later step far more to work with. It shows you what it found and changes nothing until you accept it."),
+            .init(label: "Match All Videos",
+                  description: "Step 2. Goes through your library looking each video up against the metadata source, and fills in title, release date, studio and cast. It tries the video's visual fingerprint first, which identifies a file by what it looks like rather than what it's called; where that finds nothing it falls back to searching by cast and then by title. Anything it can't settle on its own is queued for you to decide rather than guessed at."),
+            .init(label: "Match All Actors",
+                  description: "Step 3. Looks up each actor and fills in their bio, details and photos. An actor whose name matches more than one person is never guessed — those are queued for you, because two people genuinely do share a name and picking wrong merges two careers into one profile."),
+            .init(label: "Match All Studios",
+                  description: "Step 4. Looks up each studio and fills in its details, and records which network owns it where the source knows. Like actors, a studio name matching more than one result is queued rather than guessed — two networks can use the same imprint name."),
+
+            // MARK: Fix Problems
+            .init(label: "Repair Tag Spelling",
+                  description: "Finds tags stored under two spellings that differ only by case — \"pov\" and \"POV\" — and merges them into the one you choose. It also offers the metadata source's own spelling where that differs from yours, as a suggestion you can decline. You pick which spelling survives; nothing is merged until you accept it."),
+            .init(label: "Fix Duplicate Studios",
+                  description: "The same thing for studios: finds studios recorded under two spellings of one name and merges them, keeping the spelling you choose. Every video filed under the losing spelling moves across."),
+            .init(label: "Remove Duplicate Actor Photos",
+                  description: "Finds photos stored more than once for the same actor — usually the result of merging libraries or importing twice — and removes the extra copies. It compares the picture contents rather than filenames, so a photo saved under two names is still recognised as one."),
+            .init(label: "Remove Orphaned Profiles",
+                  description: "Finds actor, tag and studio profiles that no longer have any videos attached, so you can delete the ones left behind after removing videos. Nothing is deleted until you choose it."),
+            .init(label: "Classify Tags",
+                  description: "Every tag needs to say what it describes: something about a video, or something about a performer. \"Outdoor\" describes a scene; \"Blonde\" describes a person. Until a tag is classified the app won't attach it to anything, because attaching a performer's trait to a video — or the reverse — puts the fact on the wrong record. This screen lists the unclassified ones and lets you say which is which."),
+
+            // MARK: Build the Graph
+            .init(label: "Connect the Graph",
+                  description: "Your videos, actors, studios and tags start out connected by text — a video carries the words \"actor:Someone\". This turns those words into real connections, so the app can answer questions text can't: which performers share a studio but have never shared a video, or which videos belong to a network through one of its imprints. It reports what it connected and what it couldn't — a tag it can't attach is one that hasn't been classified yet."),
+
+            // MARK: Find Problems
+            .init(label: "Find Duplicate Videos",
+                  description: "Looks for the same video saved twice, matched by what the footage looks like rather than by filename or size — so it catches re-encodes and re-downloads that a size comparison misses. It shows both copies side by side so you can see what each one is before deciding which to keep."),
+            .init(label: "Studio Health",
+                  description: "Checks the studio hierarchy for problems: a video filed under two studios at once, an imprint pointing at a network that doesn't exist, or a loop where two studios each own the other. Each finding links straight to the record so you can fix it."),
+            .init(label: "Impossible Data",
+                  description: "Finds records that contradict each other — things no single record can reveal, only two compared. A video released before one of its cast was born is certain evidence something is wrong. The others are softer: an implausible age at release, or a video outside an actor's recorded working years, which is usually the recorded career being incomplete rather than the video being wrong. The screen keeps the certain findings separate from the suggestions, and it reports rather than repairs — it can't know which of the two records is the wrong one."),
+
+            // MARK: Move the Graph Between Libraries
+            .init(label: "Export Graph",
+                  description: "Packages your actors' bios, details and photos — plus your studios, your tag vocabulary and the connections between them — into a single file you can save anywhere. Meant for carrying work between two copies of your library, such as a portable one and your main one. Videos are deliberately left out: a video belongs to the library holding its file."),
+            .init(label: "Import & Merge Graph",
+                  description: "Reads a file made by Export Graph and merges it in. It only ever adds: an actor, studio or tag you don't have is created, and one you do have keeps what it already knows. Photos are added and never removed. Where the two libraries genuinely disagree — the same tag classified two ways, or an imprint placed under a different network — nothing is changed and the disagreement is listed, so you learn about it instead of one side quietly winning. You see the whole plan before anything is applied."),
+
+            // MARK: Maintenance
+            .init(label: "Match Again",
+                  description: "Clears the \"already matched\" mark from your videos so they're looked up afresh next time you run a match. Useful after the metadata source has improved, or if an earlier run recorded matches you don't trust. It clears the status only — your videos and everything filled in on them are untouched — but it cannot be undone, and the next full match will take as long as the first."),
         ]
     )
 }

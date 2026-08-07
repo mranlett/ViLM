@@ -139,7 +139,7 @@ final class StudioBatchPolicyTests: XCTestCase {
         XCTAssertEqual(
             StudioBatchPolicy.parentDisposition(existing: nil,
                                                 proposal: proposal(parent: "Example Network")),
-            .recorded(name: "Example Network"))
+            .recorded(name: "Example Network", sourceId: nil))
     }
 
     /// ⚠️ Reported, never overwritten. Which company owns an imprint is a fact
@@ -189,7 +189,7 @@ final class StudioBatchPolicyTests: XCTestCase {
 
     func testTheReportCountsParentsSeparatelyFromFields() {
         var report = StudioBatchReport()
-        report.record(.applied(fields: ["bio"], parent: .recorded(name: "Example Network")))
+        report.record(.applied(fields: ["bio"], parent: .recorded(name: "Example Network", sourceId: nil)))
         report.record(.applied(fields: ["bio", "akas"],
                                parent: .conflict(existing: "A", offered: "B")))
         report.record(.applied(fields: [], parent: .unchanged))

@@ -22,7 +22,12 @@ import Foundation
 /// A studio's parent, as an unattended run is allowed to treat it.
 public enum ParentDisposition: Equatable, Sendable {
     /// The source named a network and the library had none. Recorded.
-    case recorded(name: String)
+    ///
+    /// ⚠️ Carries the source's own id for the PARENT. Without it the network
+    /// this run creates is confirmed with no identifier, and — because an
+    /// already-matched studio is skipped by `skipReason` — it could never
+    /// acquire one afterwards.
+    case recorded(name: String, sourceId: String?)
     /// ⚠️ The library already records a DIFFERENT network. Reported, never
     /// overwritten: which company owns an imprint is a fact about the world
     /// that the operator may know better than the source, and the graph's
@@ -138,7 +143,9 @@ public enum StudioBatchPolicy {
               !offered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .none
         }
-        guard let existing, !existing.isEmpty else { return .recorded(name: offered) }
+        guard let existing, !existing.isEmpty else {
+            return .recorded(name: offered, sourceId: proposal.parentSourceId.value)
+        }
         // Folded, so a respelling of the same network is not a conflict —
         // "Example Network" and "ExampleNetwork" are one company, and treating
         // them as a disagreement would fill the report with non-events.

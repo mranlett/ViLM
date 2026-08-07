@@ -140,8 +140,9 @@ final class StudioBatchMatchModel: ObservableObject {
                     // been saved — an edge to a row that does not exist yet is
                     // an edge pointing at nothing.
                     if case let .applied(_, parent) = outcome,
-                       case let .recorded(name) = parent {
-                        recordParent(name, for: updated.id, in: store)
+                       case let .recorded(name, parentSourceId) = parent {
+                        recordParent(name, sourceId: parentSourceId,
+                                     for: updated.id, in: store)
                     }
                 }
                 appliedProfile = nil
@@ -259,10 +260,11 @@ final class StudioBatchMatchModel: ObservableObject {
     /// known keeps everything it had. It is called before the edge because an
     /// edge to a studio with no profile is a dangling parent, which is one of
     /// the defects Studio Health reports.
-    private func recordParent(_ name: String, for studioId: String, in store: LibraryStore) {
+    private func recordParent(_ name: String, sourceId: String?,
+                              for studioId: String, in store: LibraryStore) {
         let parentId = "studio:\(name)"
         let isNew = (try? store.fetchEntityProfile(for: parentId)) ?? nil == nil
-        try? store.confirmStudio(name, source: providerName)
+        try? store.confirmStudio(name, source: providerName, sourceId: sourceId)
         try? store.setStudioParent(parentId, forStudio: studioId)
         if isNew, !networksDiscovered.contains(name) { networksDiscovered.append(name) }
     }
