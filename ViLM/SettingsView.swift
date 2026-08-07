@@ -118,8 +118,15 @@ struct SettingsView: View {
                     toolButton("Fix Duplicate Studios",
                                icon: "building.2",
                                action: onStudioConflicts)
+                    // ⚠️ One library only, like the other profile-mutating
+                    // tools. Attached, the audit reads the MAIN library alone —
+                    // so a performer with twenty videos in the other library
+                    // reads as having none, and "0 videos" is the strongest
+                    // argument for merging a profile away. It would argue for
+                    // deleting exactly the wrong half.
                     toolButton("Merge Duplicate Performers",
                                icon: "person.2.badge.gearshape", action: onAliasSplits)
+                        .disabled(session.isFederated)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
                     toolButton("Remove Orphaned Profiles", icon: "trash.slash", action: onTagCleanup)
