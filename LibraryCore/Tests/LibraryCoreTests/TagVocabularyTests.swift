@@ -317,10 +317,10 @@ final class TagVocabularyTests: XCTestCase {
     }
 
     func testAPerformerAttributeCannotAttachToAVideo() {
-        let record = TagRecord(displayName: "Redhead", kind: .performerAttribute)
+        let record = TagRecord(displayName: "Tall", kind: .performerAttribute)
 
         XCTAssertFalse(TagVocabulary.canAttach(record, to: .video),
-                       "a video is not a redhead")
+                       "a video is not a tall")
         XCTAssertTrue(TagVocabulary.canAttach(record, to: .performer))
     }
 
@@ -332,7 +332,7 @@ final class TagVocabularyTests: XCTestCase {
     }
 
     func testAVideoAttributeAttachesToAVideo() {
-        let record = TagRecord(displayName: "Compilation", kind: .videoAttribute)
+        let record = TagRecord(displayName: "Anthology", kind: .videoAttribute)
 
         XCTAssertTrue(TagVocabulary.canAttach(record, to: .video))
         XCTAssertFalse(TagVocabulary.canAttach(record, to: .performer))
@@ -420,10 +420,10 @@ final class TagVocabularyTests: XCTestCase {
     /// gallery, because every listing surface derives its own set from raw
     /// strings and never asks the vocabulary.
     func testTwoCasingsCollapseToOneDisplayName() {
-        let map = TagVocabulary.canonicalSpellings(["GROUP", "GROUP", "GROUP"])
+        let map = TagVocabulary.canonicalSpellings(["Ensemble", "Ensemble", "Ensemble"])
 
-        XCTAssertEqual(map["GROUP"], "GROUP")
-        XCTAssertEqual(map["GROUP"], "GROUP", "the rarer casing displays as the common one")
+        XCTAssertEqual(map["Ensemble"], "Ensemble")
+        XCTAssertEqual(map["Ensemble"], "Ensemble", "the rarer casing displays as the common one")
         XCTAssertEqual(Set(map.values).count, 1, "one tag, one display name")
     }
 
@@ -437,19 +437,19 @@ final class TagVocabularyTests: XCTestCase {
     /// The operator's stored choice outranks a head-count.
     func testTheVocabularysDisplayNameWinsOverUsage() {
         let map = TagVocabulary.canonicalSpellings(
-            ["GROUP", "GROUP", "GROUP", "GROUP"],
-            preferring: [TagRecord(displayName: "GROUP")])
+            ["ensemble", "ensemble", "ensemble", "Ensemble"],
+            preferring: [TagRecord(displayName: "Ensemble")])
 
-        XCTAssertEqual(map["GROUP"], "GROUP")
-        XCTAssertEqual(map["GROUP"], "GROUP")
+        XCTAssertEqual(map["ensemble"], "Ensemble")
+        XCTAssertEqual(map["Ensemble"], "Ensemble")
     }
 
     func testCanonicalSpellingsAreStableAcrossOrderings() {
-        let a = TagVocabulary.canonicalSpellings(["GROUP", "GROUP"])
-        let b = TagVocabulary.canonicalSpellings(["GROUP", "GROUP"])
+        let a = TagVocabulary.canonicalSpellings(["Ensemble", "Ensemble"])
+        let b = TagVocabulary.canonicalSpellings(["Ensemble", "Ensemble"])
 
-        XCTAssertEqual(a["GROUP"], b["GROUP"])
-        XCTAssertEqual(a["GROUP"], b["GROUP"])
+        XCTAssertEqual(a["Ensemble"], b["Ensemble"])
+        XCTAssertEqual(a["Ensemble"], b["Ensemble"])
     }
 
     func testUnrelatedTagsAreNotMerged() {
@@ -483,16 +483,16 @@ final class TagVocabularyTests: XCTestCase {
 
     /// The rule that actually protects the graph.
     func testAPerformerAttributeIsRefusedOnAVideo() {
-        let check = TagVocabulary.check(adding: asset(["tag:Redhead"]),
+        let check = TagVocabulary.check(adding: asset(["tag:Tall"]),
                                         against: asset([]),
                                         vocabulary: vocabulary)
 
         XCTAssertFalse(check.isAllowed)
-        XCTAssertEqual(check.refused, ["Redhead"])
+        XCTAssertEqual(check.refused, ["Tall"])
     }
 
     func testActionAndVideoAttributeAreAllowedOnAVideo() {
-        let check = TagVocabulary.check(adding: asset(["tag:Climbing", "tag:Compilation"]),
+        let check = TagVocabulary.check(adding: asset(["tag:Climbing", "tag:Anthology"]),
                                         against: asset([]),
                                         vocabulary: vocabulary)
 
@@ -502,8 +502,8 @@ final class TagVocabularyTests: XCTestCase {
 
     /// The 31 videos already carrying an attribute tag stay editable.
     func testAPreExistingAttributeTagDoesNotBlockAnEdit() {
-        let before = asset(["tag:Redhead"])
-        let after = asset(["tag:Redhead", "tag:Climbing"])
+        let before = asset(["tag:Tall"])
+        let after = asset(["tag:Tall", "tag:Climbing"])
 
         let check = TagVocabulary.check(adding: after, against: before,
                                         vocabulary: vocabulary)
@@ -526,7 +526,7 @@ final class TagVocabularyTests: XCTestCase {
     func testAnAttributeIsAllowedOnAPerformer() {
         let before = EntityProfile(id: "actor:Alice Example")
         var after = before
-        after.tags = ["Redhead"]
+        after.tags = ["Tall"]
 
         XCTAssertTrue(TagVocabulary.check(adding: after, against: before,
                                           vocabulary: vocabulary).isAllowed)
@@ -536,22 +536,22 @@ final class TagVocabularyTests: XCTestCase {
 
     private var vocabulary: [TagRecord] {
         [TagRecord(displayName: "Climbing", kind: .action),
-         TagRecord(displayName: "Redhead", kind: .performerAttribute),
-         TagRecord(displayName: "Compilation", kind: .videoAttribute),
+         TagRecord(displayName: "Tall", kind: .performerAttribute),
+         TagRecord(displayName: "Anthology", kind: .videoAttribute),
          TagRecord(displayName: "Unsorted")]
     }
 
     func testAddingAnAttributeTagToAVideoIsRefused() {
         let before = asset([])
-        let after = asset(["tag:Redhead"])
+        let after = asset(["tag:Tall"])
 
         XCTAssertEqual(
             TagVocabulary.disallowedAdditions(from: before, to: after, vocabulary: vocabulary),
-            ["Redhead"])
+            ["Tall"])
     }
 
     func testAddingAnActionOrVideoAttributeToAVideoIsAllowed() {
-        let after = asset(["tag:Climbing", "tag:Compilation"])
+        let after = asset(["tag:Climbing", "tag:Anthology"])
 
         XCTAssertTrue(
             TagVocabulary.disallowedAdditions(from: asset([]), to: after,
@@ -571,7 +571,7 @@ final class TagVocabularyTests: XCTestCase {
     /// already on a video is left alone — enrichment corrects it later — so an
     /// unrelated edit to that video must not be blocked by it.
     func testAnAttributeTagAlreadyOnAVideoDoesNotBlockOtherEdits() {
-        let before = asset(["tag:Redhead"])
+        let before = asset(["tag:Tall"])
         var after = before
         after.rating = 5
         after.tags = before.tags + ["tag:Climbing"]
@@ -584,8 +584,8 @@ final class TagVocabularyTests: XCTestCase {
 
     /// Re-adding under a different casing is still not an addition.
     func testACaseVariantOfAnExistingTagIsNotAnAddition() {
-        let before = asset(["tag:Redhead"])
-        let after = asset(["tag:REDHEAD"])
+        let before = asset(["tag:Tall"])
+        let after = asset(["tag:TALL"])
 
         XCTAssertTrue(
             TagVocabulary.disallowedAdditions(from: before, to: after,
@@ -605,7 +605,7 @@ final class TagVocabularyTests: XCTestCase {
     func testAddingAnAttributeTagToAPerformerIsAllowed() {
         let before = EntityProfile(id: "actor:Alice Example")
         var after = before
-        after.tags = ["Redhead"]
+        after.tags = ["Tall"]
 
         XCTAssertTrue(
             TagVocabulary.disallowedAdditions(from: before, to: after,

@@ -122,7 +122,7 @@ final class VideoEnrichmentModel: ObservableObject {
     private let libraryURL: URL
     private let knownTags: Set<String>
     /// 🚨 Folded identities the vocabulary says describe a PERFORMER. Without
-    /// these the review pre-ticked "Redhead" onto the video itself, because
+    /// these the review pre-ticked "Tall" onto the video itself, because
     /// being classified is exactly what made it look familiar.
     private lazy var performerTraits: Set<String> = {
         guard let records = try? LibraryStore(at: libraryURL).fetchTagVocabulary() else { return [] }

@@ -174,12 +174,12 @@ final class UnionReadTests: XCTestCase {
     /// It also must not be retirable, because the string is the only surviving
     /// record that enrichment still owes this video a correction.
     func testAPerformerAttributeTagIsNotRetirableFromVideos() throws {
-        try tag("Redhead", .performerAttribute)
-        try video(["tag:Redhead"])
+        try tag("Tall", .performerAttribute)
+        try video(["tag:Tall"])
         try store.connectTagEdges()
 
         XCTAssertFalse(try store.canRetireStrings(
-            forTag: TagNormalizer.identityKey("Redhead")))
+            forTag: TagNormalizer.identityKey("Tall")))
     }
 
     // MARK: - The per-tag gate

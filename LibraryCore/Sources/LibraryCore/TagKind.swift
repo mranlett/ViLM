@@ -4,10 +4,10 @@
 // The rule this exists to enforce, in the Human Operator's words: "some tags
 // describe the action in a video and some tags describe the attributes of the
 // performer. We shouldn't tag a video with an attribute tag — a video isn't a
-// redhead, an actor is."
+// tall, an actor is."
 //
 // A kind is NOT a bare label. Measured against the real library, two kinds were
-// not enough — `Compilation` describes a video's form and `Amateur` describes
+// not enough — `Anthology` describes a video's form and `Debut` describes
 // its production, neither an action nor a person — so kinds are extensible. But
 // an open-ended list of names would destroy the enforcement, which works only
 // because a kind maps to a legal edge. So every kind declares the node type it

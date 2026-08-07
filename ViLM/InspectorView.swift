@@ -1563,7 +1563,7 @@ struct SingleInspectorView: View {
         }
 
         // The write boundary. A tag the vocabulary says describes a PERFORMER
-        // cannot be added to a video — "a video isn't a redhead, an actor is."
+        // cannot be added to a video — "a video isn't a tall, an actor is."
         // A tag with no kind yet is allowed through: refusing it would mean no
         // new tag could ever be created, and there is nowhere yet to stage the
         // link. It surfaces in Settings → Classify Tags instead.

@@ -265,7 +265,7 @@ Tags are flat `tag:` strings with no kind, so a tag filter today offers **action
 | --- | --- | --- |
 | an **action** tag | videos where this happens | Video → Tag edges |
 | an **attribute** tag | videos featuring a performer who *is* this | Video → Performer → Tag, **two hops** |
-⭐ **The second is a genuinely new capability, and it is what the operator has always meant.** "Show me videos with a redhead" is not a property of any video — it is a property of someone in it. Today that question is either unanswerable or answered by a mis-tagged video, which is the defect the taxonomy removes.
+⭐ **The second is a genuinely new capability, and it is what the operator has always meant.** "Show me videos with a tall" is not a property of any video — it is a property of someone in it. Today that question is either unanswerable or answered by a mis-tagged video, which is the defect the taxonomy removes.
 ❓ **Open — does one filter surface offer both, or two?** One list is simpler but silently changes the meaning of a selection depending on which kind was picked. Two lists are honest but add a control to a panel R2 already found overcrowded. **Recommended: one list, with kind shown per entry**, since the operator thinks in terms of what they want to find rather than which edge answers it. Needs a decision.
   **✅ decision - one list with kind shown per entry**
 ### R8.2 — ⭐ R6 is resolved by the model, not by a query fix

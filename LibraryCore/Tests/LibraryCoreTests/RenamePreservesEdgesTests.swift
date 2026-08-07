@@ -89,8 +89,8 @@ final class RenamePreservesEdgesTests: XCTestCase {
     func testAPerformersTraitEdgesFollowTheRename() throws {
         try profile("actor:Venlowe")
         try profile("actor:Marta Venlowe")
-        try store.saveTagRecord(TagRecord(displayName: "Redhead", kind: .performerAttribute))
-        try store.linkTag(TagNormalizer.identityKey("Redhead"), toPerformer: "actor:Venlowe")
+        try store.saveTagRecord(TagRecord(displayName: "Tall", kind: .performerAttribute))
+        try store.linkTag(TagNormalizer.identityKey("Tall"), toPerformer: "actor:Venlowe")
 
         try store.renameTagGlobally(oldTag: "actor:Venlowe", newTag: "actor:Marta Venlowe")
 

@@ -3,7 +3,7 @@
 // wired by accident.
 //
 // A tag either describes something that happens in a video or something a
-// performer IS — "a video isn't a redhead, an actor is." Until a tag is
+// performer IS — "a video isn't a tall, an actor is." Until a tag is
 // classified it attaches to nothing, so this screen is the gate the rest of the
 // taxonomy waits behind.
 //

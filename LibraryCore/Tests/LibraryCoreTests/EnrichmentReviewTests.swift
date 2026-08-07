@@ -173,23 +173,23 @@ final class EnrichmentReviewTests: XCTestCase {
 
     func testACollectionProposalIsAFillWhenItAddsAndUnchangedWhenItDoesNot() {
         var adds = ActorMetadataProposal()
-        adds.tags = ProposedField(["Redhead", "Scuba"])
-        XCTAssertEqual(change(review(profile(tags: ["Redhead"]), adds), ActorEnrichment.Field.tags)?.kind,
+        adds.tags = ProposedField(["Tall", "Scuba"])
+        XCTAssertEqual(change(review(profile(tags: ["Tall"]), adds), ActorEnrichment.Field.tags)?.kind,
                        .fill)
 
         var nothingNew = ActorMetadataProposal()
-        nothingNew.tags = ProposedField(["Redhead"])
-        XCTAssertEqual(change(review(profile(tags: ["Redhead"]), nothingNew), ActorEnrichment.Field.tags)?.kind,
+        nothingNew.tags = ProposedField(["Tall"])
+        XCTAssertEqual(change(review(profile(tags: ["Tall"]), nothingNew), ActorEnrichment.Field.tags)?.kind,
                        .unchanged, "proposing what is already there is not a change")
     }
 
     func testCollectionUnionIsCaseInsensitiveAndKeepsExistingCasing() {
         var p = ActorMetadataProposal()
-        p.tags = ProposedField(["REDHEAD", "Regional"])
-        let merged = ActorEnrichment.apply(p, to: profile(tags: ["Redhead"]),
+        p.tags = ProposedField(["TALL", "Freckled"])
+        let merged = ActorEnrichment.apply(p, to: profile(tags: ["Tall"]),
                                            entityId: "actor:Jane",
                                            accepting: [ActorEnrichment.Field.tags])
-        XCTAssertEqual(merged.tags, ["Redhead", "Regional"], "no case-variant duplicate")
+        XCTAssertEqual(merged.tags, ["Tall", "Freckled"], "no case-variant duplicate")
     }
 
     func testACollectionIsNeverAConflict() {

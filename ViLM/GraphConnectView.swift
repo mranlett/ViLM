@@ -165,7 +165,7 @@ struct GraphConnectView: View {
                 }
                 if !o.tags.attributeTagsOnVideos.isEmpty {
                     blocker("\(o.tags.attributeTagAssociations) performer traits sit on videos",
-                            detail: "A video isn't a redhead — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess. Open one to see which videos carry it.",
+                            detail: "A video isn't a tall — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess. Open one to see which videos carry it.",
                             icon: "person.and.arrow.left.and.arrow.right",
                             entries: o.tags.attributeTagsOnVideos
                                 .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }

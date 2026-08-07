@@ -120,12 +120,12 @@ final class AssetFilterCriteriaTests: XCTestCase {
     func testTagFilterMatchesRegardlessOfCasing() {
         var criteria = AssetFilterCriteria()
         criteria.tagsLogic = .or
-        criteria.selectedTags = ["GROUP"]
+        criteria.selectedTags = ["Ensemble"]
 
-        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])))
-        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])),
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:Ensemble"])))
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:Ensemble"])),
                       "the same tag, spelled differently")
-        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP"])))
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:ensemble"])))
         XCTAssertFalse(matches(criteria, asset(tags: ["tag:Drama"])))
     }
 
@@ -133,11 +133,11 @@ final class AssetFilterCriteriaTests: XCTestCase {
     func testCaseVariantsDoNotSatisfyAnAndFilterTwice() {
         var criteria = AssetFilterCriteria()
         criteria.tagsLogic = .and
-        criteria.selectedTags = ["GROUP", "Drama"]
+        criteria.selectedTags = ["Ensemble", "Drama"]
 
-        XCTAssertFalse(matches(criteria, asset(tags: ["tag:GROUP", "tag:GROUP"])),
+        XCTAssertFalse(matches(criteria, asset(tags: ["tag:Ensemble", "tag:Ensemble"])),
                        "two spellings of one tag are still only one tag")
-        XCTAssertTrue(matches(criteria, asset(tags: ["tag:GROUP", "tag:Drama"])))
+        XCTAssertTrue(matches(criteria, asset(tags: ["tag:Ensemble", "tag:Drama"])))
     }
 
     func testSelectedStudiosAndOr() {

@@ -208,7 +208,7 @@ final class ActorFilterCriteriaTests: XCTestCase {
         var f = empty
         f.showNeedingAttentionOnly = true
         f.selectedGenders = ["Female"]
-        f.selectedTags = ["Redhead"]
+        f.selectedTags = ["Tall"]
         f.tagsLogic = .or
         f.minRating = 4
         f.minAge = 20; f.maxAge = 40

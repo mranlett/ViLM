@@ -23,26 +23,26 @@ final class PerformerTraitGuardrailTests: XCTestCase {
         return p
     }
 
-    private let traits: Set<String> = [TagNormalizer.identityKey("Redhead")]
+    private let traits: Set<String> = [TagNormalizer.identityKey("Tall")]
 
     // MARK: - The guardrail
 
     func testANewPerformerTraitIsOfferedButNeverPreTicked() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(), proposal: proposal(tags: ["Redhead", "Outdoor"]),
-            knownTags: ["Redhead", "Outdoor"], performerTraits: traits)
+            for: asset(), proposal: proposal(tags: ["Tall", "Outdoor"]),
+            knownTags: ["Tall", "Outdoor"], performerTraits: traits)
 
         let selection = VideoEnrichmentReview.defaultSelection(options)
 
-        XCTAssertTrue(options.contains { $0.name == "Redhead" }, "offered, not hidden")
-        XCTAssertFalse(selection.contains("Redhead"), "a video is not a redhead")
+        XCTAssertTrue(options.contains { $0.name == "Tall" }, "offered, not hidden")
+        XCTAssertFalse(selection.contains("Tall"), "a video is not a tall")
         XCTAssertTrue(selection.contains("Outdoor"), "an ordinary known tag still ticks")
     }
 
     func testTheOptionSaysWhyItIsNotTicked() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(), proposal: proposal(tags: ["Redhead"]),
-            knownTags: ["Redhead"], performerTraits: traits)
+            for: asset(), proposal: proposal(tags: ["Tall"]),
+            knownTags: ["Tall"], performerTraits: traits)
 
         XCTAssertTrue(try XCTUnwrap(options.first).describesPerformer)
     }
@@ -50,11 +50,11 @@ final class PerformerTraitGuardrailTests: XCTestCase {
     /// 🚨 The exact regression: being classified is what used to tick it.
     func testAClassifiedTraitIsNotTickedDespiteBeingInTheVocabulary() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(), proposal: proposal(tags: ["Redhead"]),
-            knownTags: ["Redhead"], performerTraits: traits)
+            for: asset(), proposal: proposal(tags: ["Tall"]),
+            knownTags: ["Tall"], performerTraits: traits)
 
         XCTAssertTrue(try! XCTUnwrap(options.first).isKnown, "it IS in the vocabulary")
-        XCTAssertFalse(VideoEnrichmentReview.defaultSelection(options).contains("Redhead"))
+        XCTAssertFalse(VideoEnrichmentReview.defaultSelection(options).contains("Tall"))
     }
 
     // MARK: - What must not change
@@ -63,27 +63,27 @@ final class PerformerTraitGuardrailTests: XCTestCase {
     /// off, and silently proposing removal of applied tags is its own surprise.
     func testATraitAlreadyOnTheVideoStaysTicked() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(tags: ["tag:Redhead"]), proposal: proposal(tags: []),
-            knownTags: ["Redhead"], performerTraits: traits)
+            for: asset(tags: ["tag:Tall"]), proposal: proposal(tags: []),
+            knownTags: ["Tall"], performerTraits: traits)
 
-        XCTAssertTrue(VideoEnrichmentReview.defaultSelection(options).contains("Redhead"))
+        XCTAssertTrue(VideoEnrichmentReview.defaultSelection(options).contains("Tall"))
     }
 
     /// Case differences must not defeat the guard.
     func testTheGuardMatchesOnFoldedIdentity() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(), proposal: proposal(tags: ["REDHEAD"]),
-            knownTags: ["REDHEAD"], performerTraits: traits)
+            for: asset(), proposal: proposal(tags: ["TALL"]),
+            knownTags: ["TALL"], performerTraits: traits)
 
-        XCTAssertFalse(VideoEnrichmentReview.defaultSelection(options).contains("REDHEAD"))
+        XCTAssertFalse(VideoEnrichmentReview.defaultSelection(options).contains("TALL"))
     }
 
     /// With no vocabulary kinds supplied, behaviour is exactly as before.
     func testWithNoTraitsSuppliedNothingChanges() {
         let options = VideoEnrichmentReview.tagOptions(
-            for: asset(), proposal: proposal(tags: ["Redhead"]),
-            knownTags: ["Redhead"])
+            for: asset(), proposal: proposal(tags: ["Tall"]),
+            knownTags: ["Tall"])
 
-        XCTAssertTrue(VideoEnrichmentReview.defaultSelection(options).contains("Redhead"))
+        XCTAssertTrue(VideoEnrichmentReview.defaultSelection(options).contains("Tall"))
     }
 }

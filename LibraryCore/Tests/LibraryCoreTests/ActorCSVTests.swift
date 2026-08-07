@@ -98,7 +98,7 @@ final class ActorCSVTests: XCTestCase {
     }
 
     func testAFullCRLFDocumentImportsTheSameProfilesAsLF() {
-        let body = "Jane Doe,a bio,,,,Brown,1990,US,4,Janet,Redhead"
+        let body = "Jane Doe,a bio,,,,Brown,1990,US,4,Janet,Tall"
         let lf   = ActorCSV.header + "\n"   + body
         let crlf = ActorCSV.header + "\r\n" + body
         let lfRows   = Array(ActorCSV.parse(lf).dropFirst())
@@ -180,10 +180,10 @@ final class ActorCSVTests: XCTestCase {
     // MARK: - AKA and tag round-trip
 
     func testExportWritesAKAsAndTags() {
-        let p = profile(tags: ["Redhead", "Favourite"], akas: ["Janet", "J.D."])
+        let p = profile(tags: ["Tall", "Favourite"], akas: ["Janet", "J.D."])
         let cells = ActorCSV.parse(ActorCSV.row(name: "Jane Doe", profile: p, stripCountry: identity))[0]
         XCTAssertEqual(cells[9], "Janet|J.D.")
-        XCTAssertEqual(cells[10], "Redhead|Favourite")
+        XCTAssertEqual(cells[10], "Tall|Favourite")
     }
 
     func testImportUnionsAKAsWithExisting() {
@@ -200,9 +200,9 @@ final class ActorCSVTests: XCTestCase {
         let existing = profile(tags: ["Blonde"])
         var cols = Array(repeating: "", count: 11)
         cols[0] = "Jane Doe"
-        cols[10] = "Blonde|Redhead"
+        cols[10] = "Blonde|Tall"
         let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
-        XCTAssertEqual(merged?.tags, ["Blonde", "Redhead"])
+        XCTAssertEqual(merged?.tags, ["Blonde", "Tall"])
     }
 
     func testUnionDeduplicatesCaseInsensitivelyKeepingExistingCasing() {
@@ -218,10 +218,10 @@ final class ActorCSVTests: XCTestCase {
         var cols = Array(repeating: "", count: 11)
         cols[0] = "Jane Doe"
         cols[9] = "Jane Doe|Janet"
-        cols[10] = "jane doe|Redhead"
+        cols[10] = "jane doe|Tall"
         let merged = ActorCSV.merge(columns: cols, existing: nil, decorateCountry: identity)
         XCTAssertEqual(merged?.akas, ["Janet"])
-        XCTAssertEqual(merged?.tags, ["Redhead"], "match is case-insensitive")
+        XCTAssertEqual(merged?.tags, ["Tall"], "match is case-insensitive")
     }
 
     func testABlankAKACellNeverClearsAnExistingList() {

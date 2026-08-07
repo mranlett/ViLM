@@ -103,15 +103,15 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
 
     func testActionAndVideoAttributeTagsBecomeVideoEdges() throws {
         try tag("Climbing", .action)
-        try tag("Compilation", .videoAttribute)
-        let v = try video(["tag:Climbing", "tag:Compilation"])
+        try tag("Anthology", .videoAttribute)
+        let v = try video(["tag:Climbing", "tag:Anthology"])
 
         let plan = try store.connectTagEdges()
 
         XCTAssertEqual(plan.videoEdges, 2)
         XCTAssertEqual(Set(try store.tagIds(forVideo: v)),
                        [TagNormalizer.identityKey("Climbing"),
-                        TagNormalizer.identityKey("Compilation")])
+                        TagNormalizer.identityKey("Anthology")])
     }
 
     /// ⚠️ Decision 2, enforced by the migration: an attribute tag sitting on a
@@ -119,23 +119,23 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
     /// corrects it per performer, because which of the cast it describes is a
     /// guess the migration must not make.
     func testAPerformerAttributeOnAVideoBecomesNothing() throws {
-        try tag("Redhead", .performerAttribute)
-        let v = try video(["tag:Redhead"])
+        try tag("Tall", .performerAttribute)
+        let v = try video(["tag:Tall"])
 
         let plan = try store.connectTagEdges()
 
         // ⚠️ A LIST since 2026-08-07, not a count: the screen reported a bare
         // number and gave the operator no way to reach any of the records.
         XCTAssertEqual(plan.attributeTagAssociations, 1)
-        XCTAssertEqual(plan.attributeTagsOnVideos, ["Redhead": 1],
+        XCTAssertEqual(plan.attributeTagsOnVideos, ["Tall": 1],
                        "named, so the report can lead somewhere")
         XCTAssertEqual(try store.tagIds(forVideo: v), [], "no edge")
         XCTAssertEqual(try store.edgeCount(.pendingTagAssociation), 0, "and nothing staged")
     }
 
     func testAPerformersAttributeTagBecomesAPerformerEdge() throws {
-        try tag("Redhead", .performerAttribute)
-        try profile("actor:Alice Example", tags: ["Redhead"])
+        try tag("Tall", .performerAttribute)
+        try profile("actor:Alice Example", tags: ["Tall"])
 
         let plan = try store.connectTagEdges()
 

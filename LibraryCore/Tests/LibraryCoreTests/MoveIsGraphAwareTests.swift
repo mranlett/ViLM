@@ -110,8 +110,8 @@ final class MoveIsGraphAwareTests: XCTestCase {
     /// A trait describing a person is not attached to the video — the same
     /// decision the bulk connect makes, so a move cannot be a way around it.
     func testAPerformerTraitIsNotAttachedByAMove() throws {
-        try tag("Redhead", .performerAttribute)
-        let v = try video(["tag:Redhead"])
+        try tag("Tall", .performerAttribute)
+        let v = try video(["tag:Tall"])
 
         try store.connectEdges(forVideo: v)
 
@@ -171,7 +171,7 @@ final class PerformerTagImportTests: XCTestCase {
     /// ⚠️ The inference the taxonomy allows: a tag arriving ON a person is
     /// known to describe a person, so it needs no classification step.
     func testAnUnknownTagOnAnActorBecomesAPerformerAttribute() throws {
-        let id = try actor("Alice Example", tags: ["Redhead"])
+        let id = try actor("Alice Example", tags: ["Tall"])
 
         let result = try store.connectPerformerTags(for: [id])
 
@@ -196,7 +196,7 @@ final class PerformerTagImportTests: XCTestCase {
     }
 
     func testRunningTwiceAddsNothing() throws {
-        let id = try actor("Alice Example", tags: ["Redhead"])
+        let id = try actor("Alice Example", tags: ["Tall"])
 
         try store.connectPerformerTags(for: [id])
         try store.connectPerformerTags(for: [id])
@@ -207,8 +207,8 @@ final class PerformerTagImportTests: XCTestCase {
 
     /// Case variants are one tag, not two.
     func testSpellingVariantsResolveToOneTag() throws {
-        let a = try actor("Alice Example", tags: ["Redhead"])
-        let b = try actor("Bob Example", tags: ["redhead"])
+        let a = try actor("Alice Example", tags: ["Tall"])
+        let b = try actor("Bob Example", tags: ["tall"])
 
         try store.connectPerformerTags(for: [a, b])
 
@@ -219,7 +219,7 @@ final class PerformerTagImportTests: XCTestCase {
     /// Studios are not people.
     func testNonActorProfilesAreIgnored() throws {
         var studio = EntityProfile(id: "studio:Example Studio")
-        studio.tags = ["Redhead"]
+        studio.tags = ["Tall"]
         try store.saveEntityProfile(studio)
 
         let result = try store.connectPerformerTags(for: ["studio:Example Studio"])

@@ -763,7 +763,7 @@ struct AssetsGridView: View {
     /// They are NOT the same for a TAG. A tag page shows every video in which
     /// any tagged actor appears, so deriving actors from those videos returned
     /// the whole cast of each: a blonde who happened to be in a video with a
-    /// redhead was listed under "Redhead".
+    /// tall was listed under "Tall".
     ///
     /// Narrowed only for a single tag selection, using exactly the notion the
     /// ASSET filter uses above, so the two cannot disagree.

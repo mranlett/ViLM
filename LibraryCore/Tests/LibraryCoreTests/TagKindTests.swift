@@ -4,7 +4,7 @@ import XCTest
 /// Phase B — the tag taxonomy.
 ///
 /// Everything here defends one rule: a tag may only be attached to the kind of
-/// node it describes. A video is not a redhead.
+/// node it describes. A video is not a tall.
 final class TagKindTests: XCTestCase {
 
     // MARK: - Enforcement

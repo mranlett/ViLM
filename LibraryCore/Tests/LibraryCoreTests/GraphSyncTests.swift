@@ -58,8 +58,8 @@ final class GraphSyncTests: XCTestCase {
 
     func testPerformerTraitsAndStudioHierarchyTravel() throws {
         try a.saveEntityProfile(EntityProfile(id: "actor:Alice Example"))
-        try a.saveTagRecord(TagRecord(displayName: "Redhead", kind: .performerAttribute))
-        try a.linkTag(TagNormalizer.identityKey("Redhead"), toPerformer: "actor:Alice Example")
+        try a.saveTagRecord(TagRecord(displayName: "Tall", kind: .performerAttribute))
+        try a.linkTag(TagNormalizer.identityKey("Tall"), toPerformer: "actor:Alice Example")
         try studio(a, "Example Studio"); try studio(a, "Example Network")
         try a.setStudioParent("studio:Example Network", forStudio: "studio:Example Studio")
 
@@ -139,8 +139,8 @@ final class GraphSyncTests: XCTestCase {
     /// Skipped rather than conjuring the node the edge names.
     func testAnEdgeNamingSomethingUnknownIsSkipped() throws {
         try a.saveEntityProfile(EntityProfile(id: "actor:Alice Example"))
-        try a.saveTagRecord(TagRecord(displayName: "Redhead", kind: .performerAttribute))
-        try a.linkTag(TagNormalizer.identityKey("Redhead"), toPerformer: "actor:Alice Example")
+        try a.saveTagRecord(TagRecord(displayName: "Tall", kind: .performerAttribute))
+        try a.linkTag(TagNormalizer.identityKey("Tall"), toPerformer: "actor:Alice Example")
 
         // B is given only the edges, never the nodes.
         var stripped = try a.exportGraph(includingPhotoData: false)
@@ -349,8 +349,8 @@ final class GraphSyncDisagreementTests: XCTestCase {
     func testAgreementAndGapsReportNothing() throws {
         try a.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
         try b.saveTagRecord(TagRecord(displayName: "Climbing", kind: .action))
-        try a.saveTagRecord(TagRecord(displayName: "Compilation", kind: .videoAttribute))
-        try b.saveTagRecord(TagRecord(displayName: "Compilation", kind: nil))
+        try a.saveTagRecord(TagRecord(displayName: "Anthology", kind: .videoAttribute))
+        try b.saveTagRecord(TagRecord(displayName: "Anthology", kind: nil))
 
         let result = try b.applyGraphMerge(try a.exportGraph(includingPhotoData: false))
 

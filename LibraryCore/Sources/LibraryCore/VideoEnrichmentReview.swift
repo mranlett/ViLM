@@ -62,7 +62,7 @@ public struct VideoTagOption: Equatable, Sendable, Identifiable {
     /// ethnicity, body type — and those arrived here indistinguishable from a
     /// tag about the video. Worse, they were classified, so `isKnown` was true
     /// and they were **pre-ticked**: matching a video silently proposed filing
-    /// the video itself as a redhead, and accepting the defaults applied it.
+    /// the video itself as a tall, and accepting the defaults applied it.
     ///
     /// Still offered, never pre-selected. The graph's standing rule is to show
     /// the operator and refuse to guess, and a person may genuinely want one.
@@ -281,7 +281,7 @@ public enum VideoEnrichmentReview {
         // 🚨 A NEW tag describing a performer is never pre-ticked, however
         // familiar it looks. Being in the vocabulary is exactly why these were
         // ticked before — they are classified, so `isKnown` was true — and that
-        // is how a video came to be filed as a redhead.
+        // is how a video came to be filed as a tall.
         Set(options.filter {
             $0.isExisting || ($0.isKnown && !$0.describesPerformer)
         }.map(\.name))
