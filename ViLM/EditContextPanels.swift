@@ -21,6 +21,18 @@ import LibraryCore
 ///
 /// The summary on the closed row is the part that earns its space: a file name
 /// or an alias count answers most questions without expanding anything.
+/// ⚠️ Hand-rolled rather than a `DisclosureGroup`, after two rounds of it
+/// misbehaving on macOS.
+///
+/// 🚨 With a custom label, macOS makes only the disclosure TRIANGLE clickable —
+/// and in a plain `VStack` it does not reliably draw one at all, so the rows
+/// rendered as inert text. On iOS the whole row toggles natively, so both
+/// failures were invisible everywhere they were tested.
+///
+/// Attaching a tap gesture to the label was the first fix and it was still at
+/// the mercy of how `DisclosureGroup` handles interaction on each platform. A
+/// `Button` plus conditional content behaves identically on both because there
+/// is nothing platform-specific left in it.
 struct ContextAccordion<Content: View>: View {
     let title: String
     let icon: String
@@ -31,35 +43,39 @@ struct ContextAccordion<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            content()
-                .padding(.top, 6)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                if let summary, !summary.isEmpty {
-                    Text(summary)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Image(systemName: icon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(title)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    if let summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
                 }
-                // Fills the row so the whole width is a target, not just the
-                // text — otherwise clicking beside the label does nothing.
-                Spacer(minLength: 0)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
             }
-            // 🚨 macOS makes only the DISCLOSURE TRIANGLE clickable when a
-            // `DisclosureGroup` has a custom label. On iOS the whole row
-            // toggles, so this read as working everywhere it was tested and as
-            // broken on the Mac — where the target was a few points wide and
-            // most clicks landed on nothing.
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                content()
+                    .padding(.top, 6)
+            }
         }
     }
 }
