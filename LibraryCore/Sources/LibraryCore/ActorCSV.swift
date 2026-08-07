@@ -25,7 +25,7 @@ public enum ActorCSV {
     /// 1 Bio           4 Gender      7 CountryOfOrigin   10 Tags
     /// 2 PhotoURL      5 HairColor   8 Rating
     /// ```
-    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt"
+    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId"
 
     /// Rows with fewer cells than this are skipped. Historic guard: a row must at
     /// least carry Name/Bio/PhotoURL/HomePage to be worth merging.
@@ -149,6 +149,7 @@ public enum ActorCSV {
             escape(profile?.enrichmentState?.rawValue ?? ""),
             escape(profile?.enrichmentSource ?? ""),
             escape(profile?.enrichmentCheckedAt.map(timestamp) ?? ""),
+            escape(profile?.enrichmentSourceId ?? ""),
         ]
         return cells.joined(separator: ",") + "\n"
     }
@@ -233,7 +234,19 @@ public enum ActorCSV {
         public static let state = 16
         public static let source = 17
         public static let checkedAt = 18
-        static let width = 19
+        /// 🚨 The source's own identifier, added because it was MISSING.
+        ///
+        /// The CSV carried the state, the source and the timestamp and not the
+        /// one cell that makes a later lookup possible — so every actor
+        /// enriched through the batch path came back marked "matched by X" with
+        /// no way to ask X about them again. Measured on the real library:
+        /// 1,236 of 1,250 matched actors carry no id.
+        ///
+        /// ⚠️ Worse than absent, because `ActorBatchPolicy.skipReason` skips
+        /// anything already `.matched` — the tool that would have supplied the
+        /// id refuses to look at them.
+        public static let sourceId = 19
+        static let width = 20
     }
 
     /// Returns `columns` with the enrichment cells set.
@@ -247,7 +260,8 @@ public enum ActorCSV {
     public static func settingEnrichment(in columns: [String],
                                          state: EnrichmentState?,
                                          source: String,
-                                         checkedAt: Date) -> [String] {
+                                         checkedAt: Date,
+                                         sourceId: String? = nil) -> [String] {
         guard let state else { return columns }
         var out = columns
         if out.count < EnrichmentColumn.width {
@@ -256,6 +270,9 @@ public enum ActorCSV {
         out[EnrichmentColumn.state] = state.rawValue
         out[EnrichmentColumn.source] = source
         out[EnrichmentColumn.checkedAt] = timestamp(checkedAt)
+        // ⚠️ Only ever written, never cleared. A run that reaches no conclusion
+        // about identity must not erase an id an earlier one established.
+        if let sourceId, !sourceId.isEmpty { out[EnrichmentColumn.sourceId] = sourceId }
         return out
     }
 
@@ -370,41 +387,76 @@ public enum ActorCSV {
             return columns[index]
         }
 
+        // ⚠️ Hoisted out of the initializer call. Adding one more argument to
+        // an already 25-argument call tipped the type-checker past its limit;
+        // these four are the ones that grew, so they are the ones that move.
+        let state = cell(16).flatMap(EnrichmentState.init(rawValue:)) ?? existing?.enrichmentState
+        let source = cell(17) ?? existing?.enrichmentSource
+        let checkedAt = cell(18).flatMap(parseTimestamp) ?? existing?.enrichmentCheckedAt
+        // Falls back to what the library already holds, so importing a CSV
+        // written before this column existed cannot blank an id.
+        let sourceId = cell(19) ?? existing?.enrichmentSourceId
+        let mergedTags: [String] = cell(10)
+            .map { union(existing?.tags ?? [], splitList($0), excludingName: name) }
+            ?? existing?.tags ?? []
+        let mergedAkas: [String] = cell(9)
+            .map { union(existing?.akas ?? [], splitList($0), excludingName: name) }
+            ?? existing?.akas ?? []
+        let country: String? = cell(7).map { decorateCountry($0) } ?? existing?.countryOfOrigin
+
+        // ⚠️ Every argument hoisted into a local. `EntityProfile` takes 25 of
+        // them, and adding the source-id cell tipped the type-checker past the
+        // point where it could solve the call at all — the `??` chains each
+        // multiply the candidate overloads. Identifiers cost it nothing.
+        let bio: String? = cell(1) ?? existing?.bio
+        let photoUrl: String? = cell(2) ?? existing?.photoUrl
+        let homePage: String? = cell(3) ?? existing?.homePage
+        let gender: String? = cell(4) ?? existing?.gender
+        let hairColor: String? = cell(5) ?? existing?.hairColor
+        let birthYear: Int? = cell(6).flatMap(Int.init) ?? existing?.birthYear
+        let rating: Int? = cell(8).flatMap(Int.init) ?? existing?.rating
+        let galleries: [String] = existing?.galleryUrls ?? []
+        let created: Date? = existing?.createdAt ?? now
+        let birthDate: String? = cell(11) ?? existing?.birthDate
+        let careerSpanRaw: String? = cell(12) ?? existing?.careerSpanRaw
+        let careerStart: Int? = cell(13).flatMap(Int.init) ?? existing?.careerStartYear
+        // A blank end cell means "unchanged", NOT "clear the end year" —
+        // consistent with every other column here. An open span is expressed by
+        // never having had an end, not by blanking one out.
+        let careerEnd: Int? = cell(14).flatMap(Int.init) ?? existing?.careerEndYear
+        let ageAtStart: Int? = cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart
+
         return EntityProfile(
             id: entityId(forName: name),
-            bio: cell(1) ?? existing?.bio,
-            photoUrl: cell(2) ?? existing?.photoUrl,
-            homePage: cell(3) ?? existing?.homePage,
-            gender: cell(4) ?? existing?.gender,
-            hairColor: cell(5) ?? existing?.hairColor,
-            birthYear: cell(6).flatMap(Int.init) ?? existing?.birthYear,
+            bio: bio,
+            photoUrl: photoUrl,
+            homePage: homePage,
+            gender: gender,
+            hairColor: hairColor,
+            birthYear: birthYear,
             // Re-attach the flag emoji the export stripped out.
-            countryOfOrigin: cell(7).map { decorateCountry($0) } ?? existing?.countryOfOrigin,
-            rating: cell(8).flatMap(Int.init) ?? existing?.rating,
+            countryOfOrigin: country,
+            rating: rating,
             // A blank cell leaves the existing list untouched; a populated one is
             // UNIONED with it, never substituted. galleryUrls stays carried-over:
             // it is not represented in this format at all.
-            tags: cell(10).map { union(existing?.tags ?? [], splitList($0), excludingName: name) }
-                ?? existing?.tags ?? [],
-            galleryUrls: existing?.galleryUrls ?? [],
-            akas: cell(9).map { union(existing?.akas ?? [], splitList($0), excludingName: name) }
-                ?? existing?.akas ?? [],
-            createdAt: existing?.createdAt ?? now,
-            birthDate: cell(11) ?? existing?.birthDate,
-            careerSpanRaw: cell(12) ?? existing?.careerSpanRaw,
-            careerStartYear: cell(13).flatMap(Int.init) ?? existing?.careerStartYear,
-            // A blank end cell means "unchanged", NOT "clear the end year" —
-            // consistent with every other column here. An open span is expressed
-            // by never having had an end, not by blanking one out.
-            careerEndYear: cell(14).flatMap(Int.init) ?? existing?.careerEndYear,
-            ageAtCareerStart: cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart,
+            tags: mergedTags,
+            galleryUrls: galleries,
+            akas: mergedAkas,
+            createdAt: created,
+            birthDate: birthDate,
+            careerSpanRaw: careerSpanRaw,
+            careerStartYear: careerStart,
+            careerEndYear: careerEnd,
+            ageAtCareerStart: ageAtStart,
             // An unrecognised state decodes as nil rather than failing the row:
             // a value written by a newer build must not make an actor
             // unimportable. A blank cell leaves the existing value alone, like
             // every other column here.
-            enrichmentState: cell(16).flatMap(EnrichmentState.init(rawValue:)) ?? existing?.enrichmentState,
-            enrichmentSource: cell(17) ?? existing?.enrichmentSource,
-            enrichmentCheckedAt: cell(18).flatMap(parseTimestamp) ?? existing?.enrichmentCheckedAt
+            enrichmentState: state,
+            enrichmentSource: source,
+            enrichmentSourceId: sourceId,
+            enrichmentCheckedAt: checkedAt
         )
     }
 }

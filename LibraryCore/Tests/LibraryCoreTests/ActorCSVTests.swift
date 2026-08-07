@@ -138,7 +138,7 @@ final class ActorCSVTests: XCTestCase {
             ActorCSV.header,
             "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,"
             + "BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,"
-            + "EnrichmentState,EnrichmentSource,EnrichmentCheckedAt"
+            + "EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId"
         )
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs", "index 9 is a contract — the importer reads positionally")
@@ -242,7 +242,7 @@ final class ActorCSVTests: XCTestCase {
         cols[9] = "b"
         let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
         XCTAssertEqual(merged?.galleryUrls, ["g1", "g2"], "not in the format, never cleared")
-        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 19, "and no column for it")
+        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 20, "and no column for it")
     }
 
     // MARK: - Career span columns (schema v17)
@@ -251,9 +251,10 @@ final class ActorCSVTests: XCTestCase {
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs")
         XCTAssertEqual(names[10], "Tags")
-        XCTAssertEqual(Array(names.suffix(8)),
+        XCTAssertEqual(Array(names.suffix(9)),
                        ["BirthDate", "CareerSpan", "CareerStart", "CareerEnd", "AgeAtCareerStart",
-                        "EnrichmentState", "EnrichmentSource", "EnrichmentCheckedAt"])
+                        "EnrichmentState", "EnrichmentSource", "EnrichmentCheckedAt",
+                        "EnrichmentSourceId"])
     }
 
     func testCareerFieldsRoundTripThroughExportAndImport() {
