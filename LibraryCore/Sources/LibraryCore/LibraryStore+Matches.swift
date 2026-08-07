@@ -90,6 +90,44 @@ extension LibraryStore {
                         isVideo: true)
     }
 
+    /// Hands a video's match down to the performers the source linked to it.
+    ///
+    /// ⭐ The source's scene record LINKS to confirmed performer records. Those
+    /// links are identities the source already established — so a matched video
+    /// can identify its whole cast, instead of leaving every performer to be
+    /// re-matched by name, repeating a disambiguation that was already done.
+    ///
+    /// 🚨 Only from a STRONG video match. A title match is "plausible, not
+    /// identified", and treating its cast links as confirmed would launder one
+    /// guess into a dozen confidently wrong identities — across actors who then
+    /// look verified and are skipped by every later tool.
+    ///
+    /// ⚠️ Never overrules an identity the library holds. A performer already
+    /// matched keeps their answer; this only fills gaps.
+    ///
+    /// Returns how many performers gained one.
+    @discardableResult
+    public func propagateIdentities(_ credits: [ProposedCredit], source: String,
+                                    videoMethod: MatchMethod) throws -> Int {
+        guard videoMethod.propagatesIdentity else { return 0 }
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        var written = 0
+
+        for credit in credits {
+            guard let sourceId = credit.sourceId, !sourceId.isEmpty else { continue }
+            let entityId = "actor:\(credit.name)"
+            guard known.contains(entityId) else { continue }
+            // Already identified in this source: leave it entirely alone.
+            guard try matches(forEntity: entityId)
+                    .first(where: { $0.source == source }) == nil else { continue }
+
+            try confirmEntityMatch(entityId, source: source,
+                                   sourceId: sourceId, method: .linked)
+            written += 1
+        }
+        return written
+    }
+
     // MARK: - Reading
 
     /// Every source that has identified this node, newest first.

@@ -246,7 +246,12 @@ public enum ActorCSV {
         /// anything already `.matched` — the tool that would have supplied the
         /// id refuses to look at them.
         public static let sourceId = 19
-        static let width = 20
+        /// ⚠️ `public` so tests can assert against the CURRENT width rather
+        /// than a literal. A plugin test hard-coded 19 and went red the moment
+        /// this format gained a column — the property worth asserting is that a
+        /// short row is WIDENED to whatever the format needs, not that the
+        /// format never changes.
+        public static let width = 20
     }
 
     /// Returns `columns` with the enrichment cells set.

@@ -616,8 +616,17 @@ final class VideoEnrichmentModel: ObservableObject {
         if let sourceId = chosenCandidate?.id, let source = providerName,
            let url = LibrarySession.shared.url(for: asset.id) {
             let method: MatchMethod = canReturnToPicker ? .operator : (matchMethod ?? .operator)
-            try? LibraryStore(at: url).confirmVideoMatch(
+            let store = try? LibraryStore(at: url)
+            try? store?.confirmVideoMatch(
                 asset.id, source: source, sourceId: sourceId, method: method)
+
+            // ⭐ The cast comes identified. The source's scene record links to
+            // confirmed performer records, so a strong video match identifies
+            // every performer in it — rather than leaving each to be re-matched
+            // by name, repeating a disambiguation already done.
+            if let all = proposal.actors.value {
+                try? store?.propagateIdentities(all, source: source, videoMethod: method)
+            }
         }
 
         return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,

@@ -346,10 +346,21 @@ public struct ProposedCredit: Equatable, Sendable, ExpressibleByStringLiteral {
     /// a list happened to arrive in, which says nothing about billing.
     public let billing: Int?
 
-    public init(name: String, creditedAs: String? = nil, billing: Int? = nil) {
+    /// ⭐ The source's own identifier for this performer.
+    ///
+    /// 🚨 The whole reason a video match can identify its cast. The source's
+    /// scene record LINKS to a confirmed performer record — it is not a name
+    /// the app has to look up again — and carrying that link is what stops the
+    /// operator re-matching every performer by name, repeating a
+    /// disambiguation the source had already done.
+    public let sourceId: String?
+
+    public init(name: String, creditedAs: String? = nil, billing: Int? = nil,
+                sourceId: String? = nil) {
         self.name = name
         self.creditedAs = creditedAs
         self.billing = billing
+        self.sourceId = sourceId
     }
 
     /// So a plain name still reads as one. Most call sites and every fixture

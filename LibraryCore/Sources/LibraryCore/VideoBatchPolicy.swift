@@ -73,6 +73,11 @@ public struct VideoBatchReport: Equatable, Sendable {
     /// Fields written without anyone looking. The number worth reporting most
     /// prominently, because it is the part nobody reviewed.
     public var fieldsWritten = 0
+    /// ⭐ Performers this run identified WITHOUT a separate lookup, because the
+    /// source's scene record links to their confirmed records. Counted apart
+    /// from `fieldsWritten` because nothing on the video changed — an actor
+    /// somewhere else gained an identity.
+    public var identitiesLearned = 0
 
     public var examined: Int { applied + queued + noMatch + skipped + failed }
 

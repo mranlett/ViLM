@@ -225,6 +225,14 @@ final class VideoBatchMatchModel: ObservableObject {
                     if let sourceId = matchedSourceId {
                         try? store.confirmVideoMatch(updated.id, source: provider.displayName,
                                                      sourceId: sourceId, method: .fingerprint)
+                        // ⭐ A fingerprint match is exact, so the cast it links
+                        // to is identified too — the single largest source of
+                        // actor identities the app was previously discarding.
+                        if !pendingCast.isEmpty {
+                            report.identitiesLearned += (try? store.propagateIdentities(
+                                pendingCast, source: provider.displayName,
+                                videoMethod: .fingerprint)) ?? 0
+                        }
                     }
                     if !pendingCredits.isEmpty {
                         try? store.recordCredits(pendingCredits, forVideo: updated.id)
@@ -232,6 +240,7 @@ final class VideoBatchMatchModel: ObservableObject {
                 }
                 appliedAsset = nil
                 pendingCredits = []
+                pendingCast = []
                 matchedSourceId = nil
                 try? await Task.sleep(nanoseconds: delay)
             }
@@ -254,6 +263,12 @@ final class VideoBatchMatchModel: ObservableObject {
     /// the edge needs the video row to exist — and the performer profile, which
     /// `recordCredits` checks for the same reason `connectEdges` does.
     private var pendingCredits: [ProposedCredit] = []
+
+    /// The whole cast of the match being applied, with the source's own id for
+    /// each. Distinct from `pendingCredits`, which holds only the ones carrying
+    /// something worth STORING on the edge — every performer has an identity
+    /// worth keeping, even when they were credited normally.
+    private var pendingCast: [ProposedCredit] = []
 
     /// The source's id for the record `examine` matched, carried out the same
     /// way `appliedAsset` is. Without it a batch run records "matched" and not
@@ -364,6 +379,7 @@ final class VideoBatchMatchModel: ObservableObject {
             appliedAsset = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
                                                         accepting: fields, acceptedTags: [])
             pendingCredits = VideoEnrichmentReview.credits(from: proposal, accepting: fields)
+            pendingCast = proposal.actors.value ?? []
             return .applied(route: .fingerprint, fields: Array(fields), tags: [])
         }
 

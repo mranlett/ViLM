@@ -37,6 +37,16 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
     /// which understates a match that required an exact name AND a
     /// disambiguation to survive.
     case name
+    /// ⭐ The SOURCE's own record links these — no matching happened here at
+    /// all. A scene record naming a confirmed performer is the source
+    /// asserting the relationship, not this app inferring it.
+    ///
+    /// ⚠️ Its trust is INHERITED, not intrinsic. The link is only as good as
+    /// the video match that reached it: a title-matched video is "plausible,
+    /// not identified", so propagating its cast as confirmed identities would
+    /// launder one guess into many. Callers must check the video's own method
+    /// before writing these — see `MatchMethod.propagatesIdentity`.
+    case linked
     /// A person chose it from a list. Trustworthy for a different reason than
     /// a fingerprint: someone looked.
     case `operator`
@@ -53,11 +63,22 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
         switch self {
         case .fingerprint: return 5
         case .operator:    return 4
+        case .linked:      return 4
         case .name:        return 3
         case .cast:        return 2
         case .backfill:    return 1
         case .title:       return 0
         }
+    }
+
+    /// Whether a video matched THIS way may hand its identity to its cast.
+    ///
+    /// 🚨 Only the strong routes. A title match is a plausible guess, and
+    /// treating its performer links as confirmed would turn one weak match into
+    /// a dozen confidently wrong identities — across actors who then look
+    /// verified and are skipped by every later tool.
+    public var propagatesIdentity: Bool {
+        self == .fingerprint || self == .operator
     }
 
     public var displayName: String {
@@ -66,6 +87,7 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
         case .cast:        return "cast"
         case .title:       return "title"
         case .name:        return "exact name"
+        case .linked:      return "linked by the source"
         case .operator:    return "your choice"
         case .backfill:    return "recorded before the method was"
         }
