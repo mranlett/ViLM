@@ -76,6 +76,72 @@ struct VideoBatchMatchView: View {
         // results List, the sheet collapsed to a title bar and a Close button.
         // The report was rendering correctly the whole time; there was simply
         // no room to draw it, which read as "the run reported nothing".
+        // 🚨 On the CONTAINER, not on `results`.
+        //
+        // These lived on the results view — but `tally`, which SETS `browsing`,
+        // is rendered by `running`. So DURING a run, tapping a tally did
+        // nothing at all. It looked fine because a finished run shows
+        // `results`, where the sheet did exist. Same defect as the match
+        // screen, found by the same scan.
+        .sheet(item: $browsing) { group in
+            NavigationStack {
+                List {
+                    Section {
+                        ForEach(group.items) { item in
+                            Button {
+                                browsing = nil
+                                // Re-presented on the next runloop so the two
+                                // sheets do not fight over presentation.
+                                DispatchQueue.main.async { reviewing = item }
+                            } label: {
+                                HStack {
+                                    Text(item.asset.fileName)
+                                        .font(.caption.monospaced()).lineLimit(2)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } footer: {
+                        Text(group.hint)
+                    }
+                }
+                .navigationTitle("\(group.title) — \(group.items.count)")
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { browsing = nil }
+                    }
+                }
+            }
+        }
+        .sheet(item: $reviewing) { item in
+            // The library the crawl found it in — not a guess, and never a
+            // fallback to "the first one".
+            VideoEnrichmentSheet(asset: item.asset, libraryURL: item.libraryURL,
+                                 knownTags: knownTags) { updated in
+                do {
+                    try LibraryStore(at: item.libraryURL).updateAsset(updated)
+                    model.removeFromQueue(item.asset.id)
+                } catch {
+                    // Surfaced, never swallowed. A failed write here means the
+                    // video silently returns to the queue next run, which is
+                    // indistinguishable from the match not having been made.
+                    AppErrorReporter.report(
+                        "Couldn't save the match for \(item.asset.fileName): \(error.localizedDescription)")
+                }
+            }
+            // Dismissing without applying clears the row too — you have looked.
+            // The record keeps whatever state it had, so a genuinely undecided
+            // video still returns on a later crawl.
+            .onDisappear { model.removeFromQueue(item.asset.id) }
+        }
         #if os(macOS)
         .frame(minWidth: 460, idealWidth: 520, minHeight: 420, idealHeight: 560)
         #endif
@@ -224,65 +290,6 @@ struct VideoBatchMatchView: View {
                     Text("These were found by searching rather than by fingerprint. A search returns what is plausible, which is not the same as identified.")
                 }
             }
-        }
-        .sheet(item: $browsing) { group in
-            NavigationStack {
-                List {
-                    Section {
-                        ForEach(group.items) { item in
-                            Button {
-                                browsing = nil
-                                // Re-presented on the next runloop so the two
-                                // sheets do not fight over presentation.
-                                DispatchQueue.main.async { reviewing = item }
-                            } label: {
-                                HStack {
-                                    Text(item.asset.fileName)
-                                        .font(.caption.monospaced()).lineLimit(2)
-                                        .truncationMode(.middle)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } footer: {
-                        Text(group.hint)
-                    }
-                }
-                .navigationTitle("\(group.title) — \(group.items.count)")
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { browsing = nil }
-                    }
-                }
-            }
-        }
-        .sheet(item: $reviewing) { item in
-            // The library the crawl found it in — not a guess, and never a
-            // fallback to "the first one".
-            VideoEnrichmentSheet(asset: item.asset, libraryURL: item.libraryURL,
-                                 knownTags: knownTags) { updated in
-                do {
-                    try LibraryStore(at: item.libraryURL).updateAsset(updated)
-                    model.removeFromQueue(item.asset.id)
-                } catch {
-                    // Surfaced, never swallowed. A failed write here means the
-                    // video silently returns to the queue next run, which is
-                    // indistinguishable from the match not having been made.
-                    AppErrorReporter.report(
-                        "Couldn't save the match for \(item.asset.fileName): \(error.localizedDescription)")
-                }
-            }
-            // Dismissing without applying clears the row too — you have looked.
-            // The record keeps whatever state it had, so a genuinely undecided
-            // video still returns on a later crawl.
-            .onDisappear { model.removeFromQueue(item.asset.id) }
         }
     }
 }

@@ -68,6 +68,30 @@ struct VideoEnrichmentSheet: View {
                     }
                 }
         }
+        // 🚨 On the CONTAINER, not on one phase's view.
+        //
+        // These lived on the picker. `picker` and `review` are separate
+        // branches of a switch, so on the review screen the buttons set the
+        // state and nothing was in the hierarchy to present it — tapping the
+        // matched still, and "Tap to see all N images", both did nothing at
+        // all. Reported from the device; the code reads as though it works,
+        // which is why it survived.
+        .sheet(item: $examining) { candidate in
+            CandidateImageSheet(candidate: candidate) {
+                examining = nil
+                Task { await model.choose(candidate) }
+            }
+        }
+        .sheet(item: Binding(
+            get: { expandedReview.map(ExpandedImage.init) },
+            set: { expandedReview = $0?.index }
+        )) { item in
+            if let candidate = model.chosenCandidate {
+                RemotePhotoBrowser(urls: reviewImageURLs(candidate),
+                                   title: candidate.title,
+                                   initialIndex: item.index)
+            }
+        }
         .task { await model.start() }
     }
 
@@ -182,22 +206,6 @@ struct VideoEnrichmentSheet: View {
                 }
             } footer: {
                 Text("Tap a picture to see every image the source has for it, at a size worth looking at. Tap the text to choose.")
-            }
-        }
-        .sheet(item: $examining) { candidate in
-            CandidateImageSheet(candidate: candidate) {
-                examining = nil
-                Task { await model.choose(candidate) }
-            }
-        }
-        .sheet(item: Binding(
-            get: { expandedReview.map(ExpandedImage.init) },
-            set: { expandedReview = $0?.index }
-        )) { item in
-            if let candidate = model.chosenCandidate {
-                RemotePhotoBrowser(urls: reviewImageURLs(candidate),
-                                   title: candidate.title,
-                                   initialIndex: item.index)
             }
         }
     }
