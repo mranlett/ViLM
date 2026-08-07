@@ -17,9 +17,23 @@ ViLM (Video Library Manager) is built with your privacy as a fundamental priorit
 
 ## Network Access
 
-**ViLM works fully offline, but it is no longer offline-only.** The app supports optional metadata plugins that look your library up against a third-party service to fill in details you would otherwise type by hand.
+**ViLM is local-first, but it is not offline.** There are two ways it reaches the network, and one of them happens without you asking.
 
-**Nothing leaves your device unless you install a metadata plugin, supply your own credential for that service, and start a lookup.** With no plugin configured, the app makes no network requests at all beyond any web link you click yourself.
+### 1. Profile images load automatically
+
+⚠️ **This one needs no click and no plugin.** When an actor's record holds a photo URL pointing at a website, the app fetches that image **whenever the profile is displayed** — including while scrolling a gallery. The request goes to whichever site hosts the image, and it identifies itself with an ordinary browser User-Agent.
+
+🚨 **A photo URL frequently contains the actor's name.** Measured on a real library: **559 of 1,214 stored remote image URLs — 46% — include the performer's name in the path.** So the site hosting those images can observe which performers your library contains, one request at a time, as you browse.
+
+This applies to any actor record whose photo URL is a web address. Photos already downloaded into your library are read from disk and cause no request.
+
+**If you do not want this:** save photos into your library rather than referencing them, or clear the remote photo URL on the records you care about. There is currently no single switch for it — see the note below.
+
+### 2. Metadata lookup, which is opt-in
+
+The app supports optional metadata plugins that look your library up against a third-party service to fill in details you would otherwise type by hand.
+
+**Nothing leaves your device on this path unless you install a metadata plugin, supply your own credential for that service, and start a lookup.**
 
 When you do run a lookup, here is exactly what is involved.
 
@@ -43,7 +57,9 @@ The credential you supply for a metadata service is stored in the **system Keych
 
 ### Choosing not to use it
 
-Metadata lookup is entirely optional. If you never install a plugin, ViLM behaves exactly as an offline application: it will scan your files, read your filenames, build your library and browse it with no network access whatsoever.
+Metadata lookup is entirely optional. If you never install a plugin, no lookup request is ever made: the app will scan your files, read your filenames, and build and browse your library without it.
+
+⚠️ **That does not make the app silent.** Remote profile images (above) load regardless of whether any plugin is installed. An offline-only build would need those switched off too, and there is no setting for that today.
 
 ## Third-Party Services
 
