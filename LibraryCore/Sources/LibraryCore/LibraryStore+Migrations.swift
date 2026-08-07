@@ -515,6 +515,52 @@ extension LibraryStore {
                 """)
         }
 
+        // v31: a match is an EDGE, not a column.
+        //
+        // 🚨 The Epic's D4 said so and it never happened: a node's identity in
+        // an external source is four columns ON the node, so one source, one
+        // answer, no history — and a null cannot distinguish "never matched"
+        // from "matched and we failed to write it down". Measured 2026-08-07:
+        // 1,236 of 1,250 matched actors and 51 of 62 matched studios carry no
+        // source id, and none of them could ever acquire one.
+        //
+        // ⚠️ TWO tables, following the precedent every other edge sets: videos
+        // live in `assets` and entities in `entity_profiles`, so one table
+        // could carry a foreign key to neither.
+        //
+        // ⚠️ Additive only. Nothing is backfilled here and the columns stay
+        // authoritative — the same staging the string→edge migration uses, and
+        // for the same reason: creating a table is reversible, and filling one
+        // is a separate step that can be verified before anything depends on it.
+        migrator.registerMigration("v31") { db in
+            try db.create(table: "video_match") { t in
+                t.column("video_id", .text).notNull()
+                    .references("assets", onDelete: .cascade)
+                t.column("source", .text).notNull()
+                t.column("source_id", .text).notNull()
+                // ⭐ The method, which the app already computes and then throws
+                // away. It renders a fingerprint match with a green seal and
+                // everything else with a question mark — it KNOWS the
+                // difference in trust, and discarded it on dismissal.
+                t.column("method", .text).notNull()
+                t.column("matched_at", .datetime).notNull()
+                // ⭐ (node, source) — NOT (node). One node may be matched in
+                // several sources at once, and two rows for one node is the
+                // supported case rather than a conflict.
+                t.primaryKey(["video_id", "source"])
+            }
+
+            try db.create(table: "entity_match") { t in
+                t.column("entity_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+                t.column("source", .text).notNull()
+                t.column("source_id", .text).notNull()
+                t.column("method", .text).notNull()
+                t.column("matched_at", .datetime).notNull()
+                t.primaryKey(["entity_id", "source"])
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

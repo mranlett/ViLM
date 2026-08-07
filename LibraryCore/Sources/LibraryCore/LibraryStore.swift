@@ -753,11 +753,17 @@ public class LibraryStore {
                 // ⚠️ `OR IGNORE` then `DELETE`, exactly as the tag tables above:
                 // where the destination edge already exists the update collides
                 // on the primary key, and one edge is the correct result.
+                // ⚠️ `entity_match` is in this list because v31 added it with
+                // the same ON DELETE CASCADE. Omitting it would mean merging
+                // two profiles discarded the identity one of them had just been
+                // confirmed with — the exact defect this loop was written to
+                // fix, recurring on a table added afterwards.
                 for (table, column) in [("video_performer", "performer_id"),
                                         ("performer_tag", "performer_id"),
                                         ("video_studio", "studio_id"),
                                         ("studio_parent", "studio_id"),
-                                        ("studio_parent", "parent_studio_id")] {
+                                        ("studio_parent", "parent_studio_id"),
+                                        ("entity_match", "entity_id")] {
                     try db.execute(sql:
                         "UPDATE OR IGNORE \(table) SET \(column) = ? WHERE \(column) = ?",
                         arguments: [normalizedNew, normalizedOld])

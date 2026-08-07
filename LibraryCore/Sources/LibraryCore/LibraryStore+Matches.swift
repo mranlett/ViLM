@@ -1,0 +1,178 @@
+// LibraryStore+Matches.swift
+// Reading and writing the match edges (migration v31).
+//
+// ⚠️ Both representations are live. The `enrichment*` columns on the node stay
+// authoritative until a per-node check shows the edges reproduce them — the
+// same staging the string→edge migration uses, and for the same reason. Every
+// read here therefore has to be explicit about WHICH it is answering from, and
+// the union readers say so in their names.
+
+import Foundation
+import GRDB
+
+extension LibraryStore {
+
+    // MARK: - Writing
+
+    /// Records that a node was identified in a source.
+    ///
+    /// ⚠️ Upserts on (node, source). Re-matching the same node in the same
+    /// source REPLACES that source's answer rather than accumulating rows — a
+    /// second opinion from the same place is a correction, not a second
+    /// identity. A different source is a different row and both survive.
+    public func recordMatch(_ match: NodeMatch, isVideo: Bool) throws {
+        let table = isVideo ? "video_match" : "entity_match"
+        let column = isVideo ? "video_id" : "entity_id"
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO \(table) (\(column), source, source_id, method, matched_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(\(column), source) DO UPDATE SET
+                    source_id = excluded.source_id,
+                    method = excluded.method,
+                    matched_at = excluded.matched_at
+                """, arguments: [match.nodeId, match.source, match.sourceId,
+                                 match.method.rawValue, match.matchedAt])
+        }
+    }
+
+    /// Forgets one source's answer for a node.
+    ///
+    /// ⚠️ Scoped to a source. Clearing "every match" would discard identities
+    /// this library never asked about, which is the destructive reading of a
+    /// re-match.
+    public func removeMatch(nodeId: String, source: String, isVideo: Bool) throws {
+        let table = isVideo ? "video_match" : "entity_match"
+        let column = isVideo ? "video_id" : "entity_id"
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM \(table) WHERE \(column) = ? AND source = ?",
+                           arguments: [nodeId, source])
+        }
+    }
+
+    // MARK: - Reading
+
+    /// Every source that has identified this node, newest first.
+    public func matches(forVideo videoId: UUID) throws -> [NodeMatch] {
+        try readMatches(table: "video_match", column: "video_id", node: videoId.uuidString)
+    }
+
+    public func matches(forEntity entityId: String) throws -> [NodeMatch] {
+        try readMatches(table: "entity_match", column: "entity_id", node: entityId)
+    }
+
+    private func readMatches(table: String, column: String, node: String) throws -> [NodeMatch] {
+        let rows: [NodeMatch] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT \(column), source, source_id, method, matched_at
+                  FROM \(table) WHERE \(column) = ?
+                """, arguments: [node])
+                .compactMap { row in
+                    // ⚠️ An unrecognised method decodes as nil and the row is
+                    // SKIPPED rather than defaulting — a value written by a
+                    // newer build must not silently read as `backfill`, which
+                    // would understate how well the node was identified.
+                    guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
+                    return NodeMatch(nodeId: row[column], source: row["source"],
+                                     sourceId: row["source_id"], method: method,
+                                     matchedAt: row["matched_at"])
+                }
+        }
+        return NodeMatchRanking.ordered(rows)
+    }
+
+    // MARK: - The migration's own questions
+
+    /// Nodes claiming to be matched that have no match edge.
+    ///
+    /// 🚨 The 1,287. This is the query a column could not answer: a null
+    /// `enrichmentSourceId` beside `enrichmentState = matched` is
+    /// indistinguishable from a node nobody ever looked up, so those nodes were
+    /// invisible AND unreachable — `skipReason` returns "already matched", so
+    /// the tool that would supply an id refuses to examine them.
+    ///
+    /// Returns entity ids and video ids separately, because the tools that
+    /// would repair them are different.
+    public func nodesMatchedWithoutAnEdge() throws -> (entities: [String], videos: [UUID]) {
+        try dbQueue.read { db in
+            let entities = try String.fetchAll(db, sql: """
+                SELECT p.id FROM entity_profiles p
+                 WHERE p.enrichment_state = 'matched'
+                   AND NOT EXISTS (SELECT 1 FROM entity_match m WHERE m.entity_id = p.id)
+                 ORDER BY p.id
+                """)
+            let videos = try String.fetchAll(db, sql: """
+                SELECT a.id FROM assets a
+                 WHERE a.enrichment_state = 'matched'
+                   AND NOT EXISTS (SELECT 1 FROM video_match m WHERE m.video_id = a.id)
+                """).compactMap(UUID.init(uuidString:))
+            return (entities, videos)
+        }
+    }
+
+    /// Creates match edges from the identity columns, for everything that has
+    /// one and no edge yet.
+    ///
+    /// ⚠️ A node marked `matched` with NO source id produces no row,
+    /// deliberately. That absence is the finding — inventing a row with an
+    /// empty id would bury exactly what this migration exists to surface.
+    ///
+    /// ⚠️ `method = .backfill`, never `.operator`. The method was not recorded
+    /// at the time and is genuinely unknown; claiming a person chose it would
+    /// invent evidence.
+    ///
+    /// Idempotent: re-running adds nothing, because it only writes where no
+    /// edge exists.
+    @discardableResult
+    public func backfillMatchEdges() throws -> (entities: Int, videos: Int) {
+        let now = Date()
+        return try dbQueue.write { db in
+            var entities = 0, videos = 0
+
+            for row in try Row.fetchAll(db, sql: """
+                SELECT p.id, p.enrichment_source, p.enrichment_source_id,
+                       p.enrichment_checked_at
+                  FROM entity_profiles p
+                 WHERE p.enrichment_source_id IS NOT NULL
+                   AND p.enrichment_source_id <> ''
+                   AND NOT EXISTS (SELECT 1 FROM entity_match m WHERE m.entity_id = p.id)
+                """) {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO entity_match
+                        (entity_id, source, source_id, method, matched_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, arguments: [row["id"],
+                                     // A source that was never named still has
+                                     // an id worth keeping; "unknown" is honest
+                                     // and keeps the row addressable.
+                                     (row["enrichment_source"] as String?) ?? "unknown",
+                                     row["enrichment_source_id"],
+                                     MatchMethod.backfill.rawValue,
+                                     (row["enrichment_checked_at"] as Date?) ?? now])
+                entities += 1
+            }
+
+            for row in try Row.fetchAll(db, sql: """
+                SELECT a.id, a.enrichment_source, a.enrichment_source_id,
+                       a.enrichment_checked_at
+                  FROM assets a
+                 WHERE a.enrichment_source_id IS NOT NULL
+                   AND a.enrichment_source_id <> ''
+                   AND NOT EXISTS (SELECT 1 FROM video_match m WHERE m.video_id = a.id)
+                """) {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO video_match
+                        (video_id, source, source_id, method, matched_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, arguments: [row["id"],
+                                     (row["enrichment_source"] as String?) ?? "unknown",
+                                     row["enrichment_source_id"],
+                                     MatchMethod.backfill.rawValue,
+                                     (row["enrichment_checked_at"] as Date?) ?? now])
+                videos += 1
+            }
+
+            return (entities, videos)
+        }
+    }
+}
