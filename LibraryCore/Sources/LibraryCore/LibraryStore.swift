@@ -2208,6 +2208,40 @@ public class LibraryStore {
         return new
     }
 
+    /// Performers recorded twice, found by their own alias lists.
+    ///
+    /// ⚠️ Counts videos across BOTH representations. A profile reachable only
+    /// through `video_performer` edges would otherwise read as having none, and
+    /// "0 videos" is the strongest argument for merging one away — so getting
+    /// it wrong argues for deleting the wrong half.
+    public func auditAliasSplits() throws -> [AliasSplitCandidate] {
+        let profiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+
+        let edges: [(String, String)] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT video_id, performer_id FROM video_performer")
+                .map { ($0["video_id"], $0["performer_id"]) }
+        }
+        // ⚠️ A SET of video ids per profile, not a running total. A performer
+        // carried by both a tag string and an edge on the same video must count
+        // once — adding the two sources would double every migrated profile and
+        // make the merge look far more valuable than it is.
+        var byProfile: [String: Set<String>] = [:]
+        for (videoId, performerId) in edges {
+            byProfile[performerId, default: []].insert(videoId)
+        }
+        for asset in try fetchAllAssets() {
+            for name in Set(asset.actors) {
+                byProfile["actor:\(name)", default: []].insert(asset.id.uuidString)
+            }
+        }
+        let counts = byProfile.mapValues(\.count)
+
+        return AliasSplitAudit.findings(.init(
+            profiles: profiles.map { ($0.id, $0.akas,
+                                      $0.enrichmentState == .matched, $0.birthYear) },
+            videoCounts: counts))
+    }
+
     /// Profiles nothing refers to, grouped by node kind.
     ///
     /// ⚠️ Gathers the edge sets as well as the strings. A check reading tag

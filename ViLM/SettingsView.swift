@@ -20,6 +20,7 @@ struct SettingsView: View {
     var onTagCleanup: (() -> Void)?
     var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
+    var onAliasSplits: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
@@ -117,6 +118,8 @@ struct SettingsView: View {
                     toolButton("Fix Duplicate Studios",
                                icon: "building.2",
                                action: onStudioConflicts)
+                    toolButton("Merge Duplicate Performers",
+                               icon: "person.2.badge.gearshape", action: onAliasSplits)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
                     toolButton("Remove Orphaned Profiles", icon: "trash.slash", action: onTagCleanup)
