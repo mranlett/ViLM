@@ -27,6 +27,7 @@ struct SettingsView: View {
     var onBatchMatchStudios: (() -> Void)?
     var onStudioConflicts: (() -> Void)?
     var onStudioAudit: (() -> Void)?
+    var onGraphAudit: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
@@ -157,6 +158,12 @@ struct SettingsView: View {
                     // tell apart at a glance.
                     toolButton("Studio Health",
                                icon: "checklist", action: onStudioAudit)
+                        .disabled(session.isFederated)
+                    // Cross-record checks: a video's date against a performer's
+                    // birth date or recorded career. Finds data that is WRONG,
+                    // where the others find data that is missing.
+                    toolButton("Impossible Data",
+                               icon: "exclamationmark.magnifyingglass", action: onGraphAudit)
                         .disabled(session.isFederated)
                 }
 

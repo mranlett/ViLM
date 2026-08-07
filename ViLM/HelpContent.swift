@@ -213,8 +213,11 @@ enum HelpContent {
                   description: "Step through the same list of videos you arrived from, without going back to the grid."),
             .init(label: "Full-screen toggle",
                   description: "Expands the detail pane to fill the window."),
+            // The Danger Zone disclosure group was removed in 6d2855d and this
+            // description was not updated with it, so the help sent people to a
+            // section that no longer exists.
             .init(label: "Delete Video",
-                  description: "In the Danger Zone section — moves the video file and its metadata to the Trash. Recoverable from the Trash, but not undoable within the app."),
+                  description: "In the ⋯ menu at the top of the video's page, with one video selected — moves the video file and its metadata to the Trash. Recoverable from the Trash, but not undoable within the app. On a Mac, ⌘⌫ does the same thing."),
             .init(label: "Batch edit (multiple videos selected)",
                   description: "Toggle reviewed status for all selected videos at once, add or remove tags shared across the whole selection, and set the same Series Name or Season number for every selected video. Episode number and episode title are edited one video at a time, since those are usually unique per video."),
         ]

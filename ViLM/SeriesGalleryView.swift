@@ -15,6 +15,7 @@ struct SeriesGalleryView: View {
 
     @State private var alphaFilter: Character? = nil
     @State private var isShowingCleanup = false
+    @State private var isShowingRemoval = false
     @State private var isShowingHelp = false
 
     // Cached once per assets change rather than re-derived every render.
@@ -73,13 +74,25 @@ struct SeriesGalleryView: View {
         .toolbar {
             if !allSeries.isEmpty {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        isShowingCleanup = true
+                    // A menu rather than two buttons: these are the two things
+                    // you can do to a series name, and they are opposites —
+                    // one keeps a name and tidies it, the other takes it off.
+                    Menu {
+                        Button {
+                            isShowingCleanup = true
+                        } label: {
+                            Label("Standardize Names", systemImage: "wand.and.stars")
+                        }
+                        Button(role: .destructive) {
+                            isShowingRemoval = true
+                        } label: {
+                            Label("Remove Names…", systemImage: "eraser")
+                        }
                     } label: {
-                        Label("Standardize Names", systemImage: "wand.and.stars")
+                        Label("Clean Up", systemImage: "wand.and.stars")
                     }
-                    // Single-library tool: renames primary rows only, which
-                    // would half-rename a series spanning attached libraries.
+                    // Single-library tools: both write primary rows only, which
+                    // would half-change a series spanning attached libraries.
                     .disabled(LibrarySession.shared.isFederated)
                 }
             }
@@ -94,6 +107,11 @@ struct SeriesGalleryView: View {
         .sheet(isPresented: $isShowingCleanup) {
             if let url = libraryURL {
                 SeriesCleanupView(libraryURL: url, assets: assets)
+            }
+        }
+        .sheet(isPresented: $isShowingRemoval) {
+            if let url = libraryURL {
+                SeriesRemovalView(libraryURL: url, assets: assets) { recompute() }
             }
         }
         .sheet(isPresented: $isShowingHelp) {

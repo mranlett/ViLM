@@ -127,7 +127,41 @@ final class AssetSortTests: XCTestCase {
         XCTAssertEqual(AssetSort.Option.name.rawValue, "Name")
         XCTAssertEqual(AssetSort.Option.date.rawValue, "Date Added")
         XCTAssertEqual(AssetSort.Option.size.rawValue, "File Size")
-        XCTAssertEqual(AssetSort.Option.allCases.count, 4)
+        XCTAssertEqual(AssetSort.Option.releaseDate.rawValue, "Release Date")
+        XCTAssertEqual(AssetSort.Option.allCases.count, 5)
+    }
+
+    /// ⚠️ Undated videos sort LAST ascending. They are not "very old", they are
+    /// unknown, and leading a career view with them opens it on the records
+    /// that say nothing about it.
+    func testUndatedVideosSortLastInAscendingReleaseOrder() {
+        let dated = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: [], releaseDate: "2020-01-01")
+        let undated = Asset(relativePath: "b.mp4", fileName: "b.mp4", tags: [])
+
+        let out = AssetSort.sorted([undated, dated], by: .releaseDate, ascending: true)
+        XCTAssertEqual(out.map(\.fileName), ["a.mp4", "b.mp4"])
+    }
+
+    func testReleaseOrderIsChronological() {
+        let older = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: [], releaseDate: "2018-03-04")
+        let newer = Asset(relativePath: "b.mp4", fileName: "b.mp4",
+                          tags: [], releaseDate: "2024-11-30")
+
+        XCTAssertTrue(AssetSort.releaseDatePrecedes(older, newer))
+        XCTAssertFalse(AssetSort.releaseDatePrecedes(newer, older))
+    }
+
+    /// An empty string is not a date. Treating it as one would sort those
+    /// records to the front of every chronological view.
+    func testAnEmptyReleaseDateCountsAsUnknown() {
+        let blank = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: [], releaseDate: "   ")
+        let dated = Asset(relativePath: "b.mp4", fileName: "b.mp4",
+                          tags: [], releaseDate: "2001-01-01")
+
+        XCTAssertTrue(AssetSort.releaseDatePrecedes(dated, blank))
     }
 
     func testEmptyInputIsHandledForEveryMode() {

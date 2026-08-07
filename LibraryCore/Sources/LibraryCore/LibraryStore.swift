@@ -1522,6 +1522,18 @@ public class LibraryStore {
             parentPairs: try studioParentPairs()))
     }
 
+    /// Data that is wrong, found by joining records that disagree.
+    ///
+    /// Whole-table reads, like `auditStudios`: the questions are about the
+    /// library entire, and asking them per record is what made an earlier
+    /// version of `promoteStudioProfiles` unusable with the drive attached.
+    public func auditGraph() throws -> [GraphCheck] {
+        let profiles = try fetchAllEntityProfiles()
+        return GraphAudit.run(GraphAudit.Input(
+            assets: try fetchAllAssets(),
+            profiles: Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })))
+    }
+
     public func tagIds(forVideo videoId: UUID) throws -> [String] {
         try dbQueue.read { db in
             try String.fetchAll(db, sql:

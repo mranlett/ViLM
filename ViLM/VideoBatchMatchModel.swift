@@ -50,10 +50,45 @@ final class VideoBatchMatchModel: ObservableObject {
     private let libraryURLs: [URL]
     private var cancelled = false
 
-    init(libraryURLs: [URL]) { self.libraryURLs = libraryURLs }
+    /// Restricts the run to specific videos, or `nil` for the whole library.
+    ///
+    /// ⭐ This is what lets the same run be launched from a performer's or a
+    /// studio's page over just their films. Matching a library of two thousand
+    /// videos to fix one studio's forty is most of an hour of rate-limited
+    /// requests to do forty seconds of work.
+    ///
+    /// ⚠️ Applied to BOTH the count and the crawl, from one property. The
+    /// comments below record two separate defects that came from `total` and
+    /// the loop disagreeing about what was being walked; a scope that reached
+    /// only one of them would be the third.
+    private let scope: Scope?
+
+    /// The videos a scoped run covers, and what to call them.
+    struct Scope {
+        /// What the operator is looking at — used in the screen's wording, so
+        /// it says "40 videos for this studio" rather than a bare number.
+        let label: String
+        let assetIDs: Set<Asset.ID>
+    }
+
+    init(libraryURLs: [URL], scope: Scope? = nil) {
+        self.libraryURLs = libraryURLs
+        self.scope = scope
+    }
 
     /// What the run will actually walk, for the operator to see before it does.
     var libraryNames: [String] { libraryURLs.map { $0.lastPathComponent } }
+
+    /// What this run covers, for the screen to state plainly before it starts.
+    var scopeLabel: String? { scope?.label }
+    var isScoped: Bool { scope != nil }
+
+    /// The assets this run should examine, from one place.
+    private func assetsInScope(_ store: LibraryStore) -> [Asset] {
+        guard let all = try? store.fetchAllAssets() else { return [] }
+        guard let scope else { return all }
+        return all.filter { scope.assetIDs.contains($0.id) }
+    }
 
     private var provider: (any VideoMetadataProvider)? {
         PluginEnvironment.registry.installedVideoProviders().first
@@ -122,15 +157,18 @@ final class VideoBatchMatchModel: ObservableObject {
         // showed the first library's count and looked like it was ignoring the
         // second. It was also never reset, so a second run doubled it.
         total = libraryURLs.reduce(0) { running, url in
-            running + ((try? LibraryStore(at: url).fetchAllAssets().count) ?? 0)
+            guard let store = try? LibraryStore(at: url) else { return running }
+            return running + assetsInScope(store).count
         }
 
         // The rate limit the provider declares, honoured rather than guessed.
         let delay = UInt64((1.0 / max(provider.requestsPerSecond, 0.1)) * 1_000_000_000)
 
         for libraryURL in libraryURLs {
-            guard let store = try? LibraryStore(at: libraryURL),
-                  let assets = try? store.fetchAllAssets() else { continue }
+            guard let store = try? LibraryStore(at: libraryURL) else { continue }
+            // Same helper the total came from, so the bar and the crawl can
+            // never disagree about what is being walked.
+            let assets = assetsInScope(store)
             // ⚠️ `total` is NOT accumulated here. It is counted in full above,
             // before the run starts. Adding to it again made the progress read
             // "N of 2×count" — the bar could never pass halfway, and the figure
@@ -272,17 +310,23 @@ final class VideoBatchMatchModel: ObservableObject {
                 try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")
             }
 
-            guard !fields.isEmpty else {
-                appliedAsset = asset
-                return .applied(route: .fingerprint, fields: [], tags: [])
-            }
-
             // Same as the per-video path: a studio the source supplied verifies
             // the studio itself, which is the only route by which one ever
             // stops being unconfirmed.
+            //
+            // ⚠️ ABOVE the "nothing to write" return, for exactly the reason
+            // the hierarchy block above it is: a library already carrying the
+            // right studio produces no fields at all, and confirming below the
+            // guard meant the correct case was the one that never verified.
             if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
-                                                                  accepting: fields) {
+                                                                  accepting: fields,
+                                                                  asset: asset) {
                 try? store.confirmStudio(studio, source: provider.displayName)
+            }
+
+            guard !fields.isEmpty else {
+                appliedAsset = asset
+                return .applied(route: .fingerprint, fields: [], tags: [])
             }
 
             appliedAsset = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,

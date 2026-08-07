@@ -551,7 +551,8 @@ final class VideoEnrichmentModel: ObservableObject {
         // Nothing else confirms a studio, so without this one write a studio
         // stays "unconfirmed" forever however many videos credit it.
         if let studio = VideoEnrichmentReview.confirmedStudio(proposal: proposal,
-                                                              accepting: accepted),
+                                                              accepting: accepted,
+                                                              asset: asset),
            let url = LibrarySession.shared.url(for: asset.id) {
             let store = try? LibraryStore(at: url)
             try? store?.confirmStudio(studio, source: providerName)

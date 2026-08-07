@@ -122,6 +122,8 @@ struct AssetsGridView: View {
     @State private var collapsedImprints: Set<String> = []
     /// The root `familyStudios` was resolved for, so the walk is not repeated.
     @State private var resolvedFamilyRoot: String?
+    /// Ages the user has collapsed in the career-arc view (unknown = Int.min).
+    @State private var collapsedAges: Set<Int> = []
     // A–Z letter strip over display titles ("#" = non-letter starts).
     @State private var alphaFilter: Character? = nil
 
@@ -351,6 +353,8 @@ struct AssetsGridView: View {
                 } else if displayedAssets.isEmpty {
                     emptyStateView // Use the helper view here
                         .padding(.top, 100)
+                } else if showCareerArcSections {
+                    careerArcGrid
                 } else if showImprintSections {
                     imprintSectionedGrid
                 } else if showSeasonSections {
@@ -513,6 +517,15 @@ struct AssetsGridView: View {
                 // Viewing a single series defaults to episode order.
                 if isSingleSeriesSelected {
                     sortOption = .seriesOrder
+                }
+                // A performer's page defaults to release order, for the same
+                // reason: it is the ordering that makes the page mean
+                // something. A filmography read chronologically is a career;
+                // read by filename it is a bag of videos. It also puts the
+                // career-arc grouping in front of the operator rather than
+                // behind a sort menu they would have to know to open.
+                if selectedActor != nil {
+                    sortOption = .releaseDate
                 }
                 hasLoadedDefaults = true
             }
@@ -825,6 +838,78 @@ struct AssetsGridView: View {
             }
         }
         return HelpContent.allAssets.id
+    }
+
+    // MARK: - Career arc grouping
+
+    /// The performer whose page this is, if it is one.
+    private var selectedActor: String? {
+        guard sidebarSelection.count == 1, let first = sidebarSelection.first,
+              case .actor(let name) = first else { return nil }
+        return name
+    }
+
+    /// This performer's videos, split by how old they were at each release.
+    ///
+    /// ⚠️ Computed from `displayedAssets`, so it re-splits as filters narrow
+    /// rather than describing a career the page is not showing.
+    private var careerArcSections: [CareerArc.Section] {
+        guard let actor = selectedActor else { return [] }
+        return CareerArc.sections(assets: displayedAssets,
+                                  profile: entityProfiles["actor:\(actor)"])
+    }
+
+    /// Split by age only when it says something, and only when the page is
+    /// already in release order — the arc is a chronology, and grouping a
+    /// name-sorted or size-sorted grid by age would make the sections
+    /// internally arbitrary.
+    ///
+    /// Same shape as `showSeasonSections`: one entity, the matching sort, and
+    /// more than one group to show.
+    private var showCareerArcSections: Bool {
+        selectedActor != nil
+            && sortOption == .releaseDate
+            && CareerArc.isWorthShowing(careerArcSections)
+    }
+
+    private var careerArcGrid: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(careerArcSections) { section in
+                let isCollapsed = collapsedAges.contains(section.id)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if isCollapsed {
+                            collapsedAges.remove(section.id)
+                        } else {
+                            collapsedAges.insert(section.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(section.title)
+                            .font(.headline)
+                        Text("\(section.assets.count) video\(section.assets.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.top, 8)
+                }
+                .buttonStyle(.plain)
+
+                if !isCollapsed {
+                    LazyVGrid(columns: gridColumns, spacing: 20) {
+                        ForEach(section.assets) { asset in
+                            interactiveGridItem(for: asset)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Studio family grouping

@@ -288,10 +288,20 @@ struct SingleInspectorView: View {
                         } label: {
                             Label("Add to Playlist", systemImage: "list.and.film")
                         }
+                        // ⚠️ Labels here are kept SHORT, and the two regenerate
+                        // actions live in a submenu, because this menu has to
+                        // fit on a phone at an accessibility text size.
+                        //
+                        // At a large type size every row wraps to two or three
+                        // lines, and seven rows then ran past the bottom of the
+                        // screen — taking `Delete Video…` with them, since a
+                        // destructive action belongs last. The action was
+                        // present and unreachable, which reads exactly like it
+                        // having been removed.
                         Button {
                             isShowingEditVideo = true
                         } label: {
-                            Label("Edit Video (Trim / Flip)", systemImage: "slider.horizontal.below.rectangle")
+                            Label("Trim / Flip", systemImage: "slider.horizontal.below.rectangle")
                         }
                         .disabled(missingAssetIDs.contains(asset.id))
                         // Only offered when a source is actually installed, and
@@ -311,18 +321,24 @@ struct SingleInspectorView: View {
                         } label: {
                             Label("Rename File…", systemImage: "pencil.line")
                         }
-                        Button {
-                            regenerateDefaultThumbnail()
+                        // One row instead of two, and they are a genuine pair —
+                        // both rebuild imagery from the file.
+                        Menu {
+                            Button {
+                                regenerateDefaultThumbnail()
+                            } label: {
+                                Label("Thumbnail", systemImage: "photo")
+                            }
+                            .disabled(isSavingThumb)
+                            Button {
+                                generateContactSheet()
+                            } label: {
+                                Label("Contact Sheet", systemImage: "square.grid.3x3")
+                            }
+                            .disabled(isGeneratingSheet)
                         } label: {
-                            Label("Regenerate Thumbnail", systemImage: "photo")
+                            Label("Regenerate", systemImage: "arrow.clockwise")
                         }
-                        .disabled(isSavingThumb)
-                        Button {
-                            generateContactSheet()
-                        } label: {
-                            Label("Regenerate Contact Sheet", systemImage: "square.grid.3x3")
-                        }
-                        .disabled(isGeneratingSheet)
                         Divider()
                         Button(role: .destructive) {
                             showDeleteConfirmation = true

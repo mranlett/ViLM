@@ -17,6 +17,13 @@ public enum AssetSort {
         case name        = "Name"
         case date        = "Date Added"
         case size        = "File Size"
+        /// When the video was PUBLISHED, as against when it was added here.
+        ///
+        /// The library's own chronology rather than the operator's: it is what
+        /// makes a performer's filmography read as a career and a studio's
+        /// catalogue read as a history. `Date Added` says only what order a
+        /// collection was assembled in, which is a fact about the collector.
+        case releaseDate = "Release Date"
     }
 
     /// Ordering within a series: season, then episode, then date added, then filename.
@@ -54,7 +61,33 @@ public enum AssetSort {
             return a.createdAt < b.createdAt
         case .size:
             return (fileSizes[a.id] ?? 0) < (fileSizes[b.id] ?? 0)
+        case .releaseDate:
+            return releaseDatePrecedes(a, b)
         }
+    }
+
+    /// ⚠️ Videos with no release date sort LAST in ascending order, whichever
+    /// direction is asked for — they are not "very old", they are unknown, and
+    /// letting them lead a career view would open it on the records that say
+    /// nothing about it. Ties fall back to the series order so an episode
+    /// sequence released on one day still reads in order.
+    static func releaseDatePrecedes(_ a: Asset, _ b: Asset) -> Bool {
+        switch (normalizedReleaseDate(a), normalizedReleaseDate(b)) {
+        case let (da?, db?):
+            return da == db ? seriesOrderPrecedes(a, b) : da < db
+        case (nil, _?): return false
+        case (_?, nil): return true
+        case (nil, nil): return seriesOrderPrecedes(a, b)
+        }
+    }
+
+    /// ISO-8601 dates compare correctly as strings, so this only has to reject
+    /// what is empty. Anything else is left to sort as the source wrote it
+    /// rather than being silently reinterpreted.
+    private static func normalizedReleaseDate(_ asset: Asset) -> String? {
+        guard let raw = asset.releaseDate?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        return raw
     }
 
     /// Sorts assets for display.

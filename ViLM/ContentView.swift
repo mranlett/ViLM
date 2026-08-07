@@ -104,6 +104,9 @@ struct ContentView: View {
     @State private var isShowingStudioConflicts = false
     @State private var isShowingStudioBatchMatch = false
     @State private var isShowingStudioAudit = false
+    @State private var isShowingGraphAudit = false
+    /// The video an audit finding asked to open, run once its sheet has closed.
+    @State private var pendingAuditVideo: (() -> Void)?
     /// The repair a studio finding asked for, run once the audit sheet has
     /// actually closed. Presenting a sheet while another is dismissing is how
     /// the second one silently fails to appear.
@@ -252,6 +255,7 @@ struct ContentView: View {
                     onBatchMatchStudios: { isShowingStudioBatchMatch = true },
                     onStudioConflicts: { isShowingStudioConflicts = true },
                     onStudioAudit: { isShowingStudioAudit = true },
+                    onGraphAudit: { isShowingGraphAudit = true },
                     onConnectGraph: { isShowingGraphConnect = true },
                     onResetMatches: { isShowingMatchReset = true },
                     onMoveVideos: { isShowingLibraryTransfer = true },
@@ -341,6 +345,19 @@ struct ContentView: View {
                 let urls = LibrarySession.shared.allURLs
                 if !urls.isEmpty {
                     StudioBatchMatchView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingGraphAudit, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
+                if let url = selectedLibraryURL {
+                    GraphAuditView(libraryURL: url) { assetID in
+                        // Stored, not run: this sheet is still on screen, and
+                        // selecting behind it would be invisible until it
+                        // closed. `onDismiss` runs it.
+                        pendingAuditVideo = { selectedAssetIDs = [assetID] }
+                    }
                 }
             }
             .sheet(isPresented: $isShowingStudioAudit, onDismiss: {

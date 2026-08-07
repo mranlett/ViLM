@@ -19,6 +19,8 @@ struct ProfileGraphHeaderView: View {
     /// and the page says something different about each.
     @State private var studioLineage: StudioLineage?
     @State private var isShowingEditor = false
+    @State private var isShowingEnrichment = false
+    @State private var isShowingScopedMatch = false
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
     @State private var newGlobalName = ""
@@ -209,6 +211,39 @@ struct ProfileGraphHeaderView: View {
                             isShowingEditor = true
                         } label: {
                             Label("Edit Profile", systemImage: "person.text.rectangle")
+                        }
+
+                        // Matching lives beside the other actions on the record,
+                        // the way the video page puts "Match with …" in its own
+                        // ellipsis menu rather than inside its edit sheet.
+                        //
+                        // Labelled with the source's own name — this file must
+                        // not know which sources exist.
+                        if !isStudio, let provider = installedActorProvider {
+                            Button {
+                                isShowingEnrichment = true
+                            } label: {
+                                Label("Match with \(provider.displayName)",
+                                      systemImage: "sparkle.magnifyingglass")
+                            }
+                        }
+
+                        // The whole-library run, narrowed to what this page is
+                        // showing. Matching two thousand videos to fix one
+                        // studio's forty is most of an hour of rate-limited
+                        // requests to do a minute of work.
+                        //
+                        // ⚠️ Scoped to `filteredAssets` — the videos ON SCREEN,
+                        // not every video this entity has. If a filter is
+                        // narrowing the page, the run follows it, which is why
+                        // the label states the count rather than the entity.
+                        if hasVideoProvider, !filteredAssets.isEmpty {
+                            Button {
+                                isShowingScopedMatch = true
+                            } label: {
+                                Label("Match These \(filteredAssets.count) Videos",
+                                      systemImage: "sparkles.rectangle.stack")
+                            }
                         }
                         
                         if filteredAssets.count == 0 && entityProfile != nil {
@@ -484,6 +519,44 @@ struct ProfileGraphHeaderView: View {
                 EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: ownerRawProfile(for: id), onSave: saveProfile)
             }
         }
+        .sheet(isPresented: $isShowingScopedMatch) {
+            // Every open library, like the Settings run — the scope is the set
+            // of asset ids, and those already identify which library each video
+            // lives in once the crawl finds it.
+            let urls = LibrarySession.shared.allURLs
+            if !urls.isEmpty {
+                VideoBatchMatchView(libraryURLs: urls, scope: scopedMatchScope) {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ReloadAssets"), object: nil)
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingEnrichment) {
+            if let provider = installedActorProvider, let id = currentEntityId,
+               let name = currentName {
+                ActorEnrichmentSheet(
+                    provider: provider,
+                    entityId: id,
+                    actorName: name,
+                    // The OWNING library's raw copy, not the merged view: the
+                    // merged one carries other libraries' fields, and saving it
+                    // back would copy them into the owner as if they had been
+                    // entered there.
+                    currentProfile: ownerRawProfile(for: id),
+                    libraryURL: libraryURL,
+                    onApply: { merged, renameTo in
+                        // ⚠️ Save BEFORE renaming. The rename rewrites this
+                        // record's identity, so writing afterwards would target
+                        // a row that has just moved.
+                        saveProfile(merged)
+                        if let renameTo, !renameTo.isEmpty, renameTo != name {
+                            newGlobalName = renameTo
+                            performGlobalRename()
+                        }
+                    }
+                )
+            }
+        }
         .alert("Rename Globally", isPresented: $isShowingRenameDialog) {
             TextField("New Name", text: $newGlobalName)
             Button("Cancel", role: .cancel) {}
@@ -598,6 +671,33 @@ struct ProfileGraphHeaderView: View {
                 }
             }
         }
+    }
+
+    /// The installed actor source, if any.
+    ///
+    /// `installed` is the only list the enrichment UI may consult — an
+    /// available but uninstalled plugin must have no affordance anywhere (D3).
+    private var installedActorProvider: (any ActorMetadataProvider)? {
+        PluginEnvironment.registry.installed
+            .compactMap { $0 as? any ActorMetadataProvider }
+            .first
+    }
+
+    /// Whether a scoped video run could do anything. Same rule as everywhere
+    /// else — an available but uninstalled plugin gets no affordance (D3).
+    private var hasVideoProvider: Bool {
+        !PluginEnvironment.registry.installedVideoProviders().isEmpty
+    }
+
+    /// What this page is showing, as a run scope.
+    ///
+    /// The label names the entity as well as the count, because the run screen
+    /// is otherwise identical to the whole-library one and there would be
+    /// nothing on it saying which forty videos it meant.
+    private var scopedMatchScope: VideoBatchMatchModel.Scope {
+        VideoBatchMatchModel.Scope(
+            label: "Matching the \(filteredAssets.count) video\(filteredAssets.count == 1 ? "" : "s") shown for \(currentName ?? "this page").",
+            assetIDs: Set(filteredAssets.map(\.id)))
     }
 
     /// Circle for a face, rounded rectangle for a logo.
@@ -722,160 +822,6 @@ struct ProfileGraphHeaderView: View {
         }
     }
 
-    /// Pinch-to-zoom for a single full-screen photo. Deliberately scoped to
-    /// zoom-in-place (no panning): the pager's own swipe-to-advance uses a
-    /// plain one-finger `DragGesture`, and a competing one-finger pan gesture
-    /// here would fight it for recognition. Pinch (two fingers) and
-    /// double-tap don't overlap with that at all, so they're safe to attach
-    /// with `.simultaneousGesture` without touching the pager's gesture.
-    private struct ZoomablePhoto<Content: View>: View {
-        @ViewBuilder let content: () -> Content
-
-        @State private var scale: CGFloat = 1
-        @State private var lastScale: CGFloat = 1
-
-        private let minScale: CGFloat = 1
-        private let maxScale: CGFloat = 5
-
-        var body: some View {
-            content()
-                .scaleEffect(scale)
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            scale = min(max(lastScale * value, minScale), maxScale)
-                        }
-                        .onEnded { _ in
-                            lastScale = scale
-                        }
-                )
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            scale = 1
-                            lastScale = 1
-                        }
-                    }
-                )
-        }
-    }
-
-    /// A three-page carousel that wraps endlessly with genuinely seamless
-    /// transitions.
-    ///
-    /// Rather than fighting `TabView`'s page style (which animates the large
-    /// index jump when snapping past a sentinel), this renders exactly three
-    /// pages — previous, current, next — and drives a manual drag offset.
-    /// After a swipe animates the neighbour to center, `index` is updated and
-    /// the offset reset in the animation's completion handler. Because the
-    /// newly-centered page shows the identical photo at the identical screen
-    /// position, the recenter is invisible.
-    private struct WrappingPhotoPager<Content: View>: View {
-        let count: Int
-        @Binding var index: Int
-        @ViewBuilder let content: (Int) -> Content
-
-        @State private var dragOffset: CGFloat = 0
-        @State private var isSettling = false
-
-        var body: some View {
-            GeometryReader { geo in
-                let w = max(geo.size.width, 1)
-                Group {
-                    if count <= 1 {
-                        content(wrapped(index))
-                            .frame(width: w, height: geo.size.height)
-                    } else {
-                        HStack(spacing: 0) {
-                            content(wrapped(index - 1)).frame(width: w, height: geo.size.height)
-                            content(wrapped(index)).frame(width: w, height: geo.size.height)
-                            content(wrapped(index + 1)).frame(width: w, height: geo.size.height)
-                        }
-                        // No -w here. The HStack is 3w wide and the enclosing
-                        // .frame(width: w) CENTRES it, which already places the
-                        // middle page -- wrapped(index) -- in the visible
-                        // window. Subtracting another w shifted one page
-                        // further, so tapping a thumbnail opened the NEXT photo.
-                        //
-                        // This restores the invariant settle() already documents:
-                        // at dragOffset == 0 the visible page is wrapped(index).
-                        .offset(x: dragOffset)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    guard !isSettling else { return }
-                                    dragOffset = value.translation.width
-                                }
-                                .onEnded { value in
-                                    guard !isSettling else { return }
-                                    let threshold = w * 0.25
-                                    if value.translation.width <= -threshold {
-                                        settle(step: 1, width: w)
-                                    } else if value.translation.width >= threshold {
-                                        settle(step: -1, width: w)
-                                    } else {
-                                        withAnimation(.easeOut(duration: 0.2)) { dragOffset = 0 }
-                                    }
-                                }
-                        )
-                    }
-                }
-                .frame(width: w, height: geo.size.height)
-                .clipped()
-                .contentShape(Rectangle())
-                // Kindle-style edge taps, in addition to swiping.
-                //
-                // Each zone is a quarter of the width, which leaves the middle
-                // half clear. That gap is deliberate: the photo under this
-                // overlay takes a double-tap to reset zoom, and people pinch
-                // and double-tap toward the centre. Full-width zones would
-                // turn every stray double-tap into two page turns.
-                //
-                // Reuses settle(), so a tap and a swipe animate identically.
-                .overlay {
-                    if count > 1 {
-                        HStack(spacing: 0) {
-                            tapZone(step: -1, width: w, label: "Previous photo")
-                            Spacer(minLength: 0)
-                            tapZone(step: 1, width: w, label: "Next photo")
-                        }
-                    }
-                }
-            }
-        }
-
-        private func tapZone(step: Int, width w: CGFloat, label: String) -> some View {
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .frame(width: w * 0.25)
-                .onTapGesture {
-                    guard !isSettling else { return }
-                    settle(step: step, width: w)
-                }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel(label)
-        }
-
-        private func wrapped(_ i: Int) -> Int {
-            guard count > 0 else { return 0 }
-            return ((i % count) + count) % count
-        }
-
-        private func settle(step: Int, width w: CGFloat) {
-            isSettling = true
-            withAnimation(.easeOut(duration: 0.25)) {
-                // step +1 slides content left to reveal the next page; -1 right.
-                dragOffset = -CGFloat(step) * w
-            } completion: {
-                // Recenter onto the now-visible page with no animation. Same
-                // pixels at the same position, so nothing appears to move.
-                index = wrapped(index + step)
-                dragOffset = 0
-                isSettling = false
-            }
-        }
-    }
     
     // Framed as an invitation to explore, not a set of active filters.
     private var exploreSubtitle: String {

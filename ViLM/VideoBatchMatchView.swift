@@ -35,16 +35,22 @@ struct VideoBatchMatchView: View {
         return found
     }
 
-    init(libraryURLs: [URL], onFinish: @escaping () -> Void) {
+    /// - Parameter scope: restricts the run to a subset — a performer's or a
+    ///   studio's films. `nil` runs the whole library, which is what Settings
+    ///   asks for.
+    init(libraryURLs: [URL],
+         scope: VideoBatchMatchModel.Scope? = nil,
+         onFinish: @escaping () -> Void) {
         self.libraryURLs = libraryURLs
         self.onFinish = onFinish
-        _model = StateObject(wrappedValue: VideoBatchMatchModel(libraryURLs: libraryURLs))
+        _model = StateObject(wrappedValue: VideoBatchMatchModel(libraryURLs: libraryURLs,
+                                                                scope: scope))
     }
 
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Match Videos")
+                .navigationTitle(model.isScoped ? "Match These Videos" : "Match Videos")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
@@ -91,9 +97,16 @@ struct VideoBatchMatchView: View {
             }
         } else {
             ContentUnavailableView {
-                Label("Match every video", systemImage: "sparkle.magnifyingglass")
+                Label(model.isScoped ? "Match these videos" : "Match every video",
+                      systemImage: "sparkle.magnifyingglass")
             } description: {
-                Text("Videos identified by their visual fingerprint are filled in automatically — that match is exact, not a guess. Anything found by searching is queued for you.\n\nAlready-matched videos and ones you've ruled out are skipped, so this is safe to re-run.")
+                // ⚠️ A scoped run says WHAT it covers before it starts. The
+                // screen is otherwise identical to the whole-library one, and
+                // "Match every video" on a page showing forty of two thousand
+                // is the kind of wording that gets a run cancelled halfway out
+                // of doubt about what it is doing.
+                Text((model.scopeLabel.map { "\($0)\n\n" } ?? "")
+                     + "Videos identified by their visual fingerprint are filled in automatically — that match is exact, not a guess. Anything found by searching is queued for you.\n\nAlready-matched videos and ones you've ruled out are skipped, so this is safe to re-run.")
             }
         }
     }

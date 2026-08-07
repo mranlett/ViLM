@@ -70,6 +70,13 @@ enum AppErrorReporter {
 }
 
 // MARK: - Detail High-Res Grid (4x4 clickable frames)
+/// Which frame is open full screen. `sheet(item:)` needs an `Identifiable`, and
+/// a bare `Int` is not one.
+private struct ExpandedFrame: Identifiable {
+    let index: Int
+    var id: Int { index }
+}
+
 struct DetailGridView: View {
     let asset: Asset
     let libraryURL: URL?
@@ -87,6 +94,9 @@ struct DetailGridView: View {
     // count made that per-render cost real. Set from the .task below (state
     // can't be mutated during a view update).
     @State private var cachedVideoAsset: AVURLAsset?
+    /// Which frame is open full screen. Only reachable when `isInteractive` is
+    /// false — otherwise a tap belongs to the player.
+    @State private var expandedFrame: Int?
 
     private func videoAsset(for url: URL) -> AVURLAsset {
         if let cachedVideoAsset, cachedVideoAsset.url == url {
@@ -115,8 +125,20 @@ struct DetailGridView: View {
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    guard isInteractive, let start else { return }
-                                    onSelectTime?(start)
+                                    guard let start else { return }
+                                    if isInteractive {
+                                        onSelectTime?(start)
+                                    } else {
+                                        // ⚠️ This used to do nothing at all,
+                                        // on the reasoning that with no player
+                                        // behind the screen a tap had nowhere
+                                        // to go. It has somewhere now: on the
+                                        // match screen these frames are the
+                                        // half of the comparison you could not
+                                        // enlarge, while the candidate's images
+                                        // opened full screen.
+                                        expandedFrame = index
+                                    }
                                 }
                             }
                         }
@@ -128,6 +150,16 @@ struct DetailGridView: View {
                     let avAsset = self.videoAsset(for: url)
                     cachedVideoAsset = avAsset
                     await computeTimes(for: avAsset)
+                }
+                .sheet(item: Binding(
+                    get: { expandedFrame.map(ExpandedFrame.init) },
+                    set: { expandedFrame = $0?.index }
+                )) { item in
+                    VideoFrameBrowser(videoAsset: videoAsset,
+                                      assetKey: url.path,
+                                      times: times,
+                                      aspectRatio: computedAspectRatio,
+                                      initialIndex: item.index)
                 }
             } else {
                 EmptyView()

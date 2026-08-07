@@ -20,6 +20,9 @@ struct VideoEnrichmentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: VideoEnrichmentModel
     @State private var examining: PluginCandidate?
+    /// Index of the chosen candidate's image being viewed full screen, on the
+    /// review screen itself.
+    @State private var expandedReview: Int?
 
     init(asset: Asset, libraryURL: URL, knownTags: Set<String>,
          onApply: @escaping (Asset) -> Void) {
@@ -187,6 +190,28 @@ struct VideoEnrichmentSheet: View {
                 Task { await model.choose(candidate) }
             }
         }
+        .sheet(item: Binding(
+            get: { expandedReview.map(ExpandedImage.init) },
+            set: { expandedReview = $0?.index }
+        )) { item in
+            if let candidate = model.chosenCandidate {
+                RemotePhotoBrowser(urls: reviewImageURLs(candidate),
+                                   title: candidate.title,
+                                   initialIndex: item.index)
+            }
+        }
+    }
+
+    /// Every image the chosen candidate has, falling back to the thumbnail.
+    ///
+    /// ⚠️ A candidate can carry a `thumbnailURL` and an empty `imageURLs` —
+    /// the search response supplies the first and the full set only sometimes.
+    /// Passing the empty array would open a browser onto nothing, which is
+    /// worse than not offering the tap at all.
+    private func reviewImageURLs(_ candidate: PluginCandidate) -> [URL] {
+        candidate.imageURLs.isEmpty
+            ? [candidate.thumbnailURL, candidate.fullImageURL].compactMap { $0 }
+            : candidate.imageURLs
     }
 
     private func candidateRow(_ candidate: PluginCandidate) -> some View {
@@ -306,9 +331,28 @@ struct VideoEnrichmentSheet: View {
 
             if let candidate = model.chosenCandidate {
                 Section {
-                    Button { examining = candidate } label: {
-                        HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        // ⚠️ The still is its own button, opening full screen
+                        // with pinch-to-zoom. It used to share one button with
+                        // the text, which sent every tap to the image GRID —
+                        // so on the review screen, the one place a single still
+                        // is shown beside the data being accepted, the picture
+                        // was the only thing that could not be enlarged.
+                        Button { expandedReview = 0 } label: {
                             thumbnail(candidate)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        .font(.caption2)
+                                        .padding(4)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                        .padding(3)
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Expand preview image")
+
+                        Button { examining = candidate } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(candidate.title).font(.subheadline).fontWeight(.medium)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -316,14 +360,17 @@ struct VideoEnrichmentSheet: View {
                                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                                Text("Tap to see all \(candidate.imageURLs.count) images")
-                                    .font(.caption2).foregroundStyle(.tint)
+                                if candidate.imageURLs.count > 1 {
+                                    Text("Tap to see all \(candidate.imageURLs.count) images")
+                                        .font(.caption2).foregroundStyle(.tint)
+                                }
                             }
-                            Spacer()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .disabled(candidate.imageURLs.count <= 1)
                     }
-                    .buttonStyle(.plain)
                 } header: {
                     Text("Matched to")
                 } footer: {
@@ -445,6 +492,15 @@ struct VideoEnrichmentSheet: View {
     }
 }
 
+/// Which image is open full screen.
+///
+/// `sheet(item:)` needs an `Identifiable`, and a bare `Int` is not one — the
+/// index is the identity here, so it is wrapped rather than stored twice.
+private struct ExpandedImage: Identifiable {
+    let index: Int
+    var id: Int { index }
+}
+
 /// Every image a candidate has, at a size worth looking at.
 ///
 /// Separate from the row because the two answer different questions: a row asks
@@ -456,6 +512,8 @@ private struct CandidateImageSheet: View {
     var onChoose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// Index of the image being viewed full screen, if any.
+    @State private var expanded: Int?
     private let columns = [GridItem(.adaptive(minimum: 240), spacing: 10)]
 
     var body: some View {
@@ -468,13 +526,33 @@ private struct CandidateImageSheet: View {
                         .padding(.horizontal)
                 }
                 LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(candidate.imageURLs, id: \.self) { url in
-                        AsyncImage(url: url) { image in
-                            image.resizable().scaledToFit()
-                        } placeholder: {
-                            Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 150)
+                    ForEach(Array(candidate.imageURLs.enumerated()), id: \.element) { index, url in
+                        // Tapping opens the full-screen zoomable browser at
+                        // this image. Deciding whether two videos are the same
+                        // work often comes down to a detail — a logo, a room, a
+                        // face in the background — and a 240pt grid cell cannot
+                        // settle that however many of them are on screen.
+                        Button { expanded = index } label: {
+                            AsyncImage(url: url) { image in
+                                image.resizable().scaledToFit()
+                            } placeholder: {
+                                Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 150)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(alignment: .bottomTrailing) {
+                                // Says the images are interactive. Without it
+                                // nothing distinguishes this grid from a static
+                                // contact sheet.
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.caption2)
+                                    .padding(5)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .padding(6)
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Image \(index + 1) of \(candidate.imageURLs.count). Opens full screen.")
                     }
                 }
                 .padding()
@@ -498,5 +576,13 @@ private struct CandidateImageSheet: View {
         // the images can be compared, and one column at a time is not a
         // comparison.
         .macSheet(minWidth: 820, minHeight: 640)
+        .sheet(item: Binding(
+            get: { expanded.map(ExpandedImage.init) },
+            set: { expanded = $0?.index }
+        )) { item in
+            RemotePhotoBrowser(urls: candidate.imageURLs,
+                               title: candidate.title,
+                               initialIndex: item.index)
+        }
     }
 }

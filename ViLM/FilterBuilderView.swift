@@ -162,6 +162,14 @@ struct FilterBuilderView: View {
                         }
                     }
                 }
+                Section(
+                    header: Text("Age at Release"),
+                    footer: Text("Shows videos where a credited actor was this old when the video came out — not how old they are now.\n\nAn age worked out from a birth year alone is only right to within a year, so a video is included only when every possible age fits. Videos with no release date, or actors with no birth date, can't be checked and are left out.")
+                ) {
+                    ageBound(label: "From", value: $criteria.minAgeAtRelease)
+                    ageBound(label: "To", value: $criteria.maxAgeAtRelease)
+                }
+
                 DisclosureGroup("Actors", isExpanded: $isActorsExpanded) {
                     AlphaPickerView(filter: $actorAlphaFilter)
                         .padding(.vertical, 4)
@@ -279,6 +287,26 @@ struct FilterBuilderView: View {
         return items.filter { $0.uppercased().hasPrefix(String(filter)) }
     }
     
+    /// One end of the age-at-release range.
+    ///
+    /// ⚠️ Zero means "unset", not "age nought", which is why the stepper's
+    /// floor reads **Any** rather than 0 — an age filter of zero would be a
+    /// bound that excludes nothing while looking like a real setting.
+    private func ageBound(label: String, value: Binding<Int?>) -> some View {
+        Stepper(value: Binding(
+            get: { value.wrappedValue ?? 0 },
+            set: { value.wrappedValue = $0 == 0 ? nil : $0 }
+        ), in: 0...99) {
+            HStack {
+                Text(label)
+                Spacer()
+                Text(value.wrappedValue.map(String.init) ?? "Any")
+                    .foregroundStyle(value.wrappedValue == nil ? .secondary : .primary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
     private func filterSection(items: [String], filter: Character?, logicBinding: Binding<AssetFilterCriteria.Logic>, selectionBinding: Binding<Set<String>>) -> some View {
         let alphaFiltered = filteredItems(items, by: filter)
         let finalFiltered = alphaFiltered.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }

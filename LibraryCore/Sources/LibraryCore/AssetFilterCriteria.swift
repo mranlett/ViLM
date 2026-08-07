@@ -50,8 +50,21 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     /// Optional, so filters saved before this field existed still decode.
     public var minActorRating: Int? = nil
 
+    /// Matches videos where a credited performer was this old at RELEASE.
+    ///
+    /// ⭐ The library's first filter on a fact no single record holds: it needs
+    /// the video's release date and the performer's birth date together, which
+    /// is exactly the join the graph exists to make cheap.
+    ///
+    /// ⚠️ Matched against `AgeAtRelease.possibleAges`, never `years` — see
+    /// `satisfiesAgeAtRelease`. Optional so filters saved before these fields
+    /// existed still decode.
+    public var minAgeAtRelease: Int? = nil
+    public var maxAgeAtRelease: Int? = nil
+
     public var isEmpty: Bool {
         reviewStatus == .all && enrichment == .any && minRating == nil && minActorRating == nil &&
+        minAgeAtRelease == nil && maxAgeAtRelease == nil &&
         selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
         selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
     }
@@ -60,6 +73,31 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
 }
 
 extension AssetFilterCriteria {
+
+    /// Whether one performer's age at release satisfies the age bounds.
+    ///
+    /// 🚨 **Every possible age must satisfy the bounds, not just the headline
+    /// number.** `AgeAtRelease` distinguishes an exact answer from one derived
+    /// from a birth YEAR, where the true figure is either that number or one
+    /// less because whether the birthday had come round is unknown.
+    ///
+    /// So an approximate 18 covers 17. Filtering on `years` would report it as
+    /// certainly 18 and include a record that might not qualify — the spike
+    /// named this exact failure: *"an approximate 18 silently includes 17"*.
+    ///
+    /// ⚠️ This is deliberately the CONSERVATIVE reading, and it excludes some
+    /// records that do qualify. That asymmetry is intended: a filter that
+    /// wrongly includes states something the data does not support, while one
+    /// that wrongly excludes merely shows less. `AgeAtRelease.displayText`
+    /// already renders an approximate age as a range for the same reason, so
+    /// the boundary case is visible rather than silently decided.
+    func satisfiesAgeAtRelease(_ age: AgeAtRelease) -> Bool {
+        let possible = age.possibleAges
+        if let minAgeAtRelease, possible.lowerBound < minAgeAtRelease { return false }
+        if let maxAgeAtRelease, possible.upperBound > maxAgeAtRelease { return false }
+        return true
+    }
+
     /// The actor names appearing in `asset`, with AKA aliases resolved to their
     /// canonical name via `akaMap`. Callers pass the resolved set into
     /// `matches(...)` so the matching stays pure and free of store lookups.
@@ -137,6 +175,20 @@ extension AssetFilterCriteria {
             } else {
                 if selectedStudios.isDisjoint(with: assetStudios) { return false }
             }
+        }
+
+        // Age at release. Needs the video's date and a performer's birth date
+        // together — the first filter here that no single record can answer.
+        if minAgeAtRelease != nil || maxAgeAtRelease != nil {
+            let ages = mappedActors.compactMap { name in
+                entityProfiles["actor:\(name)"].flatMap {
+                    AgeAtReleaseCalculator.age(of: $0, at: asset.releaseDate)
+                }
+            }
+            // ⚠️ A video whose ages cannot be established does NOT match. The
+            // filter asks a question about age; a record that cannot answer it
+            // has not answered yes.
+            guard ages.contains(where: { satisfiesAgeAtRelease($0) }) else { return false }
         }
 
         // Actor-metadata filters match a video through the profiles of the

@@ -223,6 +223,37 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(registry.installedStudioProviders().map(\.id), ["s"])
     }
 
+    /// 🚨 Registering by a duplicate id REPLACES the earlier plugin.
+    ///
+    /// Recorded because it caused a real regression: a studio provider was
+    /// given the actor provider's id in the belief that it "shared" the
+    /// account, and it silently evicted the actor provider — Import vanished
+    /// from the actor editor and Match All Actors had no provider at all.
+    ///
+    /// A shared account is expressed with `credentialId`, never with `id`.
+    func testASecondPluginWithTheSameIdEvictsTheFirst() {
+        let (registry, store, _) = makeRegistry()
+        registry.register(DoubleActorProvider(id: "same", displayName: "Actor half"))
+        registry.register(DoubleStudioProvider(id: "same", displayName: "Studio half"))
+        store.setEnabled(true, pluginId: "same")
+
+        XCTAssertTrue(registry.installedActorProviders().isEmpty,
+                      "the actor provider is gone — this is the trap, not a feature")
+        XCTAssertEqual(registry.installedStudioProviders().count, 1)
+    }
+
+    /// The correct arrangement: distinct ids, so both capabilities survive.
+    func testDistinctIdsKeepBothCapabilities() {
+        let (registry, store, _) = makeRegistry()
+        registry.register(DoubleActorProvider(id: "src", displayName: "Actor half"))
+        registry.register(DoubleStudioProvider(id: "src-studio", displayName: "Studio half"))
+        store.setEnabled(true, pluginId: "src")
+        store.setEnabled(true, pluginId: "src-studio")
+
+        XCTAssertEqual(registry.installedActorProviders().count, 1)
+        XCTAssertEqual(registry.installedStudioProviders().count, 1)
+    }
+
     /// A source that can answer about scenes but not companies is a real shape,
     /// so a library with no studio provider must simply have none rather than
     /// falling back to one that cannot answer.

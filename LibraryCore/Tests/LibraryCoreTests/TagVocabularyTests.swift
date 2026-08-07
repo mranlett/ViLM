@@ -36,7 +36,8 @@ final class TagVocabularyPersistenceTests: XCTestCase {
         var proposal = VideoMetadataProposal()
         proposal.studio = ProposedField("Example Studio")
         let studio = try XCTUnwrap(VideoEnrichmentReview.confirmedStudio(
-            proposal: proposal, accepting: [VideoEnrichmentReview.Field.studio]))
+            proposal: proposal, accepting: [VideoEnrichmentReview.Field.studio],
+            asset: Asset(relativePath: "a.mp4", fileName: "a.mp4", tags: [])))
         try store.confirmStudio(studio, source: "TestSource")
 
         let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "studio:Example Studio"))
@@ -44,13 +45,52 @@ final class TagVocabularyPersistenceTests: XCTestCase {
         XCTAssertEqual(profile.enrichmentSource, "TestSource")
     }
 
-    /// An unticked studio confirms nothing.
+    /// An unticked studio the video does NOT carry confirms nothing — that is
+    /// a conflict the operator declined.
     func testADeclinedStudioIsNotConfirmed() {
         var proposal = VideoMetadataProposal()
         proposal.studio = ProposedField("Example Studio")
 
-        XCTAssertNil(VideoEnrichmentReview.confirmedStudio(proposal: proposal,
-                                                           accepting: []))
+        XCTAssertNil(VideoEnrichmentReview.confirmedStudio(
+            proposal: proposal, accepting: [],
+            asset: Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                         tags: ["studio:Something Else"])))
+    }
+
+    /// 🚨 Agreement confirms.
+    ///
+    /// `changes(for:)` emits no studio row when the video already carries that
+    /// studio, so nothing could be accepted and the studio was never verified.
+    /// The better the data already was, the less likely it ever confirmed —
+    /// which is how a studio could show on screen and still read unconfirmed.
+    func testAStudioTheVideoAlreadyCarriesIsConfirmedWithNothingToWrite() {
+        var proposal = VideoMetadataProposal()
+        proposal.studio = ProposedField("Example Studio")
+
+        XCTAssertEqual(
+            VideoEnrichmentReview.confirmedStudio(
+                proposal: proposal, accepting: [],
+                asset: Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                             tags: ["studio:Example Studio"])),
+            "Example Studio")
+    }
+
+    /// ⚠️ The name the ASSET carries, not the source's spelling.
+    ///
+    /// `confirmStudio` keys the profile by name, so confirming "Example Studio"
+    /// while every video says "ExampleStudio" would create a confirmed profile
+    /// nothing points at — the gallery looks the tag up exactly and would still
+    /// show it unconfirmed.
+    func testConfirmationUsesTheSpellingTheLibraryHolds() {
+        var proposal = VideoMetadataProposal()
+        proposal.studio = ProposedField("Example Studio")
+
+        XCTAssertEqual(
+            VideoEnrichmentReview.confirmedStudio(
+                proposal: proposal, accepting: [],
+                asset: Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                             tags: ["studio:ExampleStudio"])),
+            "ExampleStudio")
     }
 
     /// Re-accepting the same studio on a second video must not clobber a

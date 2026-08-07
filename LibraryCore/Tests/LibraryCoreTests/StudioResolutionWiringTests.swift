@@ -104,7 +104,8 @@ final class StudioResolutionWiringTests: XCTestCase {
 
         XCTAssertEqual(
             VideoEnrichmentReview.confirmedStudio(
-                proposal: resolved, accepting: [VideoEnrichmentReview.Field.studio]),
+                proposal: resolved, accepting: [VideoEnrichmentReview.Field.studio],
+                asset: asset),
             "Example Network")
     }
 

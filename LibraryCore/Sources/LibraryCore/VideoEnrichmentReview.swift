@@ -340,14 +340,42 @@ public enum VideoEnrichmentReview {
     /// only route by which a studio becomes verified — nothing looks studios up
     /// directly, so without this a studio could never stop being unconfirmed.
     ///
-    /// Returns nil when the studio was not accepted, so an unticked conflict
-    /// confirms nothing.
+    /// Returns nil when the source offered a studio the video does not carry
+    /// and the operator did not accept it — an unticked conflict confirms
+    /// nothing.
+    ///
+    /// 🚨 **Agreement confirms.** This used to require `accepting` to contain
+    /// the studio field, i.e. the studio was verified only when it was WRITTEN.
+    /// But `changes(for:)` emits no studio row at all when the video already
+    /// carries that studio — so the source agreeing with the library produced
+    /// nothing to accept, and the studio was never confirmed. The better the
+    /// data already was, the less likely it ever verified. Reported by the
+    /// operator as *"the studio name appears on the UI but it isn't recognised
+    /// as a studio"* — right and wrong at the same time.
+    ///
+    /// ⚠️ Returns the name the ASSET carries, not the source's spelling, when
+    /// the two differ only by spacing or case. `confirmStudio` keys the profile
+    /// by name, and confirming "Coast Line" while every video says "CoastLine"
+    /// creates a confirmed profile nothing points at — the gallery looks up
+    /// `studio:<tag>` exactly and would still show it unconfirmed.
     public static func confirmedStudio(proposal: VideoMetadataProposal,
-                                       accepting: Set<String>) -> String? {
-        guard accepting.contains(Field.studio),
-              let studio = proposal.studio.value,
-              !studio.isEmpty else { return nil }
-        return studio
+                                       accepting: Set<String>,
+                                       asset: Asset) -> String? {
+        guard let studio = proposal.studio.value, !studio.isEmpty else { return nil }
+
+        // Written just now, at the source's spelling.
+        if accepting.contains(Field.studio) { return studio }
+
+        // Already held. The source naming a studio the library already files
+        // under is the strongest confirmation available — two independent
+        // records agreeing — and it is the case that was silently dropped.
+        if let held = asset.studios.first(where: {
+            StudioResolution.isSameStudio($0, studio)
+        }) {
+            return held
+        }
+
+        return nil
     }
 
     public static func merged(asset: Asset,
