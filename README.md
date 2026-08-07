@@ -17,6 +17,14 @@ The project is split into a **UI app** and a **shared core library** (`LibraryCo
 - ✅ **Review workflow** — reviewed/unreviewed status, star ratings, notes, review progress tracking
 - 🛠 **Maintenance tools** — force rescan, missing-file detection, file-name audit with batch rename, tag cleanup/merge, CSV export/import
 - 📦 **Batch editing** — multi-select videos or actors and apply shared metadata
+- 🕸 **A real graph, not just strings** — six edge tables connect videos to performers, studios and tags, performers to their traits, and studios to their parent networks. Edges carry provenance (where each came from) and the studio hierarchy carries validity dates, so a video resolves to the network that owned its imprint *when it was released*
+- 📚 **Playlists** — hand-picked, drag-to-reorder lists, distinct from the filter-driven Smart Collections
+- ⏱ **Scene markers** — named points inside a video
+- 🔌 **Optional metadata plugins** — look videos, actors and studios up against a third-party service to fill in details automatically, with a review-before-apply sheet. Entirely optional; with no plugin installed the app makes no network requests at all. Credentials live in the system Keychain
+- 🔗 **Attach a second library** — browse two libraries as one without merging them on disk; each record keeps living in the library that owns it
+- ↔️ **Move the graph between libraries** — export actors, studios, tags and their connections to a file and merge it into another copy. The merge is additive: it fills gaps, never overrules the receiving library, and reports genuine disagreements instead of silently picking a side
+- 🔍 **Self-auditing** — checks that find *wrong* data rather than merely absent data: a video released before a credited performer was born, a studio owning itself, a video filed under two studios
+- 💾 **Backup & restore** — the catalog, not the video files, so a backup is small and merges on restore
 
 ---
 
@@ -102,7 +110,9 @@ cd LibraryCore
 swift test
 ```
 
-Covers `LibraryStore` (CRUD, entity profiles, AKA resolution, global rename/merge, smart collections, reopen persistence), `LibraryScanner` (formats, recursion, hidden/`.catalog` exclusion, idempotent rescans), and the tag utilities.
+Roughly 1,200 tests. Covers `LibraryStore` (CRUD, entity profiles, AKA resolution, global rename/merge, smart collections, reopen persistence), `LibraryScanner` (formats, recursion, hidden/`.catalog` exclusion, idempotent rescans), the tag utilities, the graph edges and their migrations, the cross-library merge, and the audit rules.
+
+⚠️ The **app target has no test target.** Anything asserted about the UI is asserted in `LibraryCore` by keeping the decision out of the view — which is why policies like `StudioBatchPolicy` and `VideoEnrichmentReview` are pure types in the package rather than logic inside a `View`.
 
 ---
 
@@ -126,13 +136,22 @@ On first launch, select a folder containing video files; ViLM scans and indexes 
 
 ## Roadmap
 
-See `BACKLOG.md` (repo root) for the prioritized backlog. Highlights:
+⚠️ Specs and the backlog are **not in this repository** — they live in Notion, and
+work items are GitHub issues. A local file would be invisible to every other
+machine.
+
+Still open:
 
 - [ ] Picture-in-Picture playback while browsing
-- [ ] Manual playlists with drag-and-drop ordering
 - [ ] File change monitoring (incremental rescans)
 - [ ] Advanced metadata extraction (duration, codec, resolution)
 - [ ] Resume playback & watch history
+- [ ] A tag hierarchy (broad tags containing narrow ones), the shape studios already have
+- [ ] Persisting confirmed duplicate verdicts so the same question is not asked twice
+
+Shipped since this list was first written: manual playlists with drag-and-drop
+ordering, scene markers, the metadata graph, plugin-based matching, attaching a
+second library, and backup/restore.
 
 ---
 
