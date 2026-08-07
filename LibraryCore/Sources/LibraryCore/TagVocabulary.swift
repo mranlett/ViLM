@@ -10,6 +10,31 @@ import Foundation
 import GRDB
 
 /// One tag in the library's vocabulary.
+/// What a global rename actually changed.
+///
+/// 🚨 Exists because the rename could do NOTHING and the caller had no way to
+/// know. "Repaired 5 tags" was printed from a loop counter — how many renames
+/// were attempted — while every one of them silently matched no rows. A tool
+/// that reports success for work it did not do is worse than one that fails.
+public struct TagRenameOutcome: Sendable, Equatable {
+    /// Videos whose tag list was rewritten.
+    public let videosChanged: Int
+    /// Whether an actor or studio profile moved to the new id.
+    public let profileMoved: Bool
+    /// Whether the vocabulary's displayed spelling changed.
+    public let vocabularyRespelled: Bool
+
+    public var changedAnything: Bool {
+        videosChanged > 0 || profileMoved || vocabularyRespelled
+    }
+
+    public init(videosChanged: Int, profileMoved: Bool, vocabularyRespelled: Bool) {
+        self.videosChanged = videosChanged
+        self.profileMoved = profileMoved
+        self.vocabularyRespelled = vocabularyRespelled
+    }
+}
+
 public struct TagRecord: Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
 
     public static let databaseTableName = "tags"

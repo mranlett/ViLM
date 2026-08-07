@@ -225,23 +225,32 @@ struct TagCaseCleanupView: View {
 
             // Merges first. Renaming a loser onto the keeper is exactly the
             // existing global rename, which already moves every video across.
+            // ⚠️ Counted from what the rename REPORTS, not from the loop.
+            // Incrementing per attempt printed "Repaired 5 tags" while all five
+            // matched nothing, which is how a completely broken tool read as a
+            // working one for as long as it did.
+            var untouched = 0
             for collision in collisions where acceptedMerges.contains(collision.key) {
                 for loser in collision.losers {
                     progress = "Merging \(loser)…"
-                    try store.renameTagGlobally(oldTag: "tag:\(loser)",
-                                                newTag: "tag:\(collision.suggestedKeeper)")
-                    renamed += 1
+                    let outcome = try store.renameTagGlobally(
+                        oldTag: "tag:\(loser)", newTag: "tag:\(collision.suggestedKeeper)")
+                    if outcome.changedAnything { renamed += 1 } else { untouched += 1 }
                 }
             }
 
             for respelling in respellings where acceptedRespellings.contains(respelling.current) {
                 progress = "Respelling \(respelling.current)…"
-                try store.renameTagGlobally(oldTag: "tag:\(respelling.current)",
-                                            newTag: "tag:\(respelling.suggested)")
-                renamed += 1
+                let outcome = try store.renameTagGlobally(
+                    oldTag: "tag:\(respelling.current)", newTag: "tag:\(respelling.suggested)")
+                if outcome.changedAnything { renamed += 1 } else { untouched += 1 }
             }
 
-            summary = "Repaired \(renamed) tag\(renamed == 1 ? "" : "s")."
+            var message = "Repaired \(renamed) tag\(renamed == 1 ? "" : "s")."
+            if untouched > 0 {
+                message += " \(untouched) matched nothing and were left alone."
+            }
+            summary = message
             collisions = []
             respellings = []
             acceptedMerges = []

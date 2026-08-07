@@ -71,6 +71,31 @@ public struct TagNormalizer {
         }
     }
 
+    /// Whitespace tidied, capitalization left exactly as given.
+    ///
+    /// ⭐ What an EXPLICIT rename needs. `normalize` raises the first letter of
+    /// every word with no capital of its own, so an operator who chose
+    /// `Point of View` got `Point Of View` back and the spelling tool appeared
+    /// not to work — it had silently overruled the choice it just asked for.
+    ///
+    /// 🚨 The alternative — teaching the title-caser which small words to leave
+    /// alone — is deliberately NOT taken. This file's opening rule is that no
+    /// vocabulary is compiled into the app, and a list of small words is a
+    /// vocabulary. Honouring what the operator typed needs no list at all.
+    ///
+    /// Every caller of `renameTagGlobally` is an explicit choice — the operator
+    /// typing a name, or a source stating its own canonical spelling — so in
+    /// every one of them the given spelling is the answer, not a draft.
+    public static func tidied(fullTag: String) -> String {
+        let parts = fullTag.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return collapsingWhitespace(fullTag) }
+        return "\(parts[0]):\(collapsingWhitespace(String(parts[1])))"
+    }
+
+    static func collapsingWhitespace(_ value: String) -> String {
+        value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
     /// Whether two spellings are the same tag.
     ///
     /// Exists because the capitalization rule changed: entries stored under the

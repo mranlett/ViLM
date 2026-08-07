@@ -89,6 +89,11 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.fileName = fileName
         self.status = status
         self.createdAt = createdAt
+        // ⚠️ Still normalizes, unlike `init(from:)` above, and the asymmetry is
+        // deliberate: this builds a NEW asset from freshly parsed text, where
+        // converging sloppy capitalization is the point. Decoding reads back
+        // something already stored, where the spelling is an existing answer
+        // and re-casing it overrules whoever chose it.
         self.tags = tags.map { TagNormalizer.normalize(fullTag: $0) }
         self.externalLink = externalLink
         self.notes = notes
@@ -143,7 +148,17 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
             // Attempt to decode JSON string from SQLite text column
             decodedTags = (try? JSONDecoder().decode([String].self, from: data)) ?? []
         }
-        self.tags = decodedTags.map { TagNormalizer.normalize(fullTag: $0) }
+        // 🚨 Whitespace only. This used to re-capitalize every tag on DECODE,
+        // which meant the spelling stored in the database was not the spelling
+        // the app read back: an operator repairing `Point Of View` to
+        // `Point of View` had the change undone by the very next read, and a
+        // read-modify-write silently rewrote tags nobody had touched.
+        //
+        // Identity is not case — `TagNormalizer.identityKey` folds it, the
+        // filters compare case-insensitively, and the `tags` vocabulary owns
+        // the spelling to display. Nothing needed this normalization to tell
+        // two spellings apart; it only overruled the operator.
+        self.tags = decodedTags.map { TagNormalizer.tidied(fullTag: $0) }
     }
     
     enum CodingKeys: String, CodingKey {

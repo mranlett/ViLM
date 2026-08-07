@@ -2319,10 +2319,29 @@ public class LibraryStore {
         }
     }
 
-    public func renameTagGlobally(oldTag: String, newTag: String) throws {
+    @discardableResult
+    public func renameTagGlobally(oldTag: String, newTag: String) throws -> TagRenameOutcome {
+        // 🚨 The old spelling is matched AS STORED, not as normalized.
+        //
+        // This compared `asset.tags[i] == normalize(oldTag)`, so renaming the
+        // lowercase `tag:pov` looked for `tag:Pov` and matched nothing — while
+        // the caller reported success. That is the whole point of a
+        // case-collision cleanup: the losing spelling is by definition the one
+        // that is NOT canonical, so normalizing it before the search removed
+        // exactly the rows the tool existed to find.
         let normalizedOld = TagNormalizer.normalize(fullTag: oldTag)
-        let normalizedNew = TagNormalizer.normalize(fullTag: newTag)
-        if normalizedOld == normalizedNew { return }
+
+        // ⭐ The chosen spelling is written unchanged. See `tidied`: normalizing
+        // here overruled the operator's answer — a case-only repair normalized
+        // to the SAME string and returned below having done nothing at all.
+        let normalizedNew = TagNormalizer.tidied(fullTag: newTag)
+
+        // Only a genuine no-op returns early. The old test compared NORMALIZED
+        // forms, so `pov` → `Pov` was read as "nothing to do" and every
+        // case-only repair silently did nothing.
+        if oldTag == normalizedNew { return TagRenameOutcome(videosChanged: 0,
+                                                             profileMoved: false,
+                                                             vocabularyRespelled: false) }
 
         // Move the entity's photo files BEFORE the DB commit, with rollback
         // (DEFECT_INVENTORY M1): the old order committed the rename first and
@@ -2364,8 +2383,11 @@ public class LibraryStore {
             }
         }
 
+        let outcome: TagRenameOutcome
         do {
-            try renameTagInDatabase(normalizedOld: normalizedOld, normalizedNew: normalizedNew)
+            outcome = try renameTagInDatabase(oldTag: oldTag,
+                                              normalizedOld: normalizedOld,
+                                              normalizedNew: normalizedNew)
         } catch {
             rollbackMoves()
             throw error
@@ -2376,21 +2398,31 @@ public class LibraryStore {
         for url in collidingSources {
             try? FileManager.default.removeItem(at: url)
         }
+        return outcome
     }
 
-    private func renameTagInDatabase(normalizedOld: String, normalizedNew: String) throws {
+    @discardableResult
+    private func renameTagInDatabase(oldTag: String, normalizedOld: String,
+                                     normalizedNew: String) throws -> TagRenameOutcome {
+        var videosChanged = 0, profileMoved = false, vocabularyRespelled = false
         try dbQueue.write { db in
             let assets = try Asset.fetchAll(db)
             for var asset in assets {
                 var modified = false
                 for i in 0..<asset.tags.count {
-                    if asset.tags[i] == normalizedOld {
+                    // ⚠️ Case-insensitive, and against the tag AS THE CALLER
+                    // NAMED IT. The audit's own premise is that spellings
+                    // differing only by case are one tag — the filters already
+                    // compare that way — so the repair must find them all,
+                    // whatever casing each row happens to hold.
+                    if TagNormalizer.isSameTag(asset.tags[i], oldTag)
+                        || asset.tags[i] == normalizedOld {
                         asset.tags[i] = normalizedNew
                         modified = true
                     }
                 }
-                
                 if modified {
+                    videosChanged += 1
                     // Deduplicate tags while preserving order
                     var uniqueTags = [String]()
                     for t in asset.tags {
@@ -2403,6 +2435,66 @@ public class LibraryStore {
                 }
             }
             
+            // 🚨 The tag VOCABULARY, which this rename never touched.
+            //
+            // `tags` carries the spelling everything displays, keyed by a folded
+            // identity. Rewriting the strings on the videos and leaving the
+            // vocabulary alone meant a spelling repair changed nothing the
+            // operator could see — the old spelling came straight back from the
+            // vocabulary — which is most of why the tool looked broken.
+            if let value = Self.tagValue(of: normalizedNew),
+               let oldValue = Self.tagValue(of: normalizedOld) {
+                let oldKey = TagNormalizer.identityKey(oldValue)
+                let newKey = TagNormalizer.identityKey(value)
+
+                if var record = try TagRecord.fetchOne(db, key: oldKey) {
+                    if oldKey == newKey {
+                        // A case-only repair: same tag, new spelling. The
+                        // identity is unchanged, so every edge still points at
+                        // the right row and only the display name moves.
+                        record.displayName = value
+                        try record.update(db)
+                        vocabularyRespelled = true
+                    } else {
+                        // ⚠️ A different tag entirely, so the EDGES must move
+                        // too — `video_tag`, `performer_tag` and the staging
+                        // table all key on the identity. Leaving them behind
+                        // would strand every edge on a vocabulary row that no
+                        // longer exists.
+                        //
+                        // `OR IGNORE` then `DELETE`: where the destination edge
+                        // already exists the update would collide on the primary
+                        // key, and the correct result is one edge, not an error.
+                        // ⚠️ The destination vocabulary row FIRST. The edge
+                        // tables have a foreign key onto `tags`, so moving an
+                        // edge to an identity that does not exist yet fails the
+                        // constraint — which is the correct behaviour and the
+                        // reason the order matters rather than being tidy.
+                        if var destination = try TagRecord.fetchOne(db, key: newKey) {
+                            // The destination keeps its own kind; an
+                            // unclassified destination may learn one.
+                            if destination.kind == nil, record.kind != nil {
+                                destination.kind = record.kind
+                                try destination.update(db)
+                            }
+                        } else {
+                            var moved = TagRecord(displayName: value)
+                            moved.kind = record.kind
+                            try moved.insert(db)
+                        }
+                        for table in ["video_tag", "performer_tag", "pending_tag_association"] {
+                            try db.execute(sql:
+                                "UPDATE OR IGNORE \(table) SET tag_id = ? WHERE tag_id = ?",
+                                arguments: [newKey, oldKey])
+                            try db.execute(sql: "DELETE FROM \(table) WHERE tag_id = ?",
+                                           arguments: [oldKey])
+                        }
+                        _ = try record.delete(db)
+                        vocabularyRespelled = true
+                    }
+                }
+            }
+
             // Handle Entity Profile merging
             if let oldProfile = try EntityProfile.fetchOne(db, key: normalizedOld) {
                 if var dest = try EntityProfile.fetchOne(db, key: normalizedNew) {
@@ -2456,8 +2548,22 @@ public class LibraryStore {
                 // tombstone naming it must go or the sync would delete what was
                 // just created.
                 try clearTombstone(for: normalizedNew, in: db)
+                profileMoved = true
             }
         }
+        return TagRenameOutcome(videosChanged: videosChanged,
+                                profileMoved: profileMoved,
+                                vocabularyRespelled: vocabularyRespelled)
+    }
+
+    /// The value part of a `tag:` id, or nil for any other category.
+    ///
+    /// Only `tag:` ids have a vocabulary row — actors and studios are
+    /// `EntityProfile`s and are handled separately below.
+    static func tagValue(of fullTag: String) -> String? {
+        let parts = fullTag.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, parts[0] == "tag" else { return nil }
+        return String(parts[1])
     }
     
     public func deleteAsset(_ asset: Asset) throws {
