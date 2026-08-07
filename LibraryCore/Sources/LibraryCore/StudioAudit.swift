@@ -27,7 +27,11 @@ import Foundation
 /// have no repair tool yet, and saying so beats inventing a destination.
 public enum StudioFix: String, Equatable, Sendable {
     case fixDuplicateStudios
-    case repairTagSpelling
+    /// 🚨 NOT `repairTagSpelling`. That tool reads `Asset.actions`, which
+    /// filters to `tag:` values — it never sees a `studio:` value, so routing
+    /// studio collisions there sent the operator to a screen that could not
+    /// fix them. Reported from the device, 2026-08-06.
+    case repairStudioSpelling
     case connectTheGraph
     case matchStudios
     case matchAgain
@@ -93,7 +97,7 @@ public struct StudioCheck: Equatable, Sendable, Identifiable {
     public var fix: StudioFix {
         switch kind {
         case .multiStudioVideo:  return .fixDuplicateStudios
-        case .spellingCollision: return .repairTagSpelling
+        case .spellingCollision: return .repairStudioSpelling
         case .missingProfile:    return .connectTheGraph
         case .unconfirmed:       return .matchStudios
         case .missingEdge:       return .connectTheGraph

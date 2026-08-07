@@ -124,7 +124,11 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
 
         let plan = try store.connectTagEdges()
 
-        XCTAssertEqual(plan.attributeTagsOnVideos, 1)
+        // ⚠️ A LIST since 2026-08-07, not a count: the screen reported a bare
+        // number and gave the operator no way to reach any of the records.
+        XCTAssertEqual(plan.attributeTagAssociations, 1)
+        XCTAssertEqual(plan.attributeTagsOnVideos, ["Redhead": 1],
+                       "named, so the report can lead somewhere")
         XCTAssertEqual(try store.tagIds(forVideo: v), [], "no edge")
         XCTAssertEqual(try store.edgeCount(.pendingTagAssociation), 0, "and nothing staged")
     }

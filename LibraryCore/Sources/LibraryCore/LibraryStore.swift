@@ -499,6 +499,110 @@ public class LibraryStore {
             }
         }
 
+        // v29 — edge attributes, phase 1. Facts ABOUT a relationship.
+        //
+        // Every edge table was `(from, to)` and nothing else, so an edge could
+        // state that a relationship exists and nothing about it. Two things
+        // were lost to that:
+        //
+        //   PROVENANCE   D7 says every value carries its source. Edges did not,
+        //                so an edge asserted by a confirmed match and one
+        //                inferred from a filename were indistinguishable
+        //                afterwards — which is why `Match Again` cannot tell a
+        //                confirmed edge from a guessed one.
+        //
+        //   CREDITED-AS  the name a performer appeared under in a specific
+        //                scene. The source supplies it on every match; it is a
+        //                property of the APPEARANCE, not of the person or the
+        //                video, so there was nowhere to put it and it was
+        //                discarded every time.
+        //
+        // ⚠️ Additive only. No primary key moves and no row is rewritten, so
+        // every existing edge reads as "provenance unknown" — which is true.
+        //
+        // ⚠️ Validity dates are deliberately NOT here. Dating an edge changes
+        // what an edge IS and takes a primary key with it (`video_studio` and
+        // `studio_parent` are keyed on one column each, encoding "exactly one,
+        // forever"). That is phase 2, and its own spec.
+        //
+        // 🚨 Registration order, NOT name order. The migrator runs these in the
+        // order they are registered in this file, which is already out of
+        // numeric sequence above — v23, v22, v21, v24, v26, v27, v20. This is
+        // last because it is written last, not because it is numbered highest.
+        migrator.registerMigration("v29") { db in
+            // Provenance is universal: every edge came from somewhere.
+            for table in ["video_performer", "video_studio", "video_tag",
+                          "performer_tag", "studio_parent", "pending_tag_association"] {
+                try db.alter(table: table) { t in
+                    t.add(column: "source", .text)
+                    t.add(column: "recorded_at", .datetime)
+                }
+            }
+
+            // Facts about an APPEARANCE, so they belong on that edge alone —
+            // a credited name means nothing on a studio hierarchy.
+            try db.alter(table: "video_performer") { t in
+                t.add(column: "credited_as", .text)
+                t.add(column: "billing", .integer)
+            }
+        }
+
+        // v30 — temporal studio hierarchy. Edge attributes, phase 2.
+        //
+        // An imprint owned by one network until 2015 and another after it is
+        // TWO facts, and the old key — `studio_id` alone — could hold only one.
+        // That key encoded "exactly one parent, forever", which is not true of
+        // companies.
+        //
+        // ⚠️ Scoped to `studio_parent` alone. `performer_tag` was considered
+        // and deliberately excluded: no source supplies "blonde from 2016", so
+        // a validity column there could only ever hold a guess — and a guess in
+        // a date column stops looking like a guess the moment it is read back.
+        // v29's `recorded_at` already says everything honestly knowable about
+        // when that edge was learned.
+        //
+        // 🚨 SQLite cannot alter a primary key in place, so this is a REBUILD.
+        // Every existing row copies across as "current, start unknown", which
+        // is exactly what it is.
+        migrator.registerMigration("v30") { db in
+            try db.create(table: "studio_parent_new") { t in
+                t.column("studio_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+                t.column("parent_studio_id", .text).notNull()
+                    .references("entity_profiles", onDelete: .cascade)
+                // NULL = "as far back as we know", NOT "never". Every migrated
+                // row carries NULL, so reading it as "no match" would make the
+                // whole existing hierarchy vanish from as-of queries.
+                t.column("valid_from", .text)
+                // NULL = still current.
+                t.column("valid_to", .text)
+                t.column("source", .text)
+                t.column("recorded_at", .datetime)
+            }
+
+            // ⚠️ Copy BEFORE the index exists. Today's data satisfies it by
+            // construction — one row per studio — but creating the index first
+            // would turn a duplicate into a cryptic constraint error instead of
+            // a diagnosable insert.
+            try db.execute(sql: """
+                INSERT INTO studio_parent_new
+                    (studio_id, parent_studio_id, valid_from, valid_to, source, recorded_at)
+                SELECT studio_id, parent_studio_id, NULL, NULL, source, recorded_at
+                  FROM studio_parent
+                """)
+
+            try db.drop(table: "studio_parent")
+            try db.rename(table: "studio_parent_new", to: "studio_parent")
+
+            // ⭐ The rule "at most one OPEN parent per studio" as a database
+            // constraint rather than an application convention — the only form
+            // that survives a second writer. Historical rows are unconstrained.
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX studio_parent_current
+                    ON studio_parent(studio_id) WHERE valid_to IS NULL
+                """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -807,8 +911,21 @@ public class LibraryStore {
         public let missingProfiles: [String]
         /// Edges that already exist and would not be duplicated.
         public let alreadyConnected: Int
-
-        public var connectable: Int { associations - alreadyConnected }
+        /// 🚨 Credits that CAN be connected and are not yet — counted by
+        /// intersecting the wanted pairs with the existing ones.
+        ///
+        /// This used to be `associations - alreadyConnected`, subtracting a
+        /// GLOBAL edge count from a TOTAL association count. Two different
+        /// sets: the numerator included credits whose performer has no profile
+        /// and so can never become an edge, and the subtrahend counted edges
+        /// that had nothing to do with them.
+        ///
+        /// On a real library that reported **484** when the run created
+        /// **3** — reported from the device, 2026-08-07.
+        public let connectable: Int
+        /// Credits skipped because the name has no profile. `associations`
+        /// minus this is what could ever be connected.
+        public let skippedNoProfile: Int
     }
 
     /// Builds `video_performer` edges from the `actor:` strings.
@@ -843,24 +960,39 @@ public class LibraryStore {
             }
         }
 
-        let existing = try dbQueue.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM video_performer") ?? 0
+        // The pairs, not the count — the count cannot say which of `wanted`
+        // is already present, which is the only question worth asking.
+        let existingPairs: Set<String> = try dbQueue.read { db in
+            Set(try Row.fetchAll(db, sql: "SELECT video_id, performer_id FROM video_performer")
+                .map { "\($0["video_id"] as String)|\($0["performer_id"] as String)" })
         }
+        let existing = existingPairs.count
+        let notYetConnected = wanted.filter {
+            !existingPairs.contains("\($0.0.uuidString)|\($0.1)")
+        }.count
 
         if !dryRun {
             try dbQueue.write { db in
                 for (videoId, performerId) in wanted {
+                    // ⚠️ `inferred`, not `filename` or `download`. This walks
+                    // `asset.tags`, and those came from every route there is —
+                    // claiming a specific origin would be inventing provenance
+                    // rather than recording it.
                     try db.execute(sql: """
-                        INSERT OR IGNORE INTO video_performer (video_id, performer_id)
-                        VALUES (?, ?)
-                        """, arguments: [videoId.uuidString, performerId])
+                        INSERT OR IGNORE INTO video_performer
+                            (video_id, performer_id, source, recorded_at)
+                        VALUES (?, ?, ?, ?)
+                        """, arguments: [videoId.uuidString, performerId,
+                                         EdgeProvenance.inferred.rawValue, Date()])
                 }
             }
         }
 
         return ConnectPlan(associations: associations,
                            missingProfiles: missing.sorted(),
-                           alreadyConnected: existing)
+                           alreadyConnected: existing,
+                           connectable: notYetConnected,
+                           skippedNoProfile: associations - wanted.count)
     }
 
     /// Whether the edges reproduce what the strings say, for every video.
@@ -892,8 +1024,16 @@ public class LibraryStore {
         /// `video_studio` permits one per video, so the schema now refuses what
         /// the strings were happy to hold. They are skipped and listed.
         public let conflicted: [UUID]
+        /// Studio links that CAN be connected and are not yet.
+        ///
+        /// 🚨 Same correction as `ConnectPlan.connectable` — see there. The
+        /// old subtraction happened to look plausible for studios because
+        /// almost every studio has a profile, and was badly wrong for
+        /// performers where 190 names do not.
+        public let connectable: Int
+        /// Videos whose studio has no profile row.
+        public let skippedNoProfile: Int
 
-        public var connectable: Int { associations - alreadyConnected }
         public var isBlocked: Bool { !conflicted.isEmpty }
     }
 
@@ -929,9 +1069,14 @@ public class LibraryStore {
             if known.contains(id) { wanted.append((asset.id, id)) } else { missing.insert(name) }
         }
 
-        let existing = try dbQueue.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM video_studio") ?? 0
+        let existingPairs: Set<String> = try dbQueue.read { db in
+            Set(try Row.fetchAll(db, sql: "SELECT video_id, studio_id FROM video_studio")
+                .map { "\($0["video_id"] as String)|\($0["studio_id"] as String)" })
         }
+        let existing = existingPairs.count
+        let notYetConnected = wanted.filter {
+            !existingPairs.contains("\($0.0.uuidString)|\($0.1)")
+        }.count
 
         if !dryRun {
             try dbQueue.write { db in
@@ -947,7 +1092,9 @@ public class LibraryStore {
         return StudioConnectPlan(associations: associations,
                                  missingProfiles: missing.sorted(),
                                  alreadyConnected: existing,
-                                 conflicted: conflicted)
+                                 conflicted: conflicted,
+                                 connectable: notYetConnected,
+                                 skippedNoProfile: associations - wanted.count)
     }
 
     /// Videos whose studio edge disagrees with their strings.
@@ -972,16 +1119,36 @@ public class LibraryStore {
     /// What connecting tags would do, split by what each tag turned out to be.
     public struct TagConnectPlan: Equatable, Sendable {
         /// Video associations that became real edges — action or video-attribute.
+        ///
+        /// ⚠️ Every wanted association, not just the new ones. That is why this
+        /// figure equals the `video_tag` table total on a re-run and looks like
+        /// the whole library was reconnected. `newVideoEdges` is what the run
+        /// actually added.
         public let videoEdges: Int
         /// Performer associations that became real edges.
         public let performerEdges: Int
+        /// Of `videoEdges`, the ones that did not already exist.
+        public let newVideoEdges: Int
+        /// Of `performerEdges`, the ones that did not already exist.
+        public let newPerformerEdges: Int
         /// Associations staged because nobody has said what the tag describes.
         public let pending: Int
         /// ⚠️ PERFORMER attributes found on VIDEOS. Not edges, and deliberately
         /// not staged either: the decision is that enrichment corrects these per
         /// performer as each video is matched, because an attribute read off a
         /// video is a guess about which of its cast it describes.
-        public let attributeTagsOnVideos: Int
+        ///
+        /// 🚨 A LIST, not a count. This was an `Int`, and the screen reported
+        /// "90 performer traits sit on videos" with no way to find any of the
+        /// ninety — the operator could not act on it at all. The same rule the
+        /// batch runs already follow: *a tally you cannot act on is a dead
+        /// end.* Keyed by tag, valued by how many videos carry it.
+        public let attributeTagsOnVideos: [String: Int]
+
+        /// Total associations, which is what the count used to be.
+        public var attributeTagAssociations: Int {
+            attributeTagsOnVideos.values.reduce(0, +)
+        }
         /// Tags used by a video but absent from the vocabulary. Promotion should
         /// be run first; reported rather than created so the two steps stay
         /// separately checkable.
@@ -1012,7 +1179,7 @@ public class LibraryStore {
         var videoEdges: [(UUID, String)] = []
         var performerEdges: [(String, String)] = []
         var pending: [(UUID, String)] = []
-        var attributeOnVideo = 0
+        var attributeOnVideo: [String: Int] = [:]
         var unknown = Set<String>()
 
         for asset in assets {
@@ -1025,8 +1192,11 @@ public class LibraryStore {
                 if kind.canAttach(to: .video) {
                     videoEdges.append((asset.id, key))
                 } else {
-                    // A performer attribute sitting on a video. Left alone.
-                    attributeOnVideo += 1
+                    // A performer attribute sitting on a video. Left alone,
+                    // but RECORDED by tag so the operator can find them —
+                    // `record.displayName` rather than the folded key, because
+                    // the key is not what any screen shows.
+                    attributeOnVideo[record.displayName, default: 0] += 1
                 }
             }
         }
@@ -1039,6 +1209,23 @@ public class LibraryStore {
                 if kind.canAttach(to: .performer) { performerEdges.append((profile.id, key)) }
             }
         }
+
+        // Counted BEFORE the write, by intersection — after it, everything
+        // looks already-connected and the run appears to have done nothing.
+        let existingVideoTags: Set<String> = try dbQueue.read { db in
+            Set(try Row.fetchAll(db, sql: "SELECT video_id, tag_id FROM video_tag")
+                .map { "\($0["video_id"] as String)|\($0["tag_id"] as String)" })
+        }
+        let existingPerformerTags: Set<String> = try dbQueue.read { db in
+            Set(try Row.fetchAll(db, sql: "SELECT performer_id, tag_id FROM performer_tag")
+                .map { "\($0["performer_id"] as String)|\($0["tag_id"] as String)" })
+        }
+        let newVideoEdges = videoEdges.filter {
+            !existingVideoTags.contains("\($0.0.uuidString)|\($0.1)")
+        }.count
+        let newPerformerEdges = performerEdges.filter {
+            !existingPerformerTags.contains("\($0.0)|\($0.1)")
+        }.count
 
         if !dryRun {
             try dbQueue.write { db in
@@ -1063,6 +1250,8 @@ public class LibraryStore {
 
         return TagConnectPlan(videoEdges: videoEdges.count,
                               performerEdges: performerEdges.count,
+                              newVideoEdges: newVideoEdges,
+                              newPerformerEdges: newPerformerEdges,
                               pending: pending.count,
                               attributeTagsOnVideos: attributeOnVideo,
                               unknownTags: unknown.sorted())
@@ -1162,12 +1351,48 @@ public class LibraryStore {
         }
     }
 
-    /// Which network owns which imprint.
+    /// Which network owns which imprint, **as things stand now**.
+    ///
+    /// ⚠️ Current rows only. Every existing caller means "now", so "now" is the
+    /// default and no call site changed when the table became temporal. A
+    /// retired 2009 hierarchy must not be reported as a dangling parent
+    /// forever, which is what including closed rows would do.
     public func studioParentPairs() throws -> [GraphEdgePair] {
         try dbQueue.read { db in
-            try Row.fetchAll(db, sql: "SELECT studio_id, parent_studio_id FROM studio_parent")
+            try Row.fetchAll(db, sql: """
+                SELECT studio_id, parent_studio_id FROM studio_parent
+                 WHERE valid_to IS NULL
+                """)
                 .map { GraphEdgePair(from: $0["studio_id"], to: $0["parent_studio_id"]) }
         }
+    }
+
+    /// The hierarchy as it stood on a given day.
+    ///
+    /// ⚠️ A row with `valid_from = NULL` matches ANY date at or before its
+    /// `valid_to`. NULL means "as far back as we know", not "never" — and since
+    /// every row migrated by v30 carries NULL, reading it as "no match" would
+    /// make the entire existing hierarchy vanish from as-of queries the day
+    /// this shipped.
+    public func studioParentPairs(asOf day: String) throws -> [GraphEdgePair] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT studio_id, parent_studio_id FROM studio_parent
+                 WHERE (valid_from IS NULL OR valid_from <= ?)
+                   AND (valid_to   IS NULL OR valid_to   >  ?)
+                """, arguments: [day, day])
+                .map { GraphEdgePair(from: $0["studio_id"], to: $0["parent_studio_id"]) }
+        }
+    }
+
+    /// The day part of a date, as the hierarchy stores it.
+    static func isoDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     // MARK: - Connecting one video
@@ -1394,11 +1619,22 @@ public class LibraryStore {
     // quietly acquiring something impossible.
 
     /// Credits a performer on a video. Idempotent: crediting twice is one edge.
-    public func linkPerformer(_ performerId: String, toVideo videoId: UUID) throws {
+    ///
+    /// - Parameter source: where the credit came from. Defaults to `inferred`
+    ///   because the callers that predate edge attributes are rewiring from
+    ///   strings; a caller that knows better should say so.
+    public func linkPerformer(_ performerId: String, toVideo videoId: UUID,
+                              source: EdgeProvenance = .inferred) throws {
         try dbQueue.write { db in
+            // Bound, not interpolated. The value is a fixed enum today and
+            // interpolating it would still be a habit worth not having in a
+            // file this size.
             try db.execute(sql: """
-                INSERT OR IGNORE INTO video_performer (video_id, performer_id) VALUES (?, ?)
-                """, arguments: [videoId.uuidString, performerId])
+                INSERT OR IGNORE INTO video_performer
+                    (video_id, performer_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [videoId.uuidString, performerId,
+                                 source.rawValue, Date()])
         }
     }
 
@@ -1438,7 +1674,21 @@ public class LibraryStore {
     /// ⚠️ Refuses a cycle — a studio that would become its own ancestor. Not
     /// expressible as a SQLite constraint, and without it a parent-studio
     /// filter recurses forever.
-    public func setStudioParent(_ parentId: String, forStudio studioId: String) throws {
+    /// - Parameters:
+    ///   - since: when the new ownership began. `nil` means "as far back as we
+    ///     know", which is the honest value when a source names a parent but no
+    ///     date — which is every source seen so far.
+    ///
+    /// ⚠️ A CHANGE of parent closes the previous row rather than overwriting
+    /// it. The old ownership was true; it stopped being true. Overwriting threw
+    /// that away, which is the whole reason for the temporal shape.
+    ///
+    /// ⚠️ Re-asserting the SAME parent is a no-op, not a new row. Match runs
+    /// re-assert constantly, and each one opening a period would fill the table
+    /// with adjacent identical rows.
+    public func setStudioParent(_ parentId: String, forStudio studioId: String,
+                                since: String? = nil,
+                                source: EdgeProvenance = .download) throws {
         guard studioId != parentId else { throw GraphEdgeError.cycle(path: [studioId]) }
 
         var seen = [studioId]
@@ -1446,18 +1696,38 @@ public class LibraryStore {
         while let id = current {
             if seen.contains(id) { throw GraphEdgeError.cycle(path: seen + [id]) }
             seen.append(id)
+            // The CURRENT parent — a closed historical row must not make a
+            // hierarchy look cyclic when it is only a former owner.
             current = try dbQueue.read { db in
-                try String.fetchOne(db, sql:
-                    "SELECT parent_studio_id FROM studio_parent WHERE studio_id = ?",
-                    arguments: [id])
+                try String.fetchOne(db, sql: """
+                    SELECT parent_studio_id FROM studio_parent
+                     WHERE studio_id = ? AND valid_to IS NULL
+                    """, arguments: [id])
             }
         }
 
         try dbQueue.write { db in
+            let existing = try String.fetchOne(db, sql: """
+                SELECT parent_studio_id FROM studio_parent
+                 WHERE studio_id = ? AND valid_to IS NULL
+                """, arguments: [studioId])
+
+            if existing == parentId { return }
+
+            if existing != nil {
+                // Closed at the moment the new one begins, so the two periods
+                // meet rather than overlapping or leaving a gap.
+                try db.execute(sql: """
+                    UPDATE studio_parent SET valid_to = ?
+                     WHERE studio_id = ? AND valid_to IS NULL
+                    """, arguments: [since ?? Self.isoDay(Date()), studioId])
+            }
+
             try db.execute(sql: """
-                INSERT INTO studio_parent (studio_id, parent_studio_id) VALUES (?, ?)
-                ON CONFLICT(studio_id) DO UPDATE SET parent_studio_id = excluded.parent_studio_id
-                """, arguments: [studioId, parentId])
+                INSERT INTO studio_parent
+                    (studio_id, parent_studio_id, valid_from, valid_to, source, recorded_at)
+                VALUES (?, ?, ?, NULL, ?, ?)
+                """, arguments: [studioId, parentId, since, source.rawValue, Date()])
         }
     }
 
@@ -1472,6 +1742,91 @@ public class LibraryStore {
     }
 
     // MARK: Reading the graph
+
+    /// Records how a performer was credited in one video.
+    ///
+    /// ⚠️ Upserts the ATTRIBUTES onto an existing edge rather than replacing
+    /// the edge. The edge itself is `(video, performer)` and does not change;
+    /// what a match learns is how they were billed and where that came from.
+    ///
+    /// ⚠️ A nil argument leaves the stored value alone rather than clearing it
+    /// — the same rule as `ProposedField`, where "the source said nothing" must
+    /// never overwrite something already known (D5).
+    public func recordPerformerCredit(_ credit: PerformerCredit,
+                                      forVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO video_performer (video_id, performer_id)
+                VALUES (?, ?)
+                """, arguments: [videoId.uuidString, credit.performerId])
+            try db.execute(sql: """
+                UPDATE video_performer
+                   SET credited_as = COALESCE(?, credited_as),
+                       billing     = COALESCE(?, billing),
+                       source      = COALESCE(?, source),
+                       recorded_at = ?
+                 WHERE video_id = ? AND performer_id = ?
+                """, arguments: [credit.creditedAs, credit.billing,
+                                 credit.source?.rawValue, Date(),
+                                 videoId.uuidString, credit.performerId])
+        }
+    }
+
+    /// Writes an edge the way the code did before v29 existed: no provenance.
+    ///
+    /// ⚠️ Internal and for tests only. There is deliberately no public path to
+    /// an unstamped edge — every writer now records where it got it — but a
+    /// migrated library is full of them, and the read path's handling of that
+    /// is worth asserting rather than assuming.
+    ///
+    /// Lives here because `dbQueue` is private to this file and stays that way.
+    func insertLegacyPerformerEdge(_ performerId: String, forVideo videoId: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO video_performer (video_id, performer_id) VALUES (?, ?)
+                """, arguments: [videoId.uuidString, performerId])
+        }
+    }
+
+    /// Every credit on a video, with whatever is known about each.
+    ///
+    /// Ordered by billing where the source stated it, then by id so the result
+    /// is stable — a list that reorders between reads looks like data changing.
+    public func performerCredits(forVideo videoId: UUID) throws -> [PerformerCredit] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT performer_id, credited_as, billing, source
+                  FROM video_performer
+                 WHERE video_id = ?
+                 ORDER BY billing IS NULL, billing, performer_id
+                """, arguments: [videoId.uuidString])
+                .map { row in
+                    PerformerCredit(
+                        performerId: row["performer_id"],
+                        creditedAs: row["credited_as"],
+                        billing: row["billing"],
+                        source: (row["source"] as String?).flatMap(EdgeProvenance.init(rawValue:)))
+                }
+        }
+    }
+
+    /// How many edges of one kind carry each provenance.
+    ///
+    /// The figure that makes phase 1 worth having: it says how much of the
+    /// graph is asserted by a source and how much was derived from strings —
+    /// a question nothing could answer before.
+    public func edgeProvenanceCounts(_ kind: GraphEdgeKind) throws -> [String: Int] {
+        try dbQueue.read { db in
+            var counts: [String: Int] = [:]
+            for row in try Row.fetchAll(db, sql: """
+                SELECT COALESCE(source, 'unknown') AS s, COUNT(*) AS n
+                  FROM \(kind.rawValue) GROUP BY s
+                """) {
+                counts[row["s"]] = row["n"]
+            }
+            return counts
+        }
+    }
 
     public func performerIds(forVideo videoId: UUID) throws -> [String] {
         try dbQueue.read { db in
@@ -1591,17 +1946,52 @@ public class LibraryStore {
         try dbQueue.read { db in
             try String.fetchAll(db, sql: """
                 SELECT studio_id FROM studio_parent
-                WHERE parent_studio_id = ? ORDER BY studio_id
+                WHERE parent_studio_id = ? AND valid_to IS NULL
+                ORDER BY studio_id
                 """, arguments: [studioId])
         }
     }
 
-    /// The network a studio belongs to, if one is recorded.
+    /// The network a studio belongs to now, if one is recorded.
     public func parentStudioId(of studioId: String) throws -> String? {
         try dbQueue.read { db in
-            try String.fetchOne(db, sql:
-                "SELECT parent_studio_id FROM studio_parent WHERE studio_id = ?",
-                arguments: [studioId])
+            try String.fetchOne(db, sql: """
+                SELECT parent_studio_id FROM studio_parent
+                 WHERE studio_id = ? AND valid_to IS NULL
+                """, arguments: [studioId])
+        }
+    }
+
+    /// Opens a second period without closing the first, the way an incautious
+    /// second writer would.
+    ///
+    /// ⚠️ Internal and for tests only. It exists to prove the **database**
+    /// refuses this, rather than the application remembering to — a rule
+    /// enforced only in `setStudioParent` would be one merge path away from
+    /// being broken.
+    func insertOpenStudioParentForTesting(_ parentId: String,
+                                          forStudio studioId: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO studio_parent (studio_id, parent_studio_id, valid_from, valid_to)
+                VALUES (?, ?, NULL, NULL)
+                """, arguments: [studioId, parentId])
+        }
+    }
+
+    /// Every network this studio has belonged to, oldest first.
+    ///
+    /// What the temporal shape buys on a profile page: *"Part of X since 2015,
+    /// previously Y"* is a fact about a company and was unrepresentable before.
+    public func studioParentHistory(of studioId: String) throws -> [StudioParentPeriod] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT parent_studio_id, valid_from, valid_to FROM studio_parent
+                 WHERE studio_id = ?
+                 ORDER BY valid_from IS NULL DESC, valid_from
+                """, arguments: [studioId])
+                .map { StudioParentPeriod(parentId: $0["parent_studio_id"],
+                                          from: $0["valid_from"], to: $0["valid_to"]) }
         }
     }
 
@@ -1618,14 +2008,31 @@ public class LibraryStore {
 
     /// A studio and every studio beneath it, so a filter on a network finds the
     /// imprints that belong to it.
-    public func studioIdWithDescendants(_ studioId: String) throws -> [String] {
+    ///
+    /// - Parameter asOf: the day to resolve ownership on. `nil` means now.
+    ///
+    /// ⭐ The as-of form is what stops the family view being an anachronism: a
+    /// 2012 release belongs to the network that owned its imprint in 2012, not
+    /// to whoever bought it in 2018.
+    public func studioIdWithDescendants(_ studioId: String,
+                                        asOf: String? = nil) throws -> [String] {
         var found = [studioId]
         var frontier = [studioId]
         while !frontier.isEmpty {
+            let placeholders = frontier.map { _ in "?" }.joined(separator: ",")
             let children: [String] = try dbQueue.read { db in
-                try String.fetchAll(db, sql: """
+                if let asOf {
+                    return try String.fetchAll(db, sql: """
+                        SELECT studio_id FROM studio_parent
+                        WHERE parent_studio_id IN (\(placeholders))
+                          AND (valid_from IS NULL OR valid_from <= ?)
+                          AND (valid_to   IS NULL OR valid_to   >  ?)
+                        """, arguments: StatementArguments(frontier + [asOf, asOf]))
+                }
+                return try String.fetchAll(db, sql: """
                     SELECT studio_id FROM studio_parent
-                    WHERE parent_studio_id IN (\(frontier.map { _ in "?" }.joined(separator: ",")))
+                    WHERE parent_studio_id IN (\(placeholders))
+                      AND valid_to IS NULL
                     """, arguments: StatementArguments(frontier))
             }
             // A cycle cannot be created through setStudioParent, but a database

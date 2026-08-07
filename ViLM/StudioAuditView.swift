@@ -163,7 +163,7 @@ struct StudioAuditView: View {
     private func availability(of fix: StudioFix) -> Availability {
         switch fix {
         case .fixDuplicateStudios:    return .available("Fix Duplicate Studios")
-        case .repairTagSpelling:      return .available("Repair Tag Spelling")
+        case .repairStudioSpelling:   return .available("Repair Studio Spelling")
         case .connectTheGraph:        return .available("Connect the Graph")
         case .matchAgain:             return .available("Match Again")
         case .removeOrphanedProfiles: return .available("Remove Orphaned Profiles")

@@ -138,13 +138,27 @@ final class GraphEdgeTests: XCTestCase {
                        "transitively, not just one level")
     }
 
-    func testAStudioHasAtMostOneParent() throws {
+    /// ⚠️ CHANGED by the temporal migration (v30), deliberately.
+    ///
+    /// This used to assert one ROW after a reassignment — "reassigned, not
+    /// accumulated" — because the table could hold only one parent per studio,
+    /// forever. It now holds a history: the old ownership was true and stopped
+    /// being true, and erasing it was the thing phase 2 exists to stop.
+    ///
+    /// The invariant that survives is the one that was actually meant: **at
+    /// most one CURRENT parent.**
+    func testAStudioHasAtMostOneCurrentParent() throws {
         for id in ["studio:Imprint", "studio:Network", "studio:Other"] { try makeProfile(id) }
 
         try store.setStudioParent("studio:Network", forStudio: "studio:Imprint")
         try store.setStudioParent("studio:Other", forStudio: "studio:Imprint")
 
-        XCTAssertEqual(try store.edgeCount(.studioParent), 1, "reassigned, not accumulated")
+        XCTAssertEqual(try store.parentStudioId(of: "studio:Imprint"), "studio:Other",
+                       "the latest assignment is the current one")
+        XCTAssertEqual(try store.studioParentPairs().count, 1,
+                       "one CURRENT parent, whatever the history holds")
+        XCTAssertEqual(try store.edgeCount(.studioParent), 2,
+                       "and the former ownership is kept rather than erased")
     }
 
     /// ⚠️ Without this a parent-studio filter recurses forever.

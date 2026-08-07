@@ -18,6 +18,10 @@ struct ProfileGraphHeaderView: View {
     /// lineage means "looked, and nothing is recorded" — two different things,
     /// and the page says something different about each.
     @State private var studioLineage: StudioLineage?
+    /// Networks this studio used to belong to. Empty for almost everything —
+    /// nothing supplies acquisition dates yet, so this fills only where the
+    /// operator has reassigned a parent by hand.
+    @State private var formerParents: [StudioParentPeriod] = []
     @State private var isShowingEditor = false
     @State private var isShowingEnrichment = false
     @State private var isShowingScopedMatch = false
@@ -86,10 +90,14 @@ struct ProfileGraphHeaderView: View {
     private func fetchStudioLineage() {
         guard isStudio, let libraryURL, let id = currentEntityId else {
             studioLineage = nil
+            formerParents = []
             return
         }
-        studioLineage = (try? LibraryStore(at: libraryURL).studioLineage(for: id))
+        let store = try? LibraryStore(at: libraryURL)
+        studioLineage = (try? store?.studioLineage(for: id))
             ?? StudioLineage(parent: nil, siblings: [], children: [])
+        formerParents = ((try? store?.studioParentHistory(of: id)) ?? [])?
+            .filter { !$0.isCurrent } ?? []
     }
 
     /// Best-effort, and only needed when the page is a tag. An empty vocabulary
@@ -604,6 +612,19 @@ struct ProfileGraphHeaderView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if let parent = lineage.parent {
                         lineageRow(title: "Part of", relatives: [parent], color: .purple)
+                    }
+                    // Former owners, where any are recorded. A company's
+                    // ownership history is a real fact about it and was
+                    // unrepresentable before the hierarchy gained a lifetime.
+                    if !formerParents.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Previously").font(.subheadline)
+                                .foregroundColor(.secondary).fontWeight(.medium)
+                            ForEach(formerParents) { period in
+                                Text(period.displayText)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     if !lineage.children.isEmpty {
                         lineageRow(title: "Imprints", relatives: lineage.children, color: .purple)

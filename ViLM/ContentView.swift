@@ -103,6 +103,7 @@ struct ContentView: View {
     @State private var isShowingActorBatchMatch = false
     @State private var isShowingStudioConflicts = false
     @State private var isShowingStudioBatchMatch = false
+    @State private var isShowingStudioSpelling = false
     @State private var isShowingStudioAudit = false
     @State private var isShowingGraphAudit = false
     /// The video an audit finding asked to open, run once its sheet has closed.
@@ -330,15 +331,31 @@ struct ContentView: View {
                     MatchResetView(libraryURL: url) { reloadUnionAssets() }
                 }
             }
-            .sheet(isPresented: $isShowingGraphConnect) {
+            .sheet(isPresented: $isShowingGraphConnect, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
                 if let url = selectedLibraryURL {
-                    GraphConnectView(libraryURL: url) { reloadUnionAssets() }
+                    GraphConnectView(libraryURL: url,
+                                     onFinish: { reloadUnionAssets() },
+                                     onExplore: { item in
+                                        // Stored, not run: this sheet is still
+                                        // on screen. `onDismiss` runs it.
+                                        pendingAuditVideo = { openSidebarItem(item) }
+                                     })
                 }
             }
             .sheet(isPresented: $isShowingStudioConflicts) {
                 let urls = LibrarySession.shared.allURLs
                 if !urls.isEmpty {
                     StudioConflictCleanupView(libraryURLs: urls) { reloadUnionAssets() }
+                }
+            }
+            .sheet(isPresented: $isShowingStudioSpelling) {
+                if let url = selectedLibraryURL {
+                    StudioSpellingCleanupView(libraryURL: url, assets: assets) {
+                        reloadUnionAssets()
+                    }
                 }
             }
             .sheet(isPresented: $isShowingStudioBatchMatch) {
@@ -354,9 +371,13 @@ struct ContentView: View {
                 if let url = selectedLibraryURL {
                     GraphAuditView(libraryURL: url) { assetID in
                         // Stored, not run: this sheet is still on screen, and
-                        // selecting behind it would be invisible until it
+                        // navigating behind it would be invisible until it
                         // closed. `onDismiss` runs it.
-                        pendingAuditVideo = { selectedAssetIDs = [assetID] }
+                        //
+                        // ⚠️ Goes through `openAsset`, the same path Settings
+                        // uses. Setting `selectedAssetIDs` by hand here was the
+                        // bug — correct on a Mac, a no-op on a phone.
+                        pendingAuditVideo = { openAsset(assetID) }
                     }
                 }
             }
@@ -727,8 +748,8 @@ struct ContentView: View {
             pendingStudioFix = { isShowingStudioBatchMatch = true }
         case .fixDuplicateStudios:
             pendingStudioFix = { isShowingStudioConflicts = true }
-        case .repairTagSpelling:
-            pendingStudioFix = { isShowingTagCaseCleanup = true }
+        case .repairStudioSpelling:
+            pendingStudioFix = { isShowingStudioSpelling = true }
         case .connectTheGraph:
             pendingStudioFix = { isShowingGraphConnect = true }
         case .matchAgain:
@@ -860,19 +881,57 @@ struct ContentView: View {
     }
 
     private func settingsDidSelectAsset(_ assetID: Asset.ID) {
-        deferUntilSettingsDismissed {
+        deferUntilSettingsDismissed { openAsset(assetID) }
+    }
+
+    /// Shows the library filtered to one entity, from wherever the operator was.
+    ///
+    /// ⚠️ Compact layout navigates by `navigationPath`, so setting the sidebar
+    /// alone would be a no-op on a phone — the same mistake the Impossible Data
+    /// rows made. Both paths, in one place.
+    private func openSidebarItem(_ item: SidebarItem) {
+        selectedAssetIDs = []
+        sidebarSelection = [item]
 #if os(iOS)
-            if horizontalSizeClass == .compact {
-                sidebarSelection = [.allAssets]
-                selectedAssetIDs = [assetID]
-                navigationPath = [.browse, .asset(assetID, context: filteredAssetContext)]
-                return
+        if horizontalSizeClass == .compact {
+            switch item {
+            case .actor(let name):
+                navigationPath = [.browse, .entityProfile(category: "actor", name: name)]
+            case .tag(let name):
+                navigationPath = [.browse, .entityProfile(category: "tag", name: name)]
+            case .studio(let name):
+                navigationPath = [.browse, .entityProfile(category: "studio", name: name)]
+            default:
+                navigationPath = [.browse]
             }
+            return
+        }
 #endif
+        columnVisibility = .all
+    }
+
+    /// Shows one video, from wherever the operator was.
+    ///
+    /// ⚠️ Extracted 2026-08-06 because it was reimplemented by hand for the
+    /// Impossible Data report and got it wrong. On a phone `selectedAssetIDs`
+    /// alone changes NOTHING visible — compact layout navigates by
+    /// `navigationPath` — so the report's rows did nothing at all when tapped.
+    ///
+    /// One implementation, so the next caller cannot repeat that.
+    private func openAsset(_ assetID: Asset.ID) {
+#if os(iOS)
+        if horizontalSizeClass == .compact {
             sidebarSelection = [.allAssets]
             selectedAssetIDs = [assetID]
-            columnVisibility = .all
+            navigationPath = [.browse, .asset(assetID, context: filteredAssetContext)]
+            return
         }
+#endif
+        // Also resets the sidebar: a gallery selection would otherwise keep the
+        // detail column on the gallery rather than the video.
+        sidebarSelection = [.allAssets]
+        selectedAssetIDs = [assetID]
+        columnVisibility = .all
     }
 
     private func settingsDidSelectActor(_ actorID: String) {

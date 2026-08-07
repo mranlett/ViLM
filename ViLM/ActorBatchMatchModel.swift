@@ -84,16 +84,15 @@ final class ActorBatchMatchModel: ObservableObject {
         // total accumulated inside the loop, so a two-library run showed the
         // first library's count and the bar could never pass halfway.
         total = libraryURLs.reduce(0) { running, url in
-            running + ((try? LibraryStore(at: url).fetchAllEntityProfiles()
-                .filter { $0.id.hasPrefix("actor:") }.count) ?? 0)
+            running + ((try? LibraryStore(at: url)).map { examinable(in: $0).count } ?? 0)
         }
 
         let delay = UInt64((1.0 / max(provider.requestsPerSecond, 0.1)) * 1_000_000_000)
 
         for libraryURL in libraryURLs {
-            guard let store = try? LibraryStore(at: libraryURL),
-                  let profiles = try? store.fetchAllEntityProfiles()
-                    .filter({ $0.id.hasPrefix("actor:") }) else { continue }
+            guard let store = try? LibraryStore(at: libraryURL) else { continue }
+            let profiles = examinable(in: store)
+            existingProfileIds = Set(((try? store.fetchAllEntityProfiles()) ?? []).map(\.id))
 
             for profile in profiles {
                 if cancelled { break }
@@ -120,7 +119,21 @@ final class ActorBatchMatchModel: ObservableObject {
 
                 // Written as it goes. A run that only persists at the end loses
                 // everything to one interruption.
-                if let state = outcome.recordedState {
+                // 🚨 A name with no profile row becomes a PERSON only when the
+                // source actually confirms one. Recording "no match" or
+                // "ambiguous" against it would mint a row for a name that may
+                // have been guessed from a filename — which is the one thing
+                // the Epic forbids (D3), and which would then let Connect the
+                // Graph wire credits to a person nobody has verified exists.
+                //
+                // Existing rows behave exactly as before.
+                let isStandIn = !existingProfileIds.contains(profile.id)
+                let mayPersist: Bool = {
+                    if case .applied = outcome { return true }
+                    return !isStandIn
+                }()
+
+                if let state = outcome.recordedState, mayPersist {
                     var updated = appliedProfile ?? profile
                     updated.enrichmentState = state
                     updated.enrichmentSource = provider.displayName
@@ -144,6 +157,36 @@ final class ActorBatchMatchModel: ObservableObject {
         finished = true
         NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
     }
+
+    /// Every actor the run should look at — **by name**, not by profile row.
+    ///
+    /// 🚨 This used to be `fetchAllEntityProfiles().filter { actor: }`, and a
+    /// cast member added by a video match creates **no profile row**. So the
+    /// people most in need of matching were not skipped, they were INVISIBLE:
+    /// the run examined only the already-matched profiles and reported "100%
+    /// skipped" while a hundred names sat at *Not yet checked* in the gallery,
+    /// which builds its list from the strings instead.
+    ///
+    /// Reported from the device, 2026-08-07. It is the same root cause as
+    /// Connect the Graph's *"190 names have no profile"*.
+    private func examinable(in store: LibraryStore) -> [EntityProfile] {
+        let profiles = (try? store.fetchAllEntityProfiles()) ?? []
+        var byId = Dictionary(uniqueKeysWithValues:
+            profiles.filter { $0.id.hasPrefix("actor:") }.map { ($0.id, $0) })
+
+        for asset in (try? store.fetchAllAssets()) ?? [] {
+            for name in asset.actors where !name.isEmpty {
+                let id = "actor:\(name)"
+                // A stand-in, never saved unless a match is actually applied.
+                if byId[id] == nil { byId[id] = EntityProfile(id: id) }
+            }
+        }
+        return byId.values.sorted { $0.id < $1.id }
+    }
+
+    /// Ids that already exist as rows, so the run knows which of its subjects
+    /// are real records and which are names it is standing in for.
+    private var existingProfileIds: Set<String> = []
 
     /// Carries the merged profile out of `examine` without widening the
     /// outcome type, which only the report needs to understand.

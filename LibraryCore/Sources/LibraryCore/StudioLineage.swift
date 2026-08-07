@@ -12,6 +12,39 @@
 
 import Foundation
 
+/// One period during which a studio belonged to a network.
+///
+/// ⚠️ `from == nil` means "as far back as we know", not "never". Every row the
+/// temporal migration created carries nil, because the hierarchy was recorded
+/// before anyone could say when it began.
+public struct StudioParentPeriod: Equatable, Sendable, Identifiable {
+    public let parentId: String
+    public let from: String?
+    public let to: String?
+
+    public var id: String { "\(parentId)|\(from ?? "")|\(to ?? "")" }
+    public var isCurrent: Bool { to == nil }
+
+    public var parentName: String { StudioLineage.displayName(parentId) }
+
+    /// How to phrase the period. Deliberately says nothing it does not know —
+    /// an unknown start reads as plain ownership rather than inventing a date.
+    public var displayText: String {
+        switch (from, to) {
+        case let (start?, nil):   return "\(parentName) since \(start)"
+        case let (start?, end?):  return "\(parentName) \(start)–\(end)"
+        case let (nil, end?):     return "\(parentName) until \(end)"
+        case (nil, nil):          return parentName
+        }
+    }
+
+    public init(parentId: String, from: String?, to: String?) {
+        self.parentId = parentId
+        self.from = from
+        self.to = to
+    }
+}
+
 public struct StudioLineage: Equatable, Sendable {
 
     /// A studio adjacent to this one, with enough to render a row.

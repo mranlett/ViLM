@@ -49,17 +49,30 @@ struct ActorBatchMatchView: View {
         .sheet(item: $reviewing) { queued in
             // Hands off to the per-actor screen, which is where a choice
             // between candidates belongs — this run's job was to find them.
-            EntityProfileEditorView(libraryURL: queued.libraryURL,
-                                    entityId: queued.profile.id,
-                                    profile: queued.profile,
-                                    onSave: { _ in
-                                        // Saving is acting on it, so it leaves
-                                        // the queue. Without this an actor
-                                        // matched here stayed on the "need you
-                                        // to choose" list all session.
-                                        model.removeFromQueue(queued.profile.id)
-                                        reviewing = nil
-                                    })
+            // ⚠️ The candidate picker, NOT the profile editor.
+            //
+            // 🚨 This handed off to the editor, where the operator had to find
+            // and press "Import from …" to reach the candidates — the same
+            // dead end the studio queue had, and the one the studio fix was
+            // explicitly noted as not yet applying here. It became obvious once
+            // the run started finding the actors it had been blind to.
+            //
+            // The sheet searches on appear and opens on its picker when there
+            // is more than one candidate, which is exactly why this record was
+            // queued.
+            if let provider = installedActorProvider {
+                ActorEnrichmentSheet(
+                    provider: provider,
+                    entityId: queued.profile.id,
+                    actorName: name(queued),
+                    // The OWNING library's row, or the stand-in the run built
+                    // for a name that has none — never a merged view.
+                    currentProfile: queued.profile,
+                    libraryURL: queued.libraryURL,
+                    onApply: { merged, renameTo in
+                        applyReviewed(merged, renameTo: renameTo, for: queued)
+                    })
+            }
         }
     }
 
@@ -167,6 +180,34 @@ struct ActorBatchMatchView: View {
                 }
             }
         }
+    }
+
+    private var installedActorProvider: (any ActorMetadataProvider)? {
+        PluginEnvironment.registry.installed
+            .compactMap { $0 as? any ActorMetadataProvider }
+            .first
+    }
+
+    /// Saves what the operator accepted, then takes the actor off the queue.
+    ///
+    /// ⚠️ Writes to the library the crawl found this record in, not "the first
+    /// one" — the video side learned that writing into a database with no such
+    /// row throws, gets swallowed, and returns the record to the queue looking
+    /// as though nothing happened.
+    private func applyReviewed(_ merged: EntityProfile, renameTo: String?,
+                               for queued: ActorBatchMatchModel.QueuedActor) {
+        guard let store = try? LibraryStore(at: queued.libraryURL) else { return }
+        // Save BEFORE any rename: a rename rewrites this record's identity, so
+        // writing afterwards would target a row that has just moved.
+        try? store.saveEntityProfile(merged)
+
+        if let renameTo, !renameTo.isEmpty, renameTo != name(queued) {
+            try? store.renameTagGlobally(oldTag: merged.id, newTag: "actor:\(renameTo)")
+        }
+
+        model.removeFromQueue(queued.profile.id)
+        reviewing = nil
+        NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
     }
 
     private func name(_ queued: ActorBatchMatchModel.QueuedActor) -> String {

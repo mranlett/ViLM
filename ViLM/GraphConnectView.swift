@@ -23,6 +23,16 @@ import LibraryCore
 struct GraphConnectView: View {
     let libraryURL: URL
     var onFinish: () -> Void
+    /// Opens the library filtered to one name or tag.
+    ///
+    /// 🚨 Added 2026-08-07. Every blocker below was a bare COUNT — "90
+    /// performer traits sit on videos", "190 names have no profile" — with no
+    /// list and no way through. The operator could read the number and had no
+    /// route to a single one of the records behind it.
+    ///
+    /// The batch runs already state the rule this broke: *a tally you cannot
+    /// act on is a dead end.*
+    var onExplore: ((SidebarItem) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -87,14 +97,31 @@ struct GraphConnectView: View {
 
     private func connectSection(_ o: Outcome) -> some View {
         Section {
-            countRow("Cast credits", o.performers.connectable, of: o.performers.associations)
-            countRow("Studios", o.studios.connectable, of: o.studios.associations)
-            countRow("Tags on videos", o.tags.videoEdges, of: nil)
-            countRow("Tags on performers", o.tags.performerEdges, of: nil)
+            // ⚠️ NEW edges, with what was already there and what can never
+            // be connected stated beside them. The old rows read "484 of
+            // 2,596" for a run that created 3 — the numerator was a
+            // subtraction across two unrelated sets and the denominator
+            // included credits that could never become edges.
+            edgeRow("Cast credits",
+                    new: o.performers.connectable,
+                    already: o.performers.alreadyConnected,
+                    skipped: o.performers.skippedNoProfile)
+            edgeRow("Studios",
+                    new: o.studios.connectable,
+                    already: o.studios.alreadyConnected,
+                    skipped: o.studios.skippedNoProfile)
+            edgeRow("Tags on videos",
+                    new: o.tags.newVideoEdges,
+                    already: o.tags.videoEdges - o.tags.newVideoEdges,
+                    skipped: 0)
+            edgeRow("Tags on performers",
+                    new: o.tags.newPerformerEdges,
+                    already: o.tags.performerEdges - o.tags.newPerformerEdges,
+                    skipped: 0)
         } header: {
             Text(result == nil ? "Would connect" : "Connected")
         } footer: {
-            Text("The existing tags are left exactly as they are. This adds a second, structured copy the app can query — it does not remove the first.")
+            Text("“New” is what this run adds. “Already” was connected by an earlier run — re-running is cheap and changes nothing. “Skipped” can never be connected as things stand, and the reasons are below.\n\nThe existing tags are left exactly as they are. This adds a second, structured copy the app can query — it does not remove the first.")
         }
     }
 
@@ -105,7 +132,7 @@ struct GraphConnectView: View {
         let hasBlockers = !o.performers.missingProfiles.isEmpty
             || !o.studios.conflicted.isEmpty
             || o.tags.pending > 0
-            || o.tags.attributeTagsOnVideos > 0
+            || !o.tags.attributeTagsOnVideos.isEmpty
             || !o.tags.unknownTags.isEmpty
 
         if hasBlockers {
@@ -113,7 +140,12 @@ struct GraphConnectView: View {
                 if !o.performers.missingProfiles.isEmpty {
                     blocker("\(o.performers.missingProfiles.count) names have no profile",
                             detail: "Their credits are skipped. Creating a person from a name that a filename may have guessed is the one thing the parser is not allowed to do, so it is not done here either — match those videos and the profiles arrive with them.",
-                            icon: "person.crop.circle.badge.questionmark")
+                            icon: "person.crop.circle.badge.questionmark",
+                            // Filtering by the NAME still works without a
+                            // profile: the grid matches the `actor:` string.
+                            entries: o.performers.missingProfiles.sorted().map {
+                                ($0, SidebarItem.actor($0))
+                            })
                 }
                 if !o.studios.conflicted.isEmpty {
                     blocker("\(o.studios.conflicted.count) videos carry two studios",
@@ -125,15 +157,22 @@ struct GraphConnectView: View {
                             detail: "Held, not lost. Classify the tag and they become edges.",
                             icon: "clock")
                 }
-                if o.tags.attributeTagsOnVideos > 0 {
-                    blocker("\(o.tags.attributeTagsOnVideos) performer traits sit on videos",
-                            detail: "A video isn't a redhead — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess.",
-                            icon: "person.and.arrow.left.and.arrow.right")
+                if !o.tags.attributeTagsOnVideos.isEmpty {
+                    blocker("\(o.tags.attributeTagAssociations) performer traits sit on videos",
+                            detail: "A video isn't a redhead — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess. Open one to see which videos carry it.",
+                            icon: "person.and.arrow.left.and.arrow.right",
+                            entries: o.tags.attributeTagsOnVideos
+                                .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+                                .map { ("\($0.key) — \($0.value) video\($0.value == 1 ? "" : "s")",
+                                        SidebarItem.tag($0.key)) })
                 }
                 if !o.tags.unknownTags.isEmpty {
                     blocker("\(o.tags.unknownTags.count) tags are not in the vocabulary",
-                            detail: "Reported rather than created, so promoting and connecting stay separately checkable.",
-                            icon: "questionmark.circle")
+                            detail: "Reported rather than created, so promoting and connecting stay separately checkable. Classify Tags adds them.",
+                            icon: "questionmark.circle",
+                            entries: o.tags.unknownTags.sorted().map {
+                                ($0, SidebarItem.tag($0))
+                            })
                 }
             } header: {
                 Text("Skipped")
@@ -178,6 +217,24 @@ struct GraphConnectView: View {
 
     // MARK: - Pieces
 
+    /// One edge kind: what this run adds, what was already there, and what
+    /// cannot be connected at all.
+    ///
+    /// 🚨 Three numbers because there are three, and collapsing them into
+    /// "N of M" produced a figure that matched nothing — reported from the
+    /// device, 2026-08-07.
+    private func edgeRow(_ title: String, new: Int, already: Int, skipped: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            LabeledContent(title) {
+                Text("\(new) new").foregroundStyle(new == 0 ? .secondary : .primary)
+            }
+            Text(skipped > 0
+                 ? "\(already) already connected · \(skipped) skipped"
+                 : "\(already) already connected")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
     private func countRow(_ title: String, _ value: Int, of total: Int?) -> some View {
         LabeledContent(title) {
             if let total, total != value {
@@ -192,6 +249,52 @@ struct GraphConnectView: View {
         VStack(alignment: .leading, spacing: 4) {
             Label(title, systemImage: icon).font(.callout)
             Text(detail).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// How many examples a blocker lists before it stops.
+    ///
+    /// ⚠️ Whatever is cut is counted and said out loud — a list that quietly
+    /// stops at a dozen reads as a library with a dozen problems.
+    private static let examplesShown = 12
+
+    /// A blocker with the records behind it, each one a way in.
+    ///
+    /// - Parameter item: what to filter the library to. `nil` for entries with
+    ///   nowhere sensible to go, which stay plain text rather than pretending
+    ///   to be tappable.
+    @ViewBuilder
+    private func blocker(_ title: String, detail: String, icon: String,
+                         entries: [(label: String, item: SidebarItem?)]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon).font(.callout)
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+
+            ForEach(Array(entries.prefix(Self.examplesShown).enumerated()), id: \.offset) { _, entry in
+                if let item = entry.item, let onExplore {
+                    Button {
+                        onExplore(item)
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(entry.label).font(.caption)
+                            Image(systemName: "arrow.forward.circle")
+                                .font(.caption2)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
+                } else {
+                    Text(entry.label).font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            if entries.count > Self.examplesShown {
+                Text("and \(entries.count - Self.examplesShown) more")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 2)
     }
