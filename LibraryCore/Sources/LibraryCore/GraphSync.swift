@@ -86,6 +86,14 @@ public struct GraphDisagreement: Sendable, Equatable, Identifiable {
         /// parents on the same date, which is the invariant the temporal shape
         /// exists to hold.
         case studioParentDate
+        /// 🚨 The same node identified as DIFFERENT records in one source.
+        ///
+        /// The most consequential disagreement there is: the two libraries do
+        /// not merely describe this node differently, they believe it is a
+        /// different person or company. Everything downstream — the
+        /// filmography, the enrichment, any future refresh — follows from which
+        /// is right, and nothing here can tell.
+        case nodeIdentity
     }
 
     public let subject: Subject
@@ -121,6 +129,8 @@ public struct GraphMergeResult: Sendable, Equatable {
     public let datedStudioParents: Int
     /// FORMER ownerships the sender knew about and this library did not.
     public let newStudioParentPeriods: Int
+    /// External identities learned from the other library.
+    public let newMatches: Int
     /// Hierarchy edges refused because taking them would have made a loop.
     public let refusedCycles: Int
     /// ⚠️ Facts the two libraries answer differently. Nothing was changed for
@@ -139,7 +149,7 @@ public struct GraphMergeResult: Sendable, Equatable {
     public var changedAnything: Bool {
         actors.new + actors.updated + actors.photos + newStudios + updatedStudios
             + newTags + classifiedTags + newPerformerTags + newStudioParents
-            + datedStudioParents + newStudioParentPeriods > 0
+            + datedStudioParents + newStudioParentPeriods + newMatches > 0
     }
 }
 
@@ -166,6 +176,9 @@ extension LibraryStore {
         export.tags = try fetchTagVocabulary()
         export.performerTags = try performerTagPairs()
         export.studioParents = try studioParentEdges()
+        // ⚠️ Entity matches only. A video match names a video id, which is
+        // local to the library holding the file.
+        export.entityMatches = try allEntityMatches()
         return export
     }
 
@@ -347,6 +360,28 @@ extension LibraryStore {
             }
         }
 
+        // Match edges (v31). Additive like everything else: a source the
+        // receiver has no answer for is taken, agreement is silent, and a
+        // DIFFERENT id for the same source is reported and written nowhere.
+        var newMatches = 0
+        let mine = Dictionary(
+            grouping: try allEntityMatches(), by: { "\($0.nodeId)|\($0.source)" })
+        for match in export.entityMatches where known.contains(match.nodeId) {
+            if let held = mine["\(match.nodeId)|\(match.source)"]?.first {
+                guard held.sourceId != match.sourceId else { continue }
+                disagreements.append(GraphDisagreement(
+                    subject: .nodeIdentity, name: match.nodeId,
+                    mine: held.sourceId, theirs: match.sourceId))
+                continue
+            }
+            // ⭐ A source this library does not use is still worth taking. An
+            // id costs nothing to hold and may matter the day that source is
+            // installed — refusing it would make the second library's work
+            // unrecoverable rather than merely unused.
+            try recordMatch(match, isVideo: false)
+            newMatches += 1
+        }
+
         return GraphMergeResult(
             actors: .init(new: actors.newActorCount, updated: actors.updatedActorCount,
                           photos: actors.newPhotoCount),
@@ -355,6 +390,7 @@ extension LibraryStore {
             newPerformerTags: newPerformerTags, newStudioParents: newStudioParents,
             datedStudioParents: datedStudioParents,
             newStudioParentPeriods: newStudioParentPeriods,
+            newMatches: newMatches,
             refusedCycles: refusedCycles, disagreements: disagreements)
     }
 

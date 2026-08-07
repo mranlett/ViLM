@@ -73,7 +73,7 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
 }
 
 /// One node, identified in one source.
-public struct NodeMatch: Equatable, Sendable, Identifiable {
+public struct NodeMatch: Codable, Equatable, Sendable, Identifiable {
     /// `assets.id` as a string, or an `entity_profiles.id`.
     public let nodeId: String
     /// Which service. Plain text, because naming a source in code is the

@@ -81,6 +81,16 @@ public struct ActorLibraryExport: Codable, Sendable {
     /// with real valid time, and it carries its history — see `StudioParentEdge`.
     public var studioParents: [StudioParentEdge] = []
 
+    /// Which external record each actor or studio IS (v31).
+    ///
+    /// ⭐ A match travels, unlike phase 1's edge attributes, which the operator
+    /// settled as local bookkeeping. "This performer is that record" is a fact
+    /// about the world and is as true in one library as in another.
+    ///
+    /// ⚠️ ENTITY matches only. A video's match names a video id, which is local
+    /// to the library holding the file — the same reason no video edge travels.
+    public var entityMatches: [NodeMatch] = []
+
     public init(formatVersion: Int, exportedAt: Date, profiles: [EntityProfile],
                 photos: [ExportedPhoto], tombstones: [EntityTombstone] = []) {
         self.formatVersion = formatVersion
@@ -118,6 +128,11 @@ public struct ActorLibraryExport: Codable, Sendable {
         tags = (try? c.decode([TagRecord].self, forKey: .tags)) ?? []
         performerTags = (try? c.decode([GraphEdgePair].self, forKey: .performerTags)) ?? []
         studioParents = (try? c.decode([StudioParentEdge].self, forKey: .studioParents)) ?? []
+        // 🚨 This decoder is hand-written and the encoder is synthesized, which
+        // is the standing trap documented above — adding a property updates one
+        // side and not the other, silently. Adding the line here IS the fix
+        // being remembered rather than re-learned.
+        entityMatches = (try? c.decode([NodeMatch].self, forKey: .entityMatches)) ?? []
     }
 }
 

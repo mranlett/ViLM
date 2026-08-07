@@ -112,6 +112,9 @@ struct ActorLibraryImportView: View {
                     if result.newStudioParentPeriods > 0 {
                         Text("\(result.newStudioParentPeriods) former owner\(result.newStudioParentPeriods == 1 ? "" : "s") recorded")
                     }
+                    if result.newMatches > 0 {
+                        Text("\(result.newMatches) external identit\(result.newMatches == 1 ? "y" : "ies") learned")
+                    }
                 }
                 .foregroundColor(.secondary)
 

@@ -121,6 +121,21 @@ extension LibraryStore {
         return NodeMatchRanking.ordered(rows)
     }
 
+    /// Every entity match in the library — what a sync carries.
+    public func allEntityMatches() throws -> [NodeMatch] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT entity_id, source, source_id, method, matched_at
+                  FROM entity_match
+                """).compactMap { row in
+                    guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
+                    return NodeMatch(nodeId: row["entity_id"], source: row["source"],
+                                     sourceId: row["source_id"], method: method,
+                                     matchedAt: row["matched_at"])
+                }
+        }
+    }
+
     // MARK: - The migration's own questions
 
     /// Nodes claiming to be matched that have no match edge.
