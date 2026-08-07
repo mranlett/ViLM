@@ -43,6 +43,12 @@ struct GraphConnectView: View {
         var tags: LibraryStore.TagConnectPlan
     }
 
+    /// Match edges created from the identity columns (v31).
+    ///
+    /// ⚠️ Folded into this tool rather than given its own button. It is the
+    /// same operation — building edges from data the library already holds —
+    /// and a migration nobody runs is a migration that did not happen.
+    @State private var backfilledMatches = 0
     @State private var plan: Outcome?
     @State private var result: Outcome?
     @State private var edgeCounts: [(GraphEdgeKind, Int)] = []
@@ -190,8 +196,18 @@ struct GraphConnectView: View {
             ForEach(edgeCounts, id: \.0) { kind, count in
                 LabeledContent(label(for: kind), value: "\(count)")
             }
+            if backfilledMatches > 0 {
+                LabeledContent("external identities", value: "\(backfilledMatches)")
+            }
         } header: {
             Text("The graph now holds")
+        } footer: {
+            if backfilledMatches > 0 {
+                // ⭐ Said plainly because it is a one-off: these were recorded
+                // as a column on each record and are now edges, which is what
+                // lets the library say which nodes have NO identity at all.
+                Text("The identities were already on your records; they are now part of the graph, so a node with none is findable rather than merely null.")
+            }
         }
     }
 
@@ -337,6 +353,10 @@ struct GraphConnectView: View {
             result = Outcome(performers: try store.connectPerformerEdges(),
                              studios: try store.connectStudioEdges(),
                              tags: try store.connectTagEdges())
+            // Idempotent, and only writes where no edge exists, so re-running
+            // this tool adds nothing the second time.
+            let filled = try store.backfillMatchEdges()
+            backfilledMatches = filled.entities + filled.videos
             edgeCounts = try GraphEdgeKind.allCases.map { ($0, try store.edgeCount($0)) }
             disagreements = (try store.performerEdgeDisagreements().count,
                              try store.studioEdgeDisagreements().count)
