@@ -104,7 +104,7 @@ Not a plan, but the ordering the analysis implies:
 | 1 — `AgeAtRelease` as a dimension (sort, group, filter) | **Built** | *Career Arc — Age at Release as a Dimension* |
 | 2 — Career-arc sections on the actor profile | **Built** | same |
 | 3 — The self-audit checks (section E) | **Built** | below |
-| 4 — Edge attributes | Not started | the structural unlock |
+| 4 — Edge attributes | **Built** 2026-08-07 | *Edge Attributes* (v29) + *Temporal Edges* (v30). Completed by carrying the credited name — see below. |
 ### Step 3, as built — "Impossible Data"
 `GraphAudit` in `LibraryCore`, surfaced as **Settings → Find Problems → Impossible Data**. Four checks, all of which need two records joined and none of which any single record can answer:
 | Check | Certain? |
@@ -124,3 +124,18 @@ Design decisions worth keeping:
 **Not built from section E:** graph-shaped duplicate detection, which wanted same-cast + same-studio + same-duration. `Asset` carries no duration, so that check has no input without going through `VideoDuplicateAnalyzer`'s own machinery. Roster implausibility was left out as too noisy for a first pass.
 ## Evidence
 Schema read at the current migration on 2026-08-06. Edge counts carried from the graph verification recorded in the previous session's handoff. `AgeAtRelease` usage established by reading its call sites: `InspectorView` and `AssetGridView`, both display; `AssetFilterCriteria` has no age field, and `ActorFilterCriteria`'s `minAge`/`maxAge` filter on a performer's age **today**, not at release.
+## Step 4 completed 2026-08-07 — the credited name
+⚠️ **Edge attributes were only half delivered.** Migration v29 added `credited_as` and `billing` to `video_performer` in the previous session, and **nothing ever wrote to them.** `VideoMetadataProposal.actors` was `[String]`, so the name a performer appeared under in a scene was read at the plugin boundary and dropped there. The column existed, the data existed, and the two were never connected. This analysis named it under section F — *"credited-as names; billing order → needs edge attributes"* — and the attributes shipped without it.
+`actors` is now `[ProposedCredit]`: a canonical name, the name credited in this video, and a billing position where the source states one.
+### 🚨 What finishing it uncovered — a performer-splitting bug
+The plugin's `performerNames` **preferred the credited name** and used the canonical one only as a fallback. So a performer who worked under three aliases became **three separate profiles**, each holding part of a filmography, none holding all of it, and nothing recording that they were one person.
+Nothing in 143 passing plugin tests pinned it either way, which is how it survived. The canonical name is now the identity; the credited name travels beside it as edge data.
+⚠️ This is a **data-quality defect already in the library** — past matches filed performers under aliases. The split profiles are still there. Merging them is the actor-disambiguation tool's job, not a migration's, because only a person can say two profiles are one performer.
+### Decisions worth keeping
+- **The canonical name becomes the ****`actor:`**** tag, never the credited one.** Filing a performer under a name they used once is what created the splits.
+- **Only credits that SAY something are stored.** A credit carrying neither a different name nor a billing position records that a performer was credited normally — which the edge already implies. Writing it for everyone would fill the column with rows that mean nothing and bury the few that matter. A credit differing only by case is the same name.
+- ⭐ **Shown at review**, as *"Alice Smith (as Alicia S.)"*. A credited name that looks nothing like the performer is the clearest sign the source matched the wrong person, and hiding it discards the evidence at the one moment someone is looking.
+- ⚠️ **The "Credited As" line on the inspector is deliberately not a browse pill.** Tapping it would search for a performer filed under a name the library does not use, and find nothing.
+- **`ProposedCredit`**** is ****`ExpressibleByStringLiteral`**, so a plain name still reads as one and every fixture naming a performer and nothing else is unchanged.
+**1,190 core tests + 153 plugin tests, 0 failures.** Both platforms build. D9 clean.
+⭐ **Billing is carried but never inferred.** The source states it or it stays nil — the order a list happened to arrive in says nothing about billing, and deriving it would manufacture a fact.

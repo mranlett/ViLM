@@ -95,7 +95,7 @@ Approved by the operator and implemented. `studio_parent` rebuilt with `valid_fr
 | `studioParentPairs(asOf:)` and `studioIdWithDescendants(_:asOf:)` | built |
 | `studioParentHistory(of:)`  • `StudioParentPeriod` | built |
 | **Previously** block on the studio profile page | built |
-| Federation rules (D4) | ⚠️ **not built** — see below |
+| Federation rules (D4) | **built 2026-08-07** |
 **1,122 LibraryCore tests, 0 failures** (11 new). macOS and iOS build. D9 clean.
 ### ⚠️ Shipped BEFORE v28, against this spec's own dependency
 This spec said *"v28 run first"*. It has not.
@@ -106,5 +106,32 @@ The interaction was re-checked rather than assumed: v28 re-points `studio_parent
 ### A behaviour change, recorded
 `GraphEdgeTests.testAStudioHasAtMostOneParent` asserted **one row** after a reassignment — *"reassigned, not accumulated"*. That is now wrong by design: the former ownership is kept. Renamed to `testAStudioHasAtMostOneCurrentParent`, asserting the invariant that was actually meant — one **current** parent, history retained.
 ### Still open
-- **D4 federation is not implemented.** `studio_parent` travels between libraries, and the specific hazard this spec identified — two libraries each holding a *different open parent*, which the partial index now makes a constraint violation mid-merge rather than a silent no-op — is **unhandled**. `GraphSync` must detect that case before writing. ⚠️ Worth doing before the next cross-library sync, not after.
+- ~~D4 federation is not implemented.~~ **Built 2026-08-07 — and the defect was worse than this spec predicted.** See the section below.
 - **The open question stands and is now sharper.** Nothing supplies acquisition dates: the source's studio record carries a parent and no date for the relationship. Every row created by v30 has `valid_from = NULL`, and the only way a period gets a date today is the operator reassigning a parent by hand. The machinery is correct and almost entirely unfed.
+## D4 FEDERATION — BUILT 2026-08-07
+Implemented in two commits. Reading the merge changed the diagnosis twice, and both corrections are worth keeping.
+### 🚨 Correction 1 — the hazard was not the one this spec named
+This spec predicted a **constraint violation**: two libraries each holding a different open parent, colliding on `studio_parent_current` mid-merge. That case never arose, because the merge never got as far as a second open row. `applyGraphMerge` called `setStudioParent` for any incoming pair not already present, which for an imprint this library had placed under a different network **silently replaced the operator's answer with the sender's** — one open row throughout, no constraint to violate.
+⚠️ **And it predates v30.** The old write was an `ON CONFLICT DO UPDATE` and overwrote just as quietly. v30 made it *worse* rather than causing it: the overruled parent is now demoted into dated history, so the overrule leaves a trail indistinguishable from a real acquisition.
+Now: same parent is silent, no parent here accepts the sender's, and a **different** parent is reported as a `studioParent` disagreement and written nowhere — the same treatment `tagKind` and `studioSource` already had.
+### 🚨 Correction 2 — D4's first rule was unimplementable
+*"Receiver has the same parent, no dates; sender has dates → accept the dates."* `GraphEdgePair` carries two ids and nothing else, so **the dates never travelled**. Every received hierarchy arrived undated regardless of what the sender knew.
+`StudioParentEdge` now carries the period. The merge:
+| Case | Behaviour |
+| --- | --- |
+| Agreed parent, only the sender has a date | **Take it** — `datedStudioParents` |
+| Agreed parent, both dated, dates differ | Reported as `studioParentDate`, neither written |
+| Sender undated (un-upgraded library) | Read as **unknown** — never stamps over a date held here |
+| A FORMER ownership the sender knows and this library does not | **Learned** — `newStudioParentPeriods` |
+| An arriving period overlapping one held here | Reported, not written |
+⭐ **Order matters, and it is asserted.** The open period is dated **first**, which stops it reaching back forever and makes room for the history behind it. Every row v30 migrated carries a nil start, so that is the common case rather than a corner one.
+⚠️ Old exports decode unchanged — both dates nil, meaning *unknown*, never *always*. Newer exports decode in older builds, which ignore the two extra keys.
+### 🚨 What the D4 work uncovered — the export was discarding the whole graph
+Found while writing a round-trip test. `ActorLibraryExport.encode(to:)` is synthesized and has always emitted the entire graph, but `init(from:)` is **hand-written and stopped at ****`tombstones`**. So `studios`, `tags`, `performerTags` and `studioParents` were written to every `.vilmactors` file and **silently discarded on read**.
+Every file-based import reported *"0 new studios, 0 new tags, 0 new connections"* while holding all of them in the file it had just parsed.
+⚠️ **The live attached-library sync was never affected** — it passes the export across in memory and never round-trips through JSON. That is precisely why this survived review: the route in daily use worked, and the broken one is the between-machines route this whole federation design exists to serve.
+Decoding is now tolerant, matching `tombstones`, so a file written before those fields existed still reads as *"knew nothing about studios"* rather than failing.
+⭐ **The lesson worth keeping:** a hand-written `init(from:)` beside a synthesized `encode(to:)` is a standing trap — adding a property updates one side and not the other, silently, with no compiler error. Either write both or write neither.
+**1,166 LibraryCore tests, 0 failures** (13 new). Both platforms build. D9 clean.
+### The open question still stands
+Nothing supplies acquisition dates automatically. What changed is that a date the operator types on one machine can now **reach the other**, which makes hand-entry worth doing where before it was stranded. The machinery remains correct and largely unfed.

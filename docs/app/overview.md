@@ -11,7 +11,8 @@ notion: https://app.notion.com/p/ViLM-3afadccaf4288198a6a9f0603c01c2f8
 
 > Application charter for ViLM (layer 2). Inherits the Personal Constitution and shared SwiftUI standards. Page ID: 3afadcca-f428-8198-a6a9-f0603c01c2f8. Target platforms: macOS 14+ / iOS 17+.
 ## Intention
-Native macOS and iOS video library management and media review application. Recursively indexes local video files into an embedded SQLite database (GRDB.swift), managing a full metadata graph of video assets, actors/entities (with aliases), tags, series, playlists, and smart collections—with video playback, contact sheet generation, duplicate detection, and review workflows—100% private and offline.
+Native macOS and iOS video library management and media review application. Recursively indexes local video files into an embedded SQLite database (GRDB.swift), managing a full metadata graph of video assets, actors/entities (with aliases), tags, series, playlists, and smart collections—with video playback, contact sheet generation, duplicate detection, and review workflows—**local-first, with no analytics and no telemetry.**
+⚠️ **Corrected 2026-08-07 — this said "100% private and offline", which is not true and predates the plugin work.** Two paths reach the network. Remote profile images are fetched **automatically whenever a profile is displayed**, needing no click and no plugin — and 559 of 1,214 stored remote image URLs (46%, measured on the drive library) contain the performer's name, so the host can observe which performers a library holds. Optional metadata plugins additionally query a third-party service, but only once one is installed, a credential supplied, and a lookup started. See `PRIVACY.md` and GitHub issue #15.
 ## Functionality
 - **Library Scanning & Indexing: **Recursive indexing (LibraryScanner.swift) of .mp4, .mov, and .m4v video files. Uses relative paths, stable UUIDs, file-hash tracking, missing-file detection, and catalog schema migrations while preserving custom user metadata during rescans.
 - **SQLite Persistence via GRDB: **High-performance SQLite engine (LibraryStore.swift) storing .catalog data alongside media files. Schema migrations for Assets, Actors, Tags, Playlists, Smart Collections, Series/Episodes, and Contact Sheets.
@@ -36,7 +37,7 @@ Native macOS and iOS video library management and media review application. Recu
 ## Architecture
 Cleanly separated into a native SwiftUI application layer (ViLM/ViLM) and a pure, testable domain library core (LibraryCore Swift package at ViLM/LibraryCore). Persists data locally into an embedded SQLite database using GRDB.swift.
 - **LibrarySession.swift — Central State: **Manages active library state, search criteria, filter state, and selection model across screens.
-- **LibraryStore.swift — GRDB SQLite Persistence: **Embedded SQLite database engine managing schema migrations, relative path resolution, and zero-network local storage.
+- **LibraryStore.swift — GRDB SQLite Persistence: **Embedded SQLite database engine managing schema migrations, and relative path resolution. ⚠️ The phrase "zero-network local storage" was removed on 2026-08-07: the STORE is local and makes no requests, but the app around it does — saying it here read as a claim about the application.
 - **Decoupled Domain Services: **Domain services for scanning (LibraryScanner), contact sheet generation (ContactSheetService), duplicate detection (VideoDuplicateAnalyzer), video editing (VideoEditingService), file renaming (FileRenamerService), and library federation (LibraryFederation).
 ## Data model (SQLite via GRDB)
 - **assets — Video Asset Master: **id (UUID), relative_path, file_name, status, created_at, tags, external_link, notes, rating, video_name, season_number, episode_number, episode, play_count, last_played_at. ⚠️ **Corrected 2026-08-01** — this entry previously claimed `file_size`, `duration`, `width`, `height`, `codec` and `modified_at` columns. Verified against `LibraryStore.swift:114-218`: **none of those exist.** File size and video dimensions are read from the filesystem and AVFoundation on demand, which is the subject of findings F5 and F6 in the *iOS Performance & Battery Optimization* spec — its Phase 3 adds those six columns, at which point this list must be updated again.
@@ -64,7 +65,7 @@ Native Apple Xcode Build & Packaging: Developed under ~/Development/ViLM, tracke
 - **Not indexed in GitNexus: **Unlike the 3Ci repos, ViLM has no knowledge graph; run `gitnexus analyze ~/Development/ViLM/ViLM` to enable graph queries instead of file reads.
 ---
 ## Current fitness & roadmap (Review, July 2026)
-Verdict — Shipped & Active. Highly mature native Apple application with modular architecture (LibraryCore + ViLM app), 22 unit test suites, offline-first SQLite database, and rich media processing.
+Verdict — Shipped & Active. Highly mature native Apple application with modular architecture (LibraryCore + ViLM app), roughly 1,200 unit tests, a local SQLite database, and rich media processing. (⚠️ "offline-first" corrected from "offline" — see Intention.)
 - **Phase 1 · Smart Shelves Dashboard Expansion: **Implementing auto-generated horizontal shelves on the Dashboard (Top Rated, Never Watched, Rediscover, Most Watched).
 - **Phase 2 · Playlists Sequential Playback: **Adding sequential auto-advance playback queue for hand-picked playlists.
 - **Phase 3 · Advanced Duplicate Reconciliation: **Enhancing per-item batch-choice resolution for asset deduplication across attached federated libraries.
