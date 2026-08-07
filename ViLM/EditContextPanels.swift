@@ -143,6 +143,17 @@ struct ActorContextPanel: View {
     let profile: EntityProfile?
     let libraryURL: URL?
 
+    /// Videos this library already has for this person.
+    ///
+    /// ⭐ The other half of disambiguation. The source's photos say who a
+    /// CANDIDATE is; these say who the library already believes this person is
+    /// — and comparing the two is what settles a choice that names and dates
+    /// leave open. Somebody who recognises the work recognises the face.
+    ///
+    /// ⚠️ Loaded in `.task`, not computed. It is a database read per video and
+    /// a computed property would re-run it on every redraw of the picker.
+    @State private var localVideos: [Asset] = []
+
     private var displayName: String {
         entityId.hasPrefix("actor:") ? String(entityId.dropFirst(6)) : entityId
     }
@@ -175,6 +186,27 @@ struct ActorContextPanel: View {
                                 }
                                 .frame(width: 78, height: 104)
                                 .clipShape(RoundedRectangle(cornerRadius: 5))
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !localVideos.isEmpty {
+                ContextAccordion(title: "In your library", icon: "film.stack",
+                                 summary: "\(localVideos.count) video\(localVideos.count == 1 ? "" : "s")") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 8) {
+                            ForEach(localVideos) { asset in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    VideoThumbnailView(asset: asset, libraryURL: libraryURL)
+                                        .frame(width: 118, height: 66)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    Text(asset.fileName)
+                                        .font(.system(size: 9)).lineLimit(2)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 118, alignment: .leading)
+                                }
                             }
                         }
                     }
@@ -216,6 +248,43 @@ struct ActorContextPanel: View {
                 }
             }
         }
+        .task(id: entityId) { await loadLocalVideos() }
+    }
+
+    /// The videos this library already credits to this person.
+    ///
+    /// ⚠️ Reads BOTH representations. `videoIds(forPerformer:)` answers from
+    /// the edges, and a performer carried only by a `actor:` tag string — which
+    /// is most of a library until the retirement step runs — would otherwise
+    /// show none, making a person with a full filmography look like a stranger
+    /// at exactly the moment their filmography is the evidence.
+    ///
+    /// ⚠️ Capped. This is a reference strip beside a picker, not a filmography
+    /// page, and decoding several hundred assets to draw eight is work nobody
+    /// asked for.
+    private func loadLocalVideos() async {
+        let name = displayName
+        let id = entityId
+        let urls = LibrarySession.shared.allURLs
+        let found: [Asset] = await Task.detached(priority: .userInitiated) {
+            var seen = Set<UUID>()
+            var out: [Asset] = []
+            for url in urls {
+                guard let store = try? LibraryStore(at: url) else { continue }
+                let edged = Set((try? store.videoIds(forPerformer: id)) ?? [])
+                for asset in (try? store.fetchAllAssets()) ?? [] where out.count < 12 {
+                    guard !seen.contains(asset.id) else { continue }
+                    if edged.contains(asset.id)
+                        || asset.actors.contains(where: {
+                            $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                        seen.insert(asset.id)
+                        out.append(asset)
+                    }
+                }
+            }
+            return out
+        }.value
+        localVideos = found
     }
 
     private var recorded: [(String, String)] {
