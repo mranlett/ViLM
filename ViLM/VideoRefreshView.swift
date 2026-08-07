@@ -123,8 +123,13 @@ struct VideoRefreshView: View {
                 Text("“Already complete” is the expected outcome for most of a library that has been matched recently — it means the source had nothing this video was missing.")
             }
 
-            if model.report.credits > 0 || model.report.hierarchies > 0 {
+            if model.report.credits > 0 || model.report.hierarchies > 0
+                || model.report.identities > 0 {
                 Section {
+                    if model.report.identities > 0 {
+                        Label("\(model.report.identities) performer\(model.report.identities == 1 ? "" : "s") identified",
+                              systemImage: "person.badge.shield.checkmark")
+                    }
                     if model.report.credits > 0 {
                         Label("\(model.report.credits) credited name\(model.report.credits == 1 ? "" : "s") recorded",
                               systemImage: "person.text.rectangle")
@@ -136,7 +141,7 @@ struct VideoRefreshView: View {
                 } header: {
                     Text("What only this could recover")
                 } footer: {
-                    Text("A credited name belongs to one performer's appearance in one video, so no other tool can recover it.")
+                    Text("A credited name belongs to one performer's appearance in one video, so no other tool can recover it. Identified performers no longer need matching separately — the source's record already links to them.")
                 }
             }
 

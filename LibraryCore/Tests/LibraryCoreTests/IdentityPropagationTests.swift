@@ -140,3 +140,76 @@ final class IdentityPropagationTests: XCTestCase {
         XCTAssertTrue(try store.matches(forEntity: "actor:Carol").isEmpty)
     }
 }
+
+/// Recovering identities from videos matched BEFORE the app asked for them.
+///
+/// 🚨 The operator's situation: a full match run completed before the client
+/// requested performer ids. Every video is now `.matched`, so `Match All
+/// Videos` skips them forever, and `Match Again` — re-reading every file from
+/// disk and re-opening every settled ambiguity — is a disproportionate price
+/// for data the source hands over on one lookup.
+final class SettledMatchIdentityTests: XCTestCase {
+
+    private var directory: URL!
+    private var store: LibraryStore!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory,
+                                                withIntermediateDirectories: true)
+        store = try LibraryStore(at: directory)
+    }
+
+    override func tearDownWithError() throws {
+        store = nil
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func actor(_ name: String) throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:\(name)"))
+    }
+
+    /// ⭐ The point: no re-match required.
+    func testASettledMatchStillIdentifiesItsCast() throws {
+        try actor("Alice")
+
+        let written = try store.propagateIdentitiesFromSettledMatch(
+            [ProposedCredit(name: "Alice", sourceId: "p-1")], source: "A Source")
+
+        XCTAssertEqual(written, 1)
+        XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.sourceId, "p-1")
+        XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.method, .linked)
+    }
+
+    /// ⚠️ Still never overrules an identity the library holds.
+    func testItDoesNotReplaceAnIdentityAlreadyHeld() throws {
+        try actor("Alice")
+        try store.recordMatch(.init(nodeId: "actor:Alice", source: "A Source",
+                                    sourceId: "chosen", method: .operator), isVideo: false)
+
+        let written = try store.propagateIdentitiesFromSettledMatch(
+            [ProposedCredit(name: "Alice", sourceId: "p-1")], source: "A Source")
+
+        XCTAssertEqual(written, 0)
+        XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.sourceId, "chosen")
+    }
+
+    func testAPerformerWithNoProfileIsStillSkipped() throws {
+        XCTAssertEqual(try store.propagateIdentitiesFromSettledMatch(
+            [ProposedCredit(name: "Ghost", sourceId: "p-9")], source: "A Source"), 0)
+    }
+
+    /// ⚠️ The strict LIVE rule is untouched — this is a separate entry point,
+    /// not a relaxation of `propagatesIdentity`, so a title match in front of a
+    /// person still hands nothing down.
+    func testTheLiveRuleIsUnchanged() throws {
+        try actor("Alice")
+
+        XCTAssertEqual(try store.propagateIdentities(
+            [ProposedCredit(name: "Alice", sourceId: "p-1")],
+            source: "A Source", videoMethod: .title), 0)
+        XCTAssertFalse(MatchMethod.title.propagatesIdentity)
+        XCTAssertFalse(MatchMethod.backfill.propagatesIdentity)
+    }
+}

@@ -128,6 +128,45 @@ extension LibraryStore {
         return written
     }
 
+    /// Identities from a video matched BEFORE the method was recorded.
+    ///
+    /// 🚨 The situation this exists for: a full match run made before the app
+    /// asked for performer ids leaves every video `.matched`, so `Match All
+    /// Videos` skips them forever and the only other route is `Match Again` —
+    /// which re-reads every file from disk and re-opens every ambiguity the
+    /// operator already settled. That is a disproportionate price for data the
+    /// source will hand over on a single lookup.
+    ///
+    /// ⚠️ Deliberately separate from `propagateIdentities`, and deliberately
+    /// NOT reached by relaxing `propagatesIdentity`. The live rule should stay
+    /// strict, because while a video is in front of someone it can still be
+    /// rejected. This is the other case, and it takes a different view for a
+    /// stated reason:
+    ///
+    /// ⭐ The performer's id and their NAME arrive in the same scene record and
+    /// are consistent with each other. Propagating attaches a correct identity
+    /// to a correctly-spelled person; what a weak video match gets wrong is
+    /// whether that performer appears in THIS video — and the original run
+    /// already wrote their name onto it. The doubtful edge exists either way,
+    /// so the identity adds accuracy rather than error.
+    @discardableResult
+    public func propagateIdentitiesFromSettledMatch(
+        _ credits: [ProposedCredit], source: String) throws -> Int {
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        var written = 0
+        for credit in credits {
+            guard let sourceId = credit.sourceId, !sourceId.isEmpty else { continue }
+            let entityId = "actor:\(credit.name)"
+            guard known.contains(entityId) else { continue }
+            guard try matches(forEntity: entityId)
+                    .first(where: { $0.source == source }) == nil else { continue }
+            try confirmEntityMatch(entityId, source: source,
+                                   sourceId: sourceId, method: .linked)
+            written += 1
+        }
+        return written
+    }
+
     // MARK: - Reading
 
     /// Every source that has identified this node, newest first.

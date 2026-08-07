@@ -41,6 +41,9 @@ final class VideoRefreshModel: ObservableObject {
         var notMatched = 0
         var credits = 0
         var hierarchies = 0
+        /// Performers identified from a video matched before the app asked for
+        /// their ids — the reason a full re-match is not needed.
+        var identities = 0
 
         var examined: Int { refreshed + alreadyComplete + queued + failed }
     }
@@ -154,6 +157,16 @@ final class VideoRefreshModel: ObservableObject {
             let updated = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
                                                        accepting: fills, acceptedTags: [])
             try? store.updateAsset(updated)
+        }
+
+        // ⭐ The largest thing this pass recovers. The source's scene record
+        // links to confirmed performer records, and a run made before the app
+        // asked for those ids left every video matched — so `Match All Videos`
+        // skips them and only `Match Again` would reach them, at the cost of
+        // re-reading every file.
+        if let all = proposal.actors.value, !all.isEmpty {
+            report.identities += (try? store.propagateIdentitiesFromSettledMatch(
+                all, source: provider.displayName)) ?? 0
         }
 
         // ⭐ The reason this pass exists. Credits are per-appearance and no

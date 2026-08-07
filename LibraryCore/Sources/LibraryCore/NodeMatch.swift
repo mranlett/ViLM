@@ -73,10 +73,21 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
 
     /// Whether a video matched THIS way may hand its identity to its cast.
     ///
-    /// 🚨 Only the strong routes. A title match is a plausible guess, and
-    /// treating its performer links as confirmed would turn one weak match into
-    /// a dozen confidently wrong identities — across actors who then look
-    /// verified and are skipped by every later tool.
+    /// 🚨 Only the strong routes, and only while a person could still review.
+    ///
+    /// ⚠️ The risk is narrower than it first appears, and worth stating
+    /// precisely. The performer's id and their NAME come from the same scene
+    /// record, so they are consistent with each other: propagating attaches a
+    /// CORRECT identity to a correctly-spelled person. What a weak video match
+    /// gets wrong is whether that performer is in THIS video — and the original
+    /// run already wrote their name onto it as a string, so the doubtful edge
+    /// exists either way.
+    ///
+    /// The real cost is stickiness: an identified actor reads as verified and
+    /// is skipped by every later tool. That is worth avoiding while the video
+    /// is still in front of someone who can reject the match — hence this rule
+    /// for live matching, and `propagateIdentitiesFromSettledMatch` for videos
+    /// whose match was settled long ago and whose method was never recorded.
     public var propagatesIdentity: Bool {
         self == .fingerprint || self == .operator
     }
