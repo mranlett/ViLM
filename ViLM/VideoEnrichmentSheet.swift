@@ -24,11 +24,21 @@ struct VideoEnrichmentSheet: View {
     /// review screen itself.
     @State private var expandedReview: Int?
 
+    /// The record to open straight onto, skipping identification.
+    ///
+    /// ⚠️ Set ONLY when the operator arrived from a list that already names the
+    /// disagreement — a refresh report's queue. From a video's own page the
+    /// "already matched" screen is the point: it says the video is settled and
+    /// makes re-matching a deliberate act.
+    private let resumeMatchId: String?
+
     init(asset: Asset, libraryURL: URL, knownTags: Set<String>,
+         resumeMatchId: String? = nil,
          onApply: @escaping (Asset) -> Void) {
         self.asset = asset
         self.libraryURL = libraryURL
         self.knownTags = knownTags
+        self.resumeMatchId = resumeMatchId
         self.onApply = onApply
         _model = StateObject(wrappedValue: VideoEnrichmentModel(
             asset: asset, libraryURL: libraryURL, knownTags: knownTags))
@@ -92,7 +102,13 @@ struct VideoEnrichmentSheet: View {
                                    initialIndex: item.index)
             }
         }
-        .task { await model.start() }
+        .task {
+            if let resumeMatchId {
+                await model.resume(sourceId: resumeMatchId)
+            } else {
+                await model.start()
+            }
+        }
         // ⚠️ Its OWN sizing. The `.macSheet` further down this file belongs to
         // `CandidateImageSheet`, and the consistency gate searched the whole
         // FILE for one — so it saw that string and passed this struct, which

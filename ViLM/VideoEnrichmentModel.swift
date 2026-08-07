@@ -439,12 +439,43 @@ final class VideoEnrichmentModel: ObservableObject {
 
     // MARK: - Reviewing
 
+    /// Opens straight onto the review of the record this video is ALREADY
+    /// matched to.
+    ///
+    /// 🚨 For a video reached from a list of known disagreements. The ordinary
+    /// entry point reports a settled match and asks for a "Match Again" tap
+    /// before doing anything — which is right from a video's own page, where
+    /// the operator may not know it was matched, and pure ceremony when they
+    /// have just clicked a specific conflict on a report that says so.
+    ///
+    /// ⭐ It also skips re-identification entirely. The record id is already
+    /// known, so this is one fetch — no reading the file off disk, no
+    /// fingerprint, no search. And re-identifying could genuinely answer
+    /// DIFFERENTLY from the match being reviewed, which would make the screen
+    /// about a different record than the one the report queued.
+    func resume(sourceId: String) async {
+        guard let provider else {
+            phase = .failed("No video metadata source is installed.")
+            return
+        }
+        matchRoute = "Reviewing the record this video is matched to"
+        matchMethod = nil
+        await fetchAndReview(sourceId, provider: provider)
+    }
+
     func choose(_ candidate: PluginCandidate) async {
         guard let provider else { return }
-        phase = .fetching
         chosenCandidate = candidate
+        await fetchAndReview(candidate.id, provider: provider)
+    }
+
+    /// Fetch one record, settle the studio question, and build the review.
+    /// Shared so the picker route and the resume route cannot drift.
+    private func fetchAndReview(_ sourceId: String,
+                                provider: any VideoMetadataProvider) async {
+        phase = .fetching
         do {
-            let fetched = try await provider.fetch(videoId: candidate.id)
+            let fetched = try await provider.fetch(videoId: sourceId)
 
             // The source names an imprint and the network above it. Which one
             // this video carries is settled BEFORE the review is built, so

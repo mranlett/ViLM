@@ -60,8 +60,13 @@ struct VideoRefreshView: View {
         // while `running` is on screen — the defect the consistency gate now
         // catches, found twice in this app.
         .sheet(item: $reviewing) { item in
+            // ⭐ Straight to the disagreement. The operator clicked a specific
+            // conflict on a report that already says this video is matched, so
+            // the "already matched — Match Again?" gate is a click that tells
+            // them what they just read.
             VideoEnrichmentSheet(asset: item.asset, libraryURL: item.libraryURL,
-                                 knownTags: knownTags) { updated in
+                                 knownTags: knownTags,
+                                 resumeMatchId: item.asset.enrichmentSourceId) { updated in
                 try? LibraryStore(at: item.libraryURL).updateAsset(updated)
                 model.removeFromQueue(item.asset.id)
             }
