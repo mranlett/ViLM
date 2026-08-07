@@ -1485,7 +1485,7 @@ struct ContentView: View {
                     // Failure is not fatal: the library still opens and the
                     // studios stay unpromoted until next launch.
                     if await LibrarySession.shared.markStudiosPromoted(libURL) {
-                        try? store.promoteStudioProfiles()
+                        _ = try? store.promoteStudioProfiles()
                     }
                     let profiles = try store.fetchAllEntityProfiles()
                     layers.append(Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) }))

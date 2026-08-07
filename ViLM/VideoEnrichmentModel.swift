@@ -604,7 +604,7 @@ final class VideoEnrichmentModel: ObservableObject {
         // nothing it does would carry a `credited_as` with it.
         let credits = VideoEnrichmentReview.credits(from: proposal, accepting: accepted)
         if !credits.isEmpty, let url = LibrarySession.shared.url(for: asset.id) {
-            try? LibraryStore(at: url).recordCredits(credits, forVideo: asset.id)
+            _ = try? LibraryStore(at: url).recordCredits(credits, forVideo: asset.id)
         }
 
         // The match edge (v31), beside the columns `recordingOutcome` sets.
@@ -625,7 +625,7 @@ final class VideoEnrichmentModel: ObservableObject {
             // every performer in it — rather than leaving each to be re-matched
             // by name, repeating a disambiguation already done.
             if let all = proposal.actors.value {
-                try? store?.propagateIdentities(all, source: source, videoMethod: method)
+                _ = try? store?.propagateIdentities(all, source: source, videoMethod: method)
             }
         }
 

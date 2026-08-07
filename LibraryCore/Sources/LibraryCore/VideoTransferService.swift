@@ -397,7 +397,7 @@ public final class VideoTransferService {
             // Best-effort like the rest of this block: the video and its text
             // have already moved intact, and a failure here costs a re-run of
             // Connect the Graph rather than any data.
-            try? destinationStore.connectEdges(forVideo: newAssetId)
+            _ = try? destinationStore.connectEdges(forVideo: newAssetId)
         } catch {
             // Roll the destination back so a failed move leaves no orphan.
             try? fm.removeItem(at: tempURL)

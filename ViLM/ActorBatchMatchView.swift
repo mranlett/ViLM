@@ -202,7 +202,7 @@ struct ActorBatchMatchView: View {
         try? store.saveEntityProfile(merged)
 
         if let renameTo, !renameTo.isEmpty, renameTo != name(queued) {
-            try? store.renameTagGlobally(oldTag: merged.id, newTag: "actor:\(renameTo)")
+            _ = try? store.renameTagGlobally(oldTag: merged.id, newTag: "actor:\(renameTo)")
         }
 
         model.removeFromQueue(queued.profile.id)

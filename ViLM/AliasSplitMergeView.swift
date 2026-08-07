@@ -224,7 +224,7 @@ struct AliasSplitMergeView: View {
                 // photos, AKAs and links are unioned rather than replaced. It
                 // also moves the graph edges and records a tombstone, so the
                 // losing name cannot come back on the next sync.
-                try LibraryStore(at: url).renameTagGlobally(oldTag: losing, newTag: surviving)
+                _ = try LibraryStore(at: url).renameTagGlobally(oldTag: losing, newTag: surviving)
             }.value
             merged += 1
             await load()

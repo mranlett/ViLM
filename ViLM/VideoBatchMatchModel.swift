@@ -235,7 +235,7 @@ final class VideoBatchMatchModel: ObservableObject {
                         }
                     }
                     if !pendingCredits.isEmpty {
-                        try? store.recordCredits(pendingCredits, forVideo: updated.id)
+                        _ = try? store.recordCredits(pendingCredits, forVideo: updated.id)
                     }
                 }
                 appliedAsset = nil
