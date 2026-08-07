@@ -313,6 +313,9 @@ enum HelpContent {
             .init(label: "Match All Studios",
                   description: "Step 4. Looks up each studio and fills in its details, and records which network owns it where the source knows. Like actors, a studio name matching more than one result is queued rather than guessed — two networks can use the same imprint name."),
 
+            .init(label: "Refresh Matched Videos",
+                  description: "Step 5, and only worth running after the first four. The earlier steps skip any video you have already matched — sensibly, since re-identifying a settled video means reading the whole file off disk again to reach the same answer. But that means a video matched a while ago never gains details the app has learned to store since, such as the name a performer was credited under in that scene, or the network above its studio.\n\nThis re-reads those videos by the record each one is already matched to. Nothing is re-identified and no video changes which record it points at — so it is quick, and it cannot undo a match. Only empty fields are filled; where the source now disagrees with a value you hold, it is queued for you to decide rather than overwritten. Tags are left alone entirely, because a source tags far more finely than a person does and an unattended pass would bury your own vocabulary.\n\nVideos matched before the app started recording which record they matched cannot be refreshed — there is nothing to look up — and the report says how many those are."),
+
             // MARK: Fix Problems
             .init(label: "Repair Tag Spelling",
                   description: "Finds tags stored under two spellings that differ only by case — \"pov\" and \"POV\" — and merges them into the one you choose. It also offers the metadata source's own spelling where that differs from yours, as a suggestion you can decline. You pick which spelling survives; nothing is merged until you accept it."),

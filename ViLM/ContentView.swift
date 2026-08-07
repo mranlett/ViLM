@@ -98,6 +98,7 @@ struct ContentView: View {
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingAliasSplits = false
+    @State private var isShowingVideoRefresh = false
     @State private var isShowingTagCaseCleanup = false
     @State private var isShowingReadFilenames = false
     @State private var isShowingBatchMatch = false
@@ -251,6 +252,7 @@ struct ContentView: View {
                     onClassifyTags: { isShowingTagClassification = true },
                     onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                     onAliasSplits: { isShowingAliasSplits = true },
+                    onRefreshMatched: { isShowingVideoRefresh = true },
                     onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                     onReadFilenames: { isShowingReadFilenames = true },
                     onBatchMatchVideos: { isShowingBatchMatch = true },
@@ -411,6 +413,11 @@ struct ContentView: View {
                     TagCaseCleanupView(libraryURL: url) {
                         reloadUnionAssets()
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingVideoRefresh) {
+                VideoRefreshView(libraryURLs: LibrarySession.shared.allURLs) {
+                    reloadUnionAssets()
                 }
             }
             .sheet(isPresented: $isShowingAliasSplits) {

@@ -21,6 +21,7 @@ struct SettingsView: View {
     var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
     var onAliasSplits: (() -> Void)?
+    var onRefreshMatched: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
@@ -104,6 +105,13 @@ struct SettingsView: View {
                     toolButton("4 · Match All Studios",
                                icon: "building.2.crop.circle",
                                action: onBatchMatchStudios)
+                    // ⭐ Fifth because it is only worth running once the first
+                    // four have. It re-reads videos those runs SKIPPED as
+                    // "already matched", which is the one route by which a
+                    // library matched before a field existed can ever gain it.
+                    toolButton("5 · Refresh Matched Videos",
+                               icon: "arrow.clockwise.circle",
+                               action: onRefreshMatched)
                 }
 
                 Section(
