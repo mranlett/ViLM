@@ -93,6 +93,16 @@ struct VideoEnrichmentSheet: View {
             }
         }
         .task { await model.start() }
+        // ⚠️ Its OWN sizing. The `.macSheet` further down this file belongs to
+        // `CandidateImageSheet`, and the consistency gate searched the whole
+        // FILE for one — so it saw that string and passed this struct, which
+        // has never had any. On macOS the review is a `List`, which has no
+        // intrinsic height, so the sheet rendered as a title bar and two
+        // buttons with no content area at all.
+        //
+        // Most visible when opened FROM another sheet — a conflict queued by
+        // Refresh Matched Videos — where there is no parent geometry to borrow.
+        .macSheet(minWidth: 720, minHeight: 620)
     }
 
     @ViewBuilder
