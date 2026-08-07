@@ -30,6 +30,35 @@ public struct GraphEdgePair: Codable, Sendable, Equatable, Hashable {
     }
 }
 
+/// One period of studio ownership, as it travels.
+///
+/// ⭐ Why this is not a `GraphEdgePair`. The hierarchy is the one portable edge
+/// with real **valid time** — an imprint is founded, acquired and retired on
+/// actual dates — and a pair cannot carry them, so before this type the dates
+/// stayed home and every received hierarchy arrived undated.
+///
+/// ⚠️ Decodes older exports unchanged. An entry written as `{from, to}` reads
+/// back with both dates nil, which is exactly what an un-upgraded library means:
+/// **unknown**, never "always". Newer exports likewise decode in older builds,
+/// which ignore the two extra keys.
+public struct StudioParentEdge: Codable, Sendable, Equatable, Hashable {
+    public let from: String
+    public let to: String
+    /// nil = "as far back as we know".
+    public let validFrom: String?
+    /// nil = still current. At most one such period per studio.
+    public let validTo: String?
+
+    public var isCurrent: Bool { validTo == nil }
+
+    public init(from: String, to: String, validFrom: String? = nil, validTo: String? = nil) {
+        self.from = from
+        self.to = to
+        self.validFrom = validFrom
+        self.validTo = validTo
+    }
+}
+
 /// A fact the two libraries disagree about.
 ///
 /// ⚠️ Reported rather than resolved. The merge is additive by design — it fills
@@ -49,6 +78,14 @@ public struct GraphDisagreement: Sendable, Equatable, Identifiable {
         /// every family view and as-of query returns — a divergence in shape,
         /// not merely in content, exactly like `tagKind`.
         case studioParent
+        /// The same ownership, dated differently — or two ownerships each
+        /// claiming the same stretch of time.
+        ///
+        /// ⚠️ Distinct from `studioParent`: the two sides agree on WHO owns the
+        /// imprint and disagree on WHEN. Writing both would give one studio two
+        /// parents on the same date, which is the invariant the temporal shape
+        /// exists to hold.
+        case studioParentDate
     }
 
     public let subject: Subject
@@ -78,6 +115,12 @@ public struct GraphMergeResult: Sendable, Equatable {
     public let classifiedTags: Int
     public let newPerformerTags: Int
     public let newStudioParents: Int
+    /// Hierarchy this library already agreed with, which gained a START DATE
+    /// from the sender. Counted apart from `newStudioParents` because no new
+    /// ownership was learned — an undated fact became a dated one.
+    public let datedStudioParents: Int
+    /// FORMER ownerships the sender knew about and this library did not.
+    public let newStudioParentPeriods: Int
     /// Hierarchy edges refused because taking them would have made a loop.
     public let refusedCycles: Int
     /// ⚠️ Facts the two libraries answer differently. Nothing was changed for
@@ -95,7 +138,8 @@ public struct GraphMergeResult: Sendable, Equatable {
 
     public var changedAnything: Bool {
         actors.new + actors.updated + actors.photos + newStudios + updatedStudios
-            + newTags + classifiedTags + newPerformerTags + newStudioParents > 0
+            + newTags + classifiedTags + newPerformerTags + newStudioParents
+            + datedStudioParents + newStudioParentPeriods > 0
     }
 }
 
@@ -121,7 +165,7 @@ extension LibraryStore {
         export.studios = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("studio:") }
         export.tags = try fetchTagVocabulary()
         export.performerTags = try performerTagPairs()
-        export.studioParents = try studioParentPairs()
+        export.studioParents = try studioParentEdges()
         return export
     }
 
@@ -220,27 +264,86 @@ extension LibraryStore {
         // into dated history, so the overrule leaves a trail that looks like a
         // real acquisition.
         var newStudioParents = 0, refusedCycles = 0
-        let currentParents = Dictionary(
-            try studioParentPairs().map { ($0.from, $0.to) }, uniquingKeysWith: { a, _ in a })
+        var datedStudioParents = 0, newStudioParentPeriods = 0
 
-        for edge in export.studioParents
-        where known.contains(edge.from) && known.contains(edge.to) {
-            if let mine = currentParents[edge.from] {
-                // Already the same answer: nothing to do, and not a conflict.
-                guard mine != edge.to else { continue }
-                disagreements.append(GraphDisagreement(
-                    subject: .studioParent, name: edge.from, mine: mine, theirs: edge.to))
-                continue
+        let incomingByStudio = Dictionary(grouping: export.studioParents, by: \.from)
+        for (studioId, incoming) in incomingByStudio.sorted(by: { $0.key < $1.key })
+        where known.contains(studioId) {
+
+            // ---- The current ownership.
+            let myCurrent = try studioParentHistory(of: studioId).first { $0.isCurrent }
+
+            if let theirs = incoming.first(where: { $0.isCurrent }), known.contains(theirs.to) {
+                if let mine = myCurrent {
+                    if mine.parentId != theirs.to {
+                        disagreements.append(GraphDisagreement(
+                            subject: .studioParent, name: studioId,
+                            mine: mine.parentId, theirs: theirs.to))
+                    } else if mine.from == nil, let start = theirs.validFrom {
+                        // ⭐ D4's first rule. Same answer, and the sender knows
+                        // WHEN — additive, so take it.
+                        try setStudioParentStart(start, forStudio: studioId)
+                        datedStudioParents += 1
+                    } else if let a = mine.from, let b = theirs.validFrom, a != b {
+                        // Same network, two different acquisition dates. Neither
+                        // side is obviously right, so neither is written.
+                        disagreements.append(GraphDisagreement(
+                            subject: .studioParentDate, name: studioId,
+                            mine: a, theirs: b))
+                    }
+                } else {
+                    do {
+                        // Genuinely additive: this library had no network for it,
+                        // and takes the sender's start date with it.
+                        try setStudioParent(theirs.to, forStudio: studioId,
+                                            since: theirs.validFrom, source: .operator)
+                        newStudioParents += 1
+                    } catch is GraphEdgeError {
+                        // ⚠️ Counted, not thrown. Two libraries can each hold half
+                        // of a hierarchy that only loops once combined, and one bad
+                        // pairing must not abandon an otherwise good sync partway.
+                        refusedCycles += 1
+                    }
+                }
             }
-            do {
-                // Genuinely additive: this library had no network for it.
-                try setStudioParent(edge.to, forStudio: edge.from, source: .operator)
-                newStudioParents += 1
-            } catch is GraphEdgeError {
-                // ⚠️ Counted, not thrown. Two libraries can each hold half of a
-                // hierarchy that only loops once combined, and one bad pairing
-                // must not abandon an otherwise good sync partway through.
-                refusedCycles += 1
+
+            // ---- Former ownerships.
+            //
+            // ⚠️ Read AFTER the current row settled above, because adopting a
+            // start date shrinks the open period and decides whether an arriving
+            // historical period overlaps it.
+            var held = try studioParentHistory(of: studioId)
+
+            for period in incoming where !period.isCurrent && known.contains(period.to) {
+                let candidate = (period.validFrom, period.validTo)
+
+                if held.contains(where: { $0.parentId == period.to
+                                       && $0.from == period.validFrom
+                                       && $0.to == period.validTo }) {
+                    continue                                    // already held
+                }
+                if let clash = held.first(where: {
+                    Self.periodsOverlap(($0.from, $0.to), candidate)
+                }) {
+                    // 🚨 Two ownerships claiming the same stretch of time. Writing
+                    // both would make `studioParentPairs(asOf:)` return two parents
+                    // for one date — the exact invariant the temporal shape exists
+                    // to hold — so this is reported and neither side changes.
+                    disagreements.append(GraphDisagreement(
+                        subject: .studioParentDate, name: studioId,
+                        mine: clash.displayText,
+                        theirs: StudioParentPeriod(parentId: period.to,
+                                                   from: period.validFrom,
+                                                   to: period.validTo).displayText))
+                    continue
+                }
+                guard let ended = period.validTo else { continue }
+                try addStudioParentPeriod(period.to, forStudio: studioId,
+                                          from: period.validFrom, to: ended,
+                                          source: .operator)
+                newStudioParentPeriods += 1
+                held.append(StudioParentPeriod(parentId: period.to,
+                                               from: period.validFrom, to: period.validTo))
             }
         }
 
@@ -250,6 +353,25 @@ extension LibraryStore {
             newStudios: newStudios, updatedStudios: updatedStudios,
             newTags: newTags, classifiedTags: classifiedTags,
             newPerformerTags: newPerformerTags, newStudioParents: newStudioParents,
+            datedStudioParents: datedStudioParents,
+            newStudioParentPeriods: newStudioParentPeriods,
             refusedCycles: refusedCycles, disagreements: disagreements)
+    }
+
+    /// Do two ownership periods cover any of the same time?
+    ///
+    /// ⚠️ nil is an INFINITY, not a missing value: a nil start reaches back
+    /// forever and a nil end runs forward forever. Treating either as "no
+    /// match" would let an arriving period slot straight through an open one —
+    /// and since every row v30 migrated carries a nil start, that is the common
+    /// case rather than the corner case.
+    ///
+    /// Half-open `[from, to)`, so a period ending on the day another begins does
+    /// NOT overlap — that is a handover, and `setStudioParent` deliberately
+    /// writes one boundary date into both rows to make it exactly that.
+    static func periodsOverlap(_ a: (String?, String?), _ b: (String?, String?)) -> Bool {
+        let aStartsBeforeBEnds = (a.0 == nil || b.1 == nil) ? true : a.0! < b.1!
+        let bStartsBeforeAEnds = (b.0 == nil || a.1 == nil) ? true : b.0! < a.1!
+        return aStartsBeforeBEnds && bStartsBeforeAEnds
     }
 }

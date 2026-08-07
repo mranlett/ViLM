@@ -562,8 +562,8 @@ public enum ActorSync {
         return order.compactMap { byKey[$0] }
     }
 
-    private static func orderedDistinctEdges(_ edges: [GraphEdgePair]) -> [GraphEdgePair] {
-        var seen = Set<GraphEdgePair>()
+    private static func orderedDistinctEdges<E: Hashable>(_ edges: [E]) -> [E] {
+        var seen = Set<E>()
         return edges.filter { seen.insert($0).inserted }
     }
 

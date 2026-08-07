@@ -101,6 +101,17 @@ struct ActorLibraryImportView: View {
                     Text("\(result.newStudios) new studio\(result.newStudios == 1 ? "" : "s"), \(result.updatedStudios) confirmed")
                     Text("\(result.newTags) new tag\(result.newTags == 1 ? "" : "s"), \(result.classifiedTags) classified")
                     Text("\(result.newPerformerTags + result.newStudioParents) new connection\(result.newPerformerTags + result.newStudioParents == 1 ? "" : "s")")
+                    // Counted apart from the connections above, deliberately.
+                    // Neither of these is a new relationship — one dates a
+                    // relationship both libraries already agreed on, the other
+                    // is a former ownership — and folding them into one number
+                    // would make the total mean nothing in particular.
+                    if result.datedStudioParents > 0 {
+                        Text("\(result.datedStudioParents) studio\(result.datedStudioParents == 1 ? "" : "s") gained a start date")
+                    }
+                    if result.newStudioParentPeriods > 0 {
+                        Text("\(result.newStudioParentPeriods) former owner\(result.newStudioParentPeriods == 1 ? "" : "s") recorded")
+                    }
                 }
                 .foregroundColor(.secondary)
 

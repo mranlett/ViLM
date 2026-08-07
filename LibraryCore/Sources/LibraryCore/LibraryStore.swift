@@ -1399,6 +1399,63 @@ public class LibraryStore {
         }
     }
 
+    /// The hierarchy WITH its dates and its history — what a sync carries.
+    ///
+    /// ⚠️ Every period, not just the open one. `studioParentPairs()` answers
+    /// "who owns this now", which is right for every reader inside this library
+    /// and wrong for an export: a former ownership the operator recorded by hand
+    /// is the scarcest fact in the graph, and dropping it means it can never
+    /// reach the other library.
+    public func studioParentEdges() throws -> [StudioParentEdge] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT studio_id, parent_studio_id, valid_from, valid_to
+                  FROM studio_parent
+                 ORDER BY studio_id, valid_from IS NULL DESC, valid_from
+                """)
+                .map { StudioParentEdge(from: $0["studio_id"], to: $0["parent_studio_id"],
+                                        validFrom: $0["valid_from"], validTo: $0["valid_to"]) }
+        }
+    }
+
+    /// Gives the CURRENT ownership a start date it did not have.
+    ///
+    /// ⚠️ Only ever fills a gap. Refuses when a start is already recorded — a
+    /// date this library holds is an answer, and replacing it would be the same
+    /// silent overrule the merge exists to avoid.
+    @discardableResult
+    public func setStudioParentStart(_ from: String, forStudio studioId: String) throws -> Bool {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE studio_parent SET valid_from = ?
+                 WHERE studio_id = ? AND valid_to IS NULL AND valid_from IS NULL
+                """, arguments: [from, studioId])
+            return db.changesCount > 0
+        }
+    }
+
+    /// Records a FORMER ownership — a period that has already ended.
+    ///
+    /// ⚠️ Closed periods only. An open period is `setStudioParent`'s business,
+    /// because it has to close whatever it replaces; this one adds history
+    /// beside the current row and touches nothing else.
+    ///
+    /// ⭐ No cycle check, deliberately. The walk in `setStudioParent` follows
+    /// **current** rows, and a period that has ended cannot put a studio inside
+    /// its own present hierarchy.
+    public func addStudioParentPeriod(_ parentId: String, forStudio studioId: String,
+                                      from: String?, to: String,
+                                      source: EdgeProvenance = .download) throws {
+        guard studioId != parentId else { throw GraphEdgeError.cycle(path: [studioId]) }
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO studio_parent
+                    (studio_id, parent_studio_id, valid_from, valid_to, source, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, arguments: [studioId, parentId, from, to, source.rawValue, Date()])
+        }
+    }
+
     /// The day part of a date, as the hierarchy stores it.
     static func isoDay(_ date: Date) -> String {
         let formatter = DateFormatter()

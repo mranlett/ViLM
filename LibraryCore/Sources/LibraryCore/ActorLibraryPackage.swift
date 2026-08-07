@@ -77,7 +77,9 @@ public struct ActorLibraryExport: Codable, Sendable {
     /// Performer traits and studio hierarchy — the two edge kinds that name no
     /// video and so mean the same thing in any library.
     public var performerTags: [GraphEdgePair] = []
-    public var studioParents: [GraphEdgePair] = []
+    /// ⭐ Dated, unlike the others. The hierarchy is the one portable edge
+    /// with real valid time, and it carries its history — see `StudioParentEdge`.
+    public var studioParents: [StudioParentEdge] = []
 
     public init(formatVersion: Int, exportedAt: Date, profiles: [EntityProfile],
                 photos: [ExportedPhoto], tombstones: [EntityTombstone] = []) {
@@ -95,6 +97,27 @@ public struct ActorLibraryExport: Codable, Sendable {
         profiles = try c.decode([EntityProfile].self, forKey: .profiles)
         photos = try c.decode([ExportedPhoto].self, forKey: .photos)
         tombstones = (try? c.decode([EntityTombstone].self, forKey: .tombstones)) ?? []
+
+        // 🚨 These four were WRITTEN and never read.
+        //
+        // `encode(to:)` is synthesized and so has always emitted the whole
+        // graph, but this decoder is hand-written and stopped at `tombstones` —
+        // so every `.vilmactors` file import silently discarded the studios,
+        // the tag vocabulary, the performer traits and the studio hierarchy,
+        // and reported "0 new studios, 0 new tags, 0 new connections" while
+        // holding all of them in the file it had just read.
+        //
+        // ⚠️ The live attached-library sync was never affected: it hands the
+        // export across in memory and never round-trips through JSON. That is
+        // why this survived — the route people used worked, and the route that
+        // did not is the one used between machines.
+        //
+        // Tolerant, like `tombstones` above: a file written before these
+        // existed decodes as "knew nothing about studios", never as a failure.
+        studios = (try? c.decode([EntityProfile].self, forKey: .studios)) ?? []
+        tags = (try? c.decode([TagRecord].self, forKey: .tags)) ?? []
+        performerTags = (try? c.decode([GraphEdgePair].self, forKey: .performerTags)) ?? []
+        studioParents = (try? c.decode([StudioParentEdge].self, forKey: .studioParents)) ?? []
     }
 }
 
