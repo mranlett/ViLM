@@ -20,6 +20,15 @@ struct ActorLibraryImportView: View {
     @State private var result: GraphMergeResult?
     @State private var errorMessage: String?
 
+    /// An entity id as a person reads it: `studio:Coast Line` becomes
+    /// `Coast Line`. Anything without a known prefix is left alone.
+    private func readable(_ value: String) -> String {
+        for prefix in ["actor:", "studio:", "tag:", "series:"] where value.hasPrefix(prefix) {
+            return String(value.dropFirst(prefix.count))
+        }
+        return value
+    }
+
     var body: some View {
         NavigationStack {
             content
@@ -102,7 +111,11 @@ struct ActorLibraryImportView: View {
                         Text("\(result.disagreements.count) disagreement\(result.disagreements.count == 1 ? "" : "s") — nothing changed for these")
                             .font(.callout).foregroundStyle(.orange)
                         ForEach(result.disagreements) { item in
-                            Text("\(item.name): here “\(item.mine)”, there “\(item.theirs)”")
+                            // ⚠️ Prefixes stripped. A studio disagreement names
+                            // entity ids, so this read "studio:Coast Line: here
+                            // “studio:Old Network”" — the operator does not
+                            // think in node ids and should not have to.
+                            Text("\(readable(item.name)): here “\(readable(item.mine))”, there “\(readable(item.theirs))”")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }

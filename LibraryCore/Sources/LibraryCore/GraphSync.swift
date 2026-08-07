@@ -43,6 +43,12 @@ public struct GraphDisagreement: Sendable, Equatable, Identifiable {
         case tagKind
         /// The same studio confirmed against different sources.
         case studioSource
+        /// 🚨 The same imprint placed under a DIFFERENT network by each side.
+        ///
+        /// The graphs disagree about who owns a company, which changes what
+        /// every family view and as-of query returns — a divergence in shape,
+        /// not merely in content, exactly like `tagKind`.
+        case studioParent
     }
 
     public let subject: Subject
@@ -199,13 +205,36 @@ extension LibraryStore {
             newPerformerTags += 1
         }
 
+        // 🚨 A studio that already has a parent here is NEVER re-parented by a
+        // sync.
+        //
+        // This used to call `setStudioParent` whenever the incoming pair was
+        // not already present — which, for an imprint this library had placed
+        // under a different network, silently REPLACED the operator's answer
+        // with the sender's. That contradicts this merge's one rule: additive,
+        // never overruling, disagreements reported rather than resolved.
+        //
+        // ⚠️ The defect predates the temporal migration — the old write was an
+        // `ON CONFLICT DO UPDATE` and overwrote just as quietly. v30 made it
+        // worse rather than causing it: the receiver's parent is now demoted
+        // into dated history, so the overrule leaves a trail that looks like a
+        // real acquisition.
         var newStudioParents = 0, refusedCycles = 0
-        let haveStudioParents = Set(try studioParentPairs())
+        let currentParents = Dictionary(
+            try studioParentPairs().map { ($0.from, $0.to) }, uniquingKeysWith: { a, _ in a })
+
         for edge in export.studioParents
-        where !haveStudioParents.contains(edge)
-            && known.contains(edge.from) && known.contains(edge.to) {
+        where known.contains(edge.from) && known.contains(edge.to) {
+            if let mine = currentParents[edge.from] {
+                // Already the same answer: nothing to do, and not a conflict.
+                guard mine != edge.to else { continue }
+                disagreements.append(GraphDisagreement(
+                    subject: .studioParent, name: edge.from, mine: mine, theirs: edge.to))
+                continue
+            }
             do {
-                try setStudioParent(edge.to, forStudio: edge.from)
+                // Genuinely additive: this library had no network for it.
+                try setStudioParent(edge.to, forStudio: edge.from, source: .operator)
                 newStudioParents += 1
             } catch is GraphEdgeError {
                 // ⚠️ Counted, not thrown. Two libraries can each hold half of a
