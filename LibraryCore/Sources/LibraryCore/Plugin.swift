@@ -456,6 +456,19 @@ public enum PluginError: Error, Equatable, Sendable {
 public protocol ActorMetadataProvider: Plugin {
     func search(name: String) async throws -> [PluginCandidate]
     func fetch(actorId: String) async throws -> ActorMetadataProposal
+
+    /// A few things this person is known for, for telling two of a name apart.
+    ///
+    /// ⭐ Because a name and a birth year frequently settle nothing. Two
+    /// performers share a name, both have plausible dates, and the operator is
+    /// asked to choose between two rows of text. A handful of that person's
+    /// work — with pictures — is what actually identifies them, and it is
+    /// information the source already holds.
+    ///
+    /// ⚠️ Fetched on demand, never for a whole picker at once: one request per
+    /// candidate would turn opening a list of eight into eight requests before
+    /// anything appeared.
+    func knownWorks(actorId: String, limit: Int) async throws -> [PluginCandidate]
 }
 
 /// Looks a studio up directly, rather than learning about it in passing.
@@ -527,6 +540,12 @@ public protocol VideoMetadataProvider: Plugin {
     func suggestions(for kind: BrowseFilterKind, matching text: String) async throws -> [String]
     func fetch(videoId: String) async throws -> VideoMetadataProposal
     func artwork(videoId: String) async throws -> [ArtworkReference]
+}
+
+public extension ActorMetadataProvider {
+    /// Optional: a provider with no notion of a filmography returns none, and
+    /// the picker simply does not offer the affordance.
+    func knownWorks(actorId: String, limit: Int) async throws -> [PluginCandidate] { [] }
 }
 
 public extension VideoMetadataProvider {

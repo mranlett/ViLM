@@ -43,6 +43,20 @@ struct ActorEnrichmentSheet: View {
     /// ⚠️ Searching a different spelling changes NOTHING in the library. The
     /// rename happens only if a match is then accepted, through the existing
     /// canonical-name field — so trying three spellings costs nothing.
+    /// A candidate's known work, fetched on demand and kept per candidate.
+    ///
+    /// ⭐ Because a name and a birth year frequently settle nothing. Two of a
+    /// name, both plausible, and the operator is asked to choose between two
+    /// rows of text — where a handful of that person's scenes, with pictures,
+    /// identifies them at a glance.
+    ///
+    /// ⚠️ Lazily, one candidate at a time. Fetching for a whole picker would
+    /// turn opening a list of eight into eight requests before anything
+    /// appeared, to answer a question about one of them.
+    @State private var knownWorks: [String: [PluginCandidate]] = [:]
+    @State private var loadingWorks: Set<String> = []
+    @State private var expandedWorks: Set<String> = []
+
     @State private var searchTerm: String = ""
     @FocusState private var searchFieldFocused: Bool
 
@@ -300,11 +314,15 @@ struct ActorEnrichmentSheet: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+
+                    worksRow(for: candidate)
                 }
             } header: {
                 Text("\(candidates.count) performers match “\(searchedName)”")
             } footer: {
-                Text("Pick the right one. Tap a photo count to see all of someone's pictures. "
+                Text("Pick the right one. Tap a photo count to see all of someone's pictures, "
+                     + "or “Known for” to see a few of their scenes — often the quickest way to "
+                     + "recognise a face when the name settles nothing. "
                      + "Nothing is changed until you review and apply.")
             }
 
@@ -322,6 +340,76 @@ struct ActorEnrichmentSheet: View {
                 Text("Use this when none of these is the right person.")
             }
         }
+    }
+
+    /// A candidate's scenes, revealed on request.
+    @ViewBuilder
+    private func worksRow(for candidate: PluginCandidate) -> some View {
+        let works = knownWorks[candidate.id] ?? []
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                if expandedWorks.contains(candidate.id) {
+                    expandedWorks.remove(candidate.id)
+                } else {
+                    expandedWorks.insert(candidate.id)
+                    Task { await loadWorks(candidate) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: expandedWorks.contains(candidate.id)
+                          ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                    Text("Known for").font(.caption)
+                    if loadingWorks.contains(candidate.id) {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+                .foregroundStyle(Color.accentColor)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expandedWorks.contains(candidate.id) {
+                if works.isEmpty && !loadingWorks.contains(candidate.id) {
+                    Text("Nothing listed for this person.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 10) {
+                            ForEach(works) { work in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    thumbnail(work.thumbnailURL)
+                                    Text(work.title)
+                                        .font(.caption2).lineLimit(2)
+                                        .frame(width: 92, alignment: .leading)
+                                    if let subtitle = work.subtitle {
+                                        Text(subtitle)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1).truncationMode(.middle)
+                                            .frame(width: 92, alignment: .leading)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .padding(.leading, 4)
+    }
+
+    private func loadWorks(_ candidate: PluginCandidate) async {
+        guard knownWorks[candidate.id] == nil,
+              !loadingWorks.contains(candidate.id) else { return }
+        loadingWorks.insert(candidate.id)
+        defer { loadingWorks.remove(candidate.id) }
+        // ⚠️ A failure records an empty list rather than nothing, so the row
+        // says "nothing listed" instead of spinning forever or re-requesting
+        // every time the operator opens it.
+        let found = (try? await model.provider.knownWorks(actorId: candidate.id, limit: 8)) ?? []
+        knownWorks[candidate.id] = found
     }
 
     /// Search under a different spelling.
