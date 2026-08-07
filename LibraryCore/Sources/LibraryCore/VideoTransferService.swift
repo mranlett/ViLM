@@ -271,6 +271,7 @@ public final class VideoTransferService {
                 enrichmentState: asset.enrichmentState,
                 enrichmentSource: asset.enrichmentSource,
                 enrichmentSourceId: asset.enrichmentSourceId,
+                lookupRoute: asset.lookupRoute,
                 enrichmentUrl: asset.enrichmentUrl,
                 enrichmentCheckedAt: asset.enrichmentCheckedAt,
                 playCount: asset.playCount,

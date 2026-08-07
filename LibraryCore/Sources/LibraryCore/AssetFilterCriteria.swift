@@ -26,6 +26,27 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     /// been looked up, or matched by a source and never watched.
     public var enrichment: EnrichmentFilter = .any
 
+    /// HOW the last lookup reached this video (v32).
+    ///
+    /// ⭐ A separate dimension rather than more `EnrichmentFilter` cases,
+    /// because the two compose: "ambiguous" AND "found by fingerprint" is the
+    /// quick pile, and folding them into one enum would need a case per
+    /// combination.
+    /// ⚠️ Optional, and nil reads as `.any` — not because absence is
+    /// meaningful, but because a synthesized decoder requires a key for every
+    /// NON-optional property. A Smart Collection saved before this field
+    /// existed must still load, which is what `minAgeAtRelease` above is
+    /// Optional for too, and what `testOlderSavedFiltersStillDecode` pins.
+    public var lookupRoute: LookupRouteFilter?
+
+    /// The route filter as the UI reads it.
+    public var effectiveLookupRoute: LookupRouteFilter {
+        get { lookupRoute ?? .any }
+        set { lookupRoute = newValue == .any ? nil : newValue }
+    }
+
+
+
     public var actorsLogic: Logic = .and
     public var selectedActors: Set<String> = []
 
@@ -63,7 +84,8 @@ public struct AssetFilterCriteria: Equatable, Codable, Sendable {
     public var maxAgeAtRelease: Int? = nil
 
     public var isEmpty: Bool {
-        reviewStatus == .all && enrichment == .any && minRating == nil && minActorRating == nil &&
+        reviewStatus == .all && enrichment == .any && effectiveLookupRoute == .any &&
+        minRating == nil && minActorRating == nil &&
         minAgeAtRelease == nil && maxAgeAtRelease == nil &&
         selectedActors.isEmpty && selectedTags.isEmpty && selectedStudios.isEmpty &&
         selectedActorTags.isEmpty && selectedActorHairColors.isEmpty && selectedActorGenders.isEmpty
@@ -135,6 +157,7 @@ extension AssetFilterCriteria {
         // status: one is whether YOU have seen it, the other whether a source
         // could identify it.
         if !enrichment.accepts(asset.enrichmentState) { return false }
+        if !effectiveLookupRoute.accepts(asset.lookupRoute) { return false }
 
         // Minimum rating (an unrated video counts as 0).
         if let minRating {

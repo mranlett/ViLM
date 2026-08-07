@@ -51,6 +51,7 @@ final class AssetPreservationTests: XCTestCase {
             enrichmentState: .matched,
             enrichmentSource: "TestSource",
             enrichmentSourceId: "scene-12345",
+            lookupRoute: VideoMatchRoute.cast.rawValue,
             enrichmentUrl: "https://example.com/scene/12345",
             enrichmentCheckedAt: Date(timeIntervalSince1970: 1_700_000_000),
             playCount: 9,
@@ -66,7 +67,7 @@ final class AssetPreservationTests: XCTestCase {
     /// look at the copy sites below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 21, """
+        XCTAssertEqual(count, 22, """
             Asset gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds an asset.

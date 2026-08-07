@@ -43,6 +43,15 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     /// confirmed match is a defect, not a refresh.
     public var enrichmentSourceId: String?
 
+    /// How the last lookup ATTEMPT reached this video, whatever it concluded.
+    ///
+    /// ⭐ The missing half of `enrichmentState`. That says a video needs a
+    /// person; this says what kind of question is waiting — a fingerprint hit
+    /// with one candidate is a glance, a title search with twelve is an
+    /// investigation, and nothing outside the batch run's own screen could tell
+    /// them apart.
+    public var lookupRoute: String?
+
     /// A human-openable link to the matched record, supplied by the provider.
     ///
     /// Separate from the id because core cannot build one from the other: that
@@ -80,6 +89,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 enrichmentState: EnrichmentState? = nil,
                 enrichmentSource: String? = nil,
                 enrichmentSourceId: String? = nil,
+                lookupRoute: String? = nil,
                 enrichmentUrl: String? = nil,
                 enrichmentCheckedAt: Date? = nil,
                 playCount: Int = 0,
@@ -106,6 +116,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
         self.enrichmentSourceId = enrichmentSourceId
+        self.lookupRoute = lookupRoute
         self.enrichmentUrl = enrichmentUrl
         self.enrichmentCheckedAt = enrichmentCheckedAt
         self.playCount = playCount
@@ -134,6 +145,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.enrichmentState = try container.decodeIfPresent(EnrichmentState.self, forKey: .enrichmentState)
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
         self.enrichmentSourceId = try container.decodeIfPresent(String.self, forKey: .enrichmentSourceId)
+        self.lookupRoute = try container.decodeIfPresent(String.self, forKey: .lookupRoute)
         self.enrichmentUrl = try container.decodeIfPresent(String.self, forKey: .enrichmentUrl)
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
@@ -179,6 +191,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case enrichmentState = "enrichment_state"
         case enrichmentSource = "enrichment_source"
         case enrichmentSourceId = "enrichment_source_id"
+        case lookupRoute = "lookup_route"
         case enrichmentUrl = "enrichment_url"
         case enrichmentCheckedAt = "enrichment_checked_at"
         case playCount = "play_count"
@@ -216,6 +229,7 @@ extension Asset {
         container["enrichment_state"] = enrichmentState?.rawValue
         container["enrichment_source"] = enrichmentSource
         container["enrichment_source_id"] = enrichmentSourceId
+        container["lookup_route"] = lookupRoute
         container["enrichment_url"] = enrichmentUrl
         container["enrichment_checked_at"] = enrichmentCheckedAt
         container["play_count"] = playCount

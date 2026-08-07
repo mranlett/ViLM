@@ -17,6 +17,23 @@ struct VideoBatchMatchView: View {
     @State private var reviewing: VideoBatchMatchModel.QueuedMatch?
     @State private var browsing: OutcomeGroup?
 
+    /// ⭐ Remembered. Someone who works this queue quickest-first wants that
+    /// every run, and re-choosing it each time is friction on the exact
+    /// workflow the setting exists to speed up.
+    @AppStorage("matchQueueOrder") private var queueOrderRaw = MatchQueueOrder.easiest.rawValue
+
+    private var queueOrder: MatchQueueOrder {
+        get { MatchQueueOrder(rawValue: queueOrderRaw) ?? .easiest }
+        nonmutating set { queueOrderRaw = newValue.rawValue }
+    }
+
+    /// The queue as the operator asked to see it.
+    private var orderedQueue: [VideoBatchMatchModel.QueuedMatch] {
+        queueOrder.arrange(model.queue) {
+            MatchQueueEntry(route: $0.route, candidateCount: $0.candidates.count)
+        }
+    }
+
     struct OutcomeGroup: Identifiable {
         let title: String
         let hint: String
@@ -266,7 +283,21 @@ struct VideoBatchMatchView: View {
 
             if !model.queue.isEmpty {
                 Section {
-                    ForEach(model.queue) { item in
+                    Picker("Order", selection: Binding(
+                        get: { queueOrder }, set: { queueOrder = $0 })) {
+                        ForEach(MatchQueueOrder.allCases, id: \.self) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(queueOrder.explanation)
+                        .font(.caption2).foregroundStyle(.secondary)
+                } header: {
+                    Text("Needs your eye — \(model.queue.count)")
+                }
+
+                Section {
+                    ForEach(orderedQueue) { item in
                         Button { reviewing = item } label: {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -284,8 +315,6 @@ struct VideoBatchMatchView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                } header: {
-                    Text("Needs your eye — \(model.queue.count)")
                 } footer: {
                     Text("These were found by searching rather than by fingerprint. A search returns what is plausible, which is not the same as identified.")
                 }

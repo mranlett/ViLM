@@ -109,6 +109,15 @@ struct FilterBuilderView: View {
                             Text(option.displayName).tag(option)
                         }
                     }
+                    // ⭐ A separate dimension, so the two COMPOSE. "Needs
+                    // attention" says a video is waiting; this says what kind
+                    // of question is waiting, and together they isolate the
+                    // quick pile from the investigations.
+                    Picker("Found By", selection: $criteria.effectiveLookupRoute) {
+                        ForEach(LookupRouteFilter.allCases, id: \.self) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
                 } header: {
                     Text("External Lookup")
                 } footer: {

@@ -49,6 +49,22 @@ public enum VideoBatchOutcome: Equatable, Sendable {
     case skipped(reason: String)
     case failed(String)
 
+    /// Which route the lookup actually took (v32).
+    ///
+    /// ⭐ Read from the outcome rather than tracked alongside it, so the route
+    /// recorded on the video and the route reported in the run cannot disagree.
+    ///
+    /// ⚠️ nil for `noMatch`: several routes were tried and all of them failed,
+    /// so naming one would be arbitrary. A skip or a failure never looked at
+    /// all, and must not overwrite what an earlier run established.
+    public var attemptedRoute: VideoMatchRoute? {
+        switch self {
+        case let .applied(route, _, _): return route
+        case let .queued(route, _):     return route
+        case .noMatch, .skipped, .failed: return nil
+        }
+    }
+
     public var recordedState: EnrichmentState? {
         switch self {
         case .applied: return .matched

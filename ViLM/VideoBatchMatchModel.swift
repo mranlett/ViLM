@@ -214,6 +214,14 @@ final class VideoBatchMatchModel: ObservableObject {
                     updated = VideoEnrichmentReview.recordingOutcome(
                         updated, state: state, source: provider.displayName,
                         sourceId: matchedSourceId)
+                    // ⭐ HOW it was looked up, kept whatever it concluded (v32).
+                    // Without this, "needs attention" survives the run and the
+                    // reason does not — so 200 ambiguous videos are one
+                    // undifferentiated pile rather than the easy ones and the
+                    // hard ones.
+                    if let route = outcome.attemptedRoute {
+                        updated.lookupRoute = route.rawValue
+                    }
                     try? store.updateAsset(updated)
 
                     // The match edge as well as the columns (v31).
@@ -269,6 +277,7 @@ final class VideoBatchMatchModel: ObservableObject {
     /// something worth STORING on the edge — every performer has an identity
     /// worth keeping, even when they were credited normally.
     private var pendingCast: [ProposedCredit] = []
+
 
     /// The source's id for the record `examine` matched, carried out the same
     /// way `appliedAsset` is. Without it a batch run records "matched" and not

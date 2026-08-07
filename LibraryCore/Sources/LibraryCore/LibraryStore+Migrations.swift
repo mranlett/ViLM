@@ -561,6 +561,24 @@ extension LibraryStore {
             }
         }
 
+        // v32: HOW a video was last looked up.
+        //
+        // 🚨 `enrichmentState` says a video needs attention and never says why.
+        // The reason — fingerprint, cast search, title search — existed only in
+        // the batch run's in-memory queue, so the moment that screen closed it
+        // was gone. An operator could see "ambiguous" on 200 videos with no way
+        // to tell the one-candidate fingerprint hits from the twelve-candidate
+        // title guesses, which are entirely different amounts of work.
+        //
+        // ⚠️ Separate from `video_match.method`, which records how a SETTLED
+        // match was made. This records the last ATTEMPT, including the ones
+        // that resolved nothing — and those are exactly the rows worth finding.
+        migrator.registerMigration("v32") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "lookup_route", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -49,7 +49,17 @@ struct ContextAccordion<Content: View>: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                // Fills the row so the whole width is a target, not just the
+                // text — otherwise clicking beside the label does nothing.
+                Spacer(minLength: 0)
             }
+            // 🚨 macOS makes only the DISCLOSURE TRIANGLE clickable when a
+            // `DisclosureGroup` has a custom label. On iOS the whole row
+            // toggles, so this read as working everywhere it was tested and as
+            // broken on the Mac — where the target was a few points wide and
+            // most clicks landed on nothing.
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }
         }
     }
 }
