@@ -2625,6 +2625,38 @@ public class LibraryStore {
                     try oldProfile.renamed(to: normalizedNew).save(db)
                 }
 
+                // 🚨 Move the GRAPH EDGES before the old profile goes.
+                //
+                // `video_performer`, `performer_tag`, `video_studio` and
+                // `studio_parent` all reference `entity_profiles` with
+                // ON DELETE CASCADE — so deleting the old row does not orphan
+                // those edges, it DESTROYS them. Renaming or merging an actor
+                // silently wiped every cast edge they had, and merging two
+                // studios wiped the hierarchy along with them. The tag strings
+                // on the videos were rewritten, so browsing still looked right
+                // and only the graph was gone.
+                //
+                // ⚠️ `OR IGNORE` then `DELETE`, exactly as the tag tables above:
+                // where the destination edge already exists the update collides
+                // on the primary key, and one edge is the correct result.
+                for (table, column) in [("video_performer", "performer_id"),
+                                        ("performer_tag", "performer_id"),
+                                        ("video_studio", "studio_id"),
+                                        ("studio_parent", "studio_id"),
+                                        ("studio_parent", "parent_studio_id")] {
+                    try db.execute(sql:
+                        "UPDATE OR IGNORE \(table) SET \(column) = ? WHERE \(column) = ?",
+                        arguments: [normalizedNew, normalizedOld])
+                    try db.execute(sql: "DELETE FROM \(table) WHERE \(column) = ?",
+                                   arguments: [normalizedOld])
+                }
+                // ⚠️ A merge can make a studio its own parent — if the losing
+                // studio was a child of the winner, remapping both columns
+                // points the row at itself. Left in place it is a cycle the
+                // hierarchy refuses everywhere else.
+                try db.execute(sql:
+                    "DELETE FROM studio_parent WHERE studio_id = parent_studio_id")
+
                 // Old profile must be deleted since the tag is gone
                 _ = try oldProfile.delete(db)
 
