@@ -443,6 +443,7 @@ public enum ActorCSV {
             tags: mergedTags,
             galleryUrls: galleries,
             akas: mergedAkas,
+
             createdAt: created,
             birthDate: birthDate,
             careerSpanRaw: careerSpanRaw,
@@ -456,7 +457,14 @@ public enum ActorCSV {
             enrichmentState: state,
             enrichmentSource: source,
             enrichmentSourceId: sourceId,
-            enrichmentCheckedAt: checkedAt
+            enrichmentCheckedAt: checkedAt,
+            // 🚨 Carried over, like galleryUrls. Omitting `links` from this call
+            // let it default to [], so importing a CSV over an existing profile
+            // DESTROYED every external reference the library held — and the
+            // batch enrichment path round-trips through this format on every
+            // run. The links are not represented in the CSV at all, so the only
+            // correct behaviour is to leave what is already there alone.
+            links: existing?.links ?? []
         )
     }
 }
