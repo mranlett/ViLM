@@ -66,6 +66,39 @@ public struct VideoTagOption: Equatable, Sendable, Identifiable {
 
 public enum VideoEnrichmentReview {
 
+    /// A credit as the review row shows it: `Alice Smith (as Alicia)`.
+    ///
+    /// ⭐ Shown because it is the operator's only chance to catch a bad match.
+    /// A credited name that looks nothing like the performer is exactly the
+    /// signal that the source matched the wrong person, and hiding it would
+    /// throw away the evidence at the one moment someone is looking.
+    static func described(_ credit: ProposedCredit) -> String {
+        guard let creditedAs = credit.creditedAs,
+              !creditedAs.isEmpty,
+              creditedAs.caseInsensitiveCompare(credit.name) != .orderedSame
+        else { return credit.name }
+        return "\(credit.name) (as \(creditedAs))"
+    }
+
+    /// The credits worth STORING from an accepted proposal.
+    ///
+    /// ⚠️ Only those that actually say something. A credit carrying neither a
+    /// different name nor a billing position records that a performer was
+    /// credited normally, which the edge already implies — writing it would
+    /// fill the column with rows that mean nothing and make "this one is
+    /// interesting" unfindable.
+    public static func credits(from proposal: VideoMetadataProposal,
+                               accepting: Set<String>) -> [ProposedCredit] {
+        guard accepting.contains(Field.performers),
+              let performers = proposal.actors.value else { return [] }
+        return performers.filter { credit in
+            credit.billing != nil
+                || (credit.creditedAs.map {
+                        !$0.isEmpty && $0.caseInsensitiveCompare(credit.name) != .orderedSame
+                    } ?? false)
+        }
+    }
+
     public enum Field {
         public static let seriesTitle = "seriesTitle"
         public static let seasonNumber = "seasonNumber"
@@ -148,11 +181,11 @@ public enum VideoEnrichmentReview {
         // offered, so the row says what would actually change.
         if let performers = proposal.actors.value {
             let held = Set(asset.actors.map { $0.lowercased() })
-            let additions = performers.filter { !held.contains($0.lowercased()) }
+            let additions = performers.filter { !held.contains($0.name.lowercased()) }
             if !additions.isEmpty {
                 rows.append(.init(field: Field.performers, label: "Performers", kind: .fill,
                                   current: asset.actors.joined(separator: ", "),
-                                  proposed: additions.joined(separator: ", "),
+                                  proposed: additions.map(Self.described).joined(separator: ", "),
                                   sourceNote: proposal.actors.sourceNote))
             }
         }
@@ -410,7 +443,13 @@ public enum VideoEnrichmentReview {
             addTag("studio:\(studio)")
         }
         if accepting.contains(Field.performers), let performers = proposal.actors.value {
-            for name in performers where !name.isEmpty { addTag("actor:\(name)") }
+            // ⚠️ The CANONICAL name becomes the tag, never the credited one.
+            // Filing a performer under a name they used once would split them
+            // into two people — which is the reason the credited name is edge
+            // data rather than another string on the video.
+            for credit in performers where !credit.name.isEmpty {
+                addTag("actor:\(credit.name)")
+            }
         }
         // Unticking an existing tag REMOVES it. Scoped to `offeredTags` so
         // this can only ever affect tags the operator was actually shown — a

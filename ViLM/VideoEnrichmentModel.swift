@@ -574,6 +574,15 @@ final class VideoEnrichmentModel: ObservableObject {
         let merged = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
                                                   accepting: accepted, acceptedTags: acceptedTags,
                                                   offeredTags: tagOptions.map(\.name))
+
+        // ⚠️ The credits go in here rather than beside the returned asset,
+        // because they are edge data: the caller persists the ASSET, and
+        // nothing it does would carry a `credited_as` with it.
+        let credits = VideoEnrichmentReview.credits(from: proposal, accepting: accepted)
+        if !credits.isEmpty, let url = LibrarySession.shared.url(for: asset.id) {
+            try? LibraryStore(at: url).recordCredits(credits, forVideo: asset.id)
+        }
+
         return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,
                                                       source: providerName,
                                                       sourceId: chosenCandidate?.id)

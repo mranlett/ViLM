@@ -323,6 +323,42 @@ public struct StudioMetadataProposal: Equatable, Sendable {
 }
 
 /// Everything a plugin may propose about a video.
+/// One performer's appearance in one video, as a source describes it.
+///
+/// ⭐ The appearance is the thing with properties. A credited name belongs to
+/// neither the person nor the video — a performer is credited differently in
+/// different scenes, and a video credits each of its cast separately — so it is
+/// a property of the edge between them, which is exactly what v29's
+/// `credited_as` column is for.
+public struct ProposedCredit: Equatable, Sendable, ExpressibleByStringLiteral {
+    /// The performer's canonical name — what becomes an `actor:` tag.
+    public let name: String
+
+    /// The name used in THIS video, when the source says it differs.
+    ///
+    /// ⚠️ nil means "credited under their usual name", and is deliberately not
+    /// stored as a copy of `name`: a duplicated name is a second place for it
+    /// to go stale, and it would make "was credited differently here" —
+    /// genuinely interesting — indistinguishable from the ordinary case.
+    public let creditedAs: String?
+
+    /// Billing order where the source states it. Never inferred from the order
+    /// a list happened to arrive in, which says nothing about billing.
+    public let billing: Int?
+
+    public init(name: String, creditedAs: String? = nil, billing: Int? = nil) {
+        self.name = name
+        self.creditedAs = creditedAs
+        self.billing = billing
+    }
+
+    /// So a plain name still reads as one. Most call sites and every fixture
+    /// name a performer and nothing else.
+    public init(stringLiteral value: String) {
+        self.init(name: value)
+    }
+}
+
 public struct VideoMetadataProposal: Equatable, Sendable {
     public var title: ProposedField<String> = .absent
     public var releaseYear: ProposedField<Int> = .absent
@@ -361,7 +397,13 @@ public struct VideoMetadataProposal: Equatable, Sendable {
     public var episodeNumber: ProposedField<Int> = .absent
     public var episodeTitle: ProposedField<String> = .absent
     public var notes: ProposedField<String> = .absent
-    public var actors: ProposedField<[String]> = .absent
+    /// The cast, each with the name they were credited under in THIS video.
+    ///
+    /// 🚨 Was `[String]`, which is why v29's `credited_as` column has never held
+    /// a value. The source states the name a performer appeared under in a
+    /// specific scene; a bare list of canonical names had nowhere to put it, so
+    /// it was read and dropped at the plugin boundary.
+    public var actors: ProposedField<[ProposedCredit]> = .absent
     public var tags: ProposedField<[String]> = .absent
     public var externalLinks: ProposedField<[URL]> = .absent
 

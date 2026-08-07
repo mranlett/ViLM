@@ -714,6 +714,7 @@ struct SingleInspectorView: View {
     @ViewBuilder
     private var browsePillsSection: some View {
         browsePillRow(title: "Actors", items: asset.actors, category: "actor", color: .blue)
+        creditedAsRow
         ageAtReleaseRow
         browsePillRow(title: "Tags", items: asset.actions, category: "tag", color: .green)
         browsePillRow(title: "Studios", items: asset.studios, category: "studio", color: .purple)
@@ -759,6 +760,32 @@ struct SingleInspectorView: View {
                                   : "Approximate — only a birth year is recorded, so this is \(age.years - 1) or \(age.years)")
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Names a performer was credited under in THIS video.
+    ///
+    /// ⭐ Shown only where one exists, and only where it differs — an "as" line
+    /// repeating the cast list above would be noise on every video. The whole
+    /// value of the field is that it is rare.
+    ///
+    /// ⚠️ Deliberately NOT a browse pill. Tapping it would have to search for a
+    /// performer filed under a name the library does not use, which finds
+    /// nothing; the canonical name in the row above is the one that navigates.
+    @ViewBuilder
+    private var creditedAsRow: some View {
+        let credits = (try? LibrarySession.shared.store(for: asset.id)
+            .performerCredits(forVideo: asset.id))?
+            .filter { $0.creditedAs?.isEmpty == false } ?? []
+        if !credits.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Credited As").font(.subheadline).fontWeight(.bold)
+                ForEach(credits) { credit in
+                    Text("\(credit.performerId.replacingOccurrences(of: "actor:", with: "")) — as \(credit.creditedAs ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

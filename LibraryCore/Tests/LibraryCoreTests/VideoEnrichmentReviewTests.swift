@@ -27,7 +27,7 @@ final class VideoEnrichmentReviewTests: XCTestCase {
         p.episodeTitle = .init(episodeTitle)
         p.releaseDate = .init(releaseDate)
         p.studio = .init(studio)
-        p.actors = .init(performers)
+        p.actors = .init(performers?.map { ProposedCredit(name: $0) })
         p.tags = .init(tags)
         return p
     }

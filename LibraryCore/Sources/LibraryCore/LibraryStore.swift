@@ -1857,6 +1857,34 @@ public class LibraryStore {
         }
     }
 
+    /// Stores accepted credits against a video's cast edges.
+    ///
+    /// ⚠️ Only for performers this library actually has. A credit naming
+    /// someone with no profile would create an edge to a node that does not
+    /// exist — `connectEdges` has the same rule, and for the same reason.
+    ///
+    /// Returns how many were written, because "the source knew a credited name"
+    /// and "we kept it" are different claims.
+    @discardableResult
+    public func recordCredits(_ credits: [ProposedCredit], forVideo videoId: UUID,
+                              source: EdgeProvenance = .download) throws -> Int {
+        guard !credits.isEmpty else { return 0 }
+        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        var written = 0
+        for credit in credits {
+            let performerId = "actor:\(credit.name)"
+            guard known.contains(performerId) else { continue }
+            try recordPerformerCredit(
+                PerformerCredit(performerId: performerId,
+                                creditedAs: credit.creditedAs,
+                                billing: credit.billing,
+                                source: source),
+                forVideo: videoId)
+            written += 1
+        }
+        return written
+    }
+
     /// Writes an edge the way the code did before v29 existed: no provenance.
     ///
     /// ⚠️ Internal and for tests only. There is deliberately no public path to

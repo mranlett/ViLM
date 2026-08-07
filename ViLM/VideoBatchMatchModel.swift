@@ -215,8 +215,12 @@ final class VideoBatchMatchModel: ObservableObject {
                         updated, state: state, source: provider.displayName,
                         sourceId: matchedSourceId)
                     try? store.updateAsset(updated)
+                    if !pendingCredits.isEmpty {
+                        try? store.recordCredits(pendingCredits, forVideo: updated.id)
+                    }
                 }
                 appliedAsset = nil
+                pendingCredits = []
                 matchedSourceId = nil
                 try? await Task.sleep(nanoseconds: delay)
             }
@@ -232,6 +236,13 @@ final class VideoBatchMatchModel: ObservableObject {
     /// Carries the merged record out of `examine` without widening the outcome
     /// type, which only the report needs to understand.
     private var appliedAsset: Asset?
+
+    /// Credits accepted with a match, held until the asset is persisted.
+    ///
+    /// ⚠️ Written AFTER `updateAsset`, not with it. A credit is edge data and
+    /// the edge needs the video row to exist — and the performer profile, which
+    /// `recordCredits` checks for the same reason `connectEdges` does.
+    private var pendingCredits: [ProposedCredit] = []
 
     /// The source's id for the record `examine` matched, carried out the same
     /// way `appliedAsset` is. Without it a batch run records "matched" and not
@@ -331,6 +342,7 @@ final class VideoBatchMatchModel: ObservableObject {
 
             appliedAsset = VideoEnrichmentReview.merged(asset: asset, proposal: proposal,
                                                         accepting: fields, acceptedTags: [])
+            pendingCredits = VideoEnrichmentReview.credits(from: proposal, accepting: fields)
             return .applied(route: .fingerprint, fields: Array(fields), tags: [])
         }
 
