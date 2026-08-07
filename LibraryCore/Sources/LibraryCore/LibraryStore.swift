@@ -2190,7 +2190,15 @@ public class LibraryStore {
     /// tags need classifying" rather than leaving them to be noticed.
     @discardableResult
     public func promoteTagVocabulary() throws -> [TagRecord] {
-        let discovered = TagVocabulary.promoting(try fetchAllAssets())
+        // ⚠️ Actor profile tags too. `connectAllEdges` reports unknown tags
+        // from both places, so promoting from only one of them left the other
+        // permanently unreachable — reported by one tool and invisible to the
+        // tool that report names as the fix.
+        let performerTags = try fetchAllEntityProfiles()
+            .filter { $0.id.hasPrefix("actor:") }
+            .flatMap(\.tags)
+        let discovered = TagVocabulary.promoting(try fetchAllAssets(),
+                                                 performerTags: performerTags)
         let known = Set(try fetchTagVocabulary().map(\.identityKey))
         let new = discovered.filter { !known.contains($0.identityKey) }
 
@@ -2198,6 +2206,34 @@ public class LibraryStore {
             for record in new { try record.insert(db) }
         }
         return new
+    }
+
+    /// Profiles nothing refers to, grouped by node kind.
+    ///
+    /// ⚠️ Gathers the edge sets as well as the strings. A check reading tag
+    /// strings alone will propose deleting the library's entire cast the moment
+    /// the string-retirement migration runs.
+    public func auditOrphans() throws -> [GraphNodeKind: [OrphanFinding]] {
+        let profiles = try fetchAllEntityProfiles().map(\.id)
+        var referenced = Set<String>()
+        for asset in try fetchAllAssets() {
+            for tag in asset.tags where GraphNodeKind.of(tag) != nil {
+                referenced.insert(tag)
+            }
+        }
+        let (performers, studios, parents): (Set<String>, Set<String>, Set<String>) =
+            try dbQueue.read { db in
+                (Set(try String.fetchAll(db, sql: "SELECT DISTINCT performer_id FROM video_performer")),
+                 Set(try String.fetchAll(db, sql: "SELECT DISTINCT studio_id FROM video_studio")),
+                 Set(try String.fetchAll(db, sql:
+                    "SELECT DISTINCT parent_studio_id FROM studio_parent WHERE valid_to IS NULL")))
+            }
+
+        return OrphanAudit.findings(.init(profiles: profiles,
+                                          referencedByString: referenced,
+                                          performersWithEdges: performers,
+                                          studiosWithEdges: studios,
+                                          studiosWithChildren: parents))
     }
 
     /// Gives every studio the library uses a profile row, so it can be looked

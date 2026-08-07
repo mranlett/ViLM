@@ -104,9 +104,12 @@ struct GraphAuditView: View {
                     }
                 } header: {
                     HStack {
-                        Image(systemName: check.isCertain
-                              ? "exclamationmark.octagon.fill" : "questionmark.diamond")
-                            .foregroundStyle(check.isCertain ? .red : .orange)
+                        // ⭐ Three treatments, not two. A `.notable` finding is
+                        // not a problem, and dressing it in a warning icon beside
+                        // "released before they were born" teaches the operator
+                        // to distrust the whole screen.
+                        Image(systemName: icon(for: check.severity))
+                            .foregroundStyle(colour(for: check.severity))
                         Text(check.title)
                         Spacer()
                         Text("\(check.count)")
@@ -123,13 +126,40 @@ struct GraphAuditView: View {
     /// record that may itself be incomplete — "9 findings" reads the same
     /// either way, and they are not the same news.
     private var headline: String {
-        let certain = checks.filter(\.isCertain).reduce(0) { $0 + $1.count }
-        let suspect = checks.filter { !$0.isCertain }.reduce(0) { $0 + $1.count }
-
-        if certain == 0 {
-            return "Nothing impossible. \(suspect) thing\(suspect == 1 ? "" : "s") disagree with a recorded career, which is often the record being incomplete rather than the video being wrong."
+        func total(_ severity: GraphCheck.Severity) -> Int {
+            checks.filter { $0.severity == severity }.reduce(0) { $0 + $1.count }
         }
-        return "\(certain) impossible\(suspect > 0 ? ", and \(suspect) worth checking" : "")."
+        let certain = total(.certain), suspect = total(.suspect), notable = total(.notable)
+
+        // ⚠️ `notable` is never counted as a problem, in either sentence. It is
+        // reported last and described as interesting, because it is.
+        let aside = notable > 0
+            ? " \(notable) late career credit\(notable == 1 ? " is" : "s are") listed below as a point of interest, not a problem."
+            : ""
+
+        if certain == 0 && suspect == 0 {
+            return "Nothing impossible, and nothing worth checking.\(aside)"
+        }
+        if certain == 0 {
+            return "Nothing impossible. \(suspect) thing\(suspect == 1 ? "" : "s") disagree with a recorded career, which is often the record being incomplete rather than the video being wrong.\(aside)"
+        }
+        return "\(certain) impossible\(suspect > 0 ? ", and \(suspect) worth checking" : "").\(aside)"
+    }
+
+    private func icon(for severity: GraphCheck.Severity) -> String {
+        switch severity {
+        case .certain:  return "exclamationmark.octagon.fill"
+        case .suspect:  return "questionmark.diamond"
+        case .notable:  return "sparkle.magnifyingglass"
+        }
+    }
+
+    private func colour(for severity: GraphCheck.Severity) -> Color {
+        switch severity {
+        case .certain:  return .red
+        case .suspect:  return .orange
+        case .notable:  return .secondary
+        }
     }
 
     private func scan() async {

@@ -31,7 +31,13 @@ public struct GraphFinding: Equatable, Sendable, Identifiable {
         case implausibleAge
         /// Released before the performer's recorded career began.
         case beforeCareerStart
-        /// Released after the performer's recorded career ended.
+        /// Worked after their recorded career ended.
+        ///
+        /// ⭐ NOT an error, and deliberately not presented as one. A performer
+        /// can come out of retirement, footage shot earlier can be released
+        /// later, and a recorded end year is a source's summary rather than a
+        /// fact about the world. Every explanation is ordinary — this is an
+        /// interesting datapoint about a career, not a contradiction.
         case afterCareerEnd
     }
 
@@ -63,20 +69,40 @@ public struct GraphCheck: Equatable, Sendable, Identifiable {
     public var id: String { kind.rawValue }
     public var count: Int { findings.count }
 
-    /// Whether the data is definitely wrong, or merely suspect.
+    /// How much of a problem a finding is.
     ///
-    /// ⚠️ Only the first is certain. The others compare a video against a
-    /// **recorded** career span, and a career span from a source is frequently
-    /// incomplete — an early or late credit is often the record being wrong
-    /// about the career rather than the video being wrong.
-    public var isCertain: Bool { kind == .releasedBeforeBirth }
+    /// ⚠️ Three levels, not two. A binary "certain or suspect" forced every
+    /// non-certain check under a heading reading *Impossible Data*, which is
+    /// simply wrong for some of them — a performer working after a recorded
+    /// retirement is an ordinary thing that happens, not a contradiction, and
+    /// filing it beside "released before they were born" trains the operator to
+    /// distrust the whole screen.
+    public enum Severity: Equatable, Sendable {
+        /// Something is definitely wrong. Only one check can say this.
+        case certain
+        /// Probably wrong, worth opening. Compares a video against a
+        /// **recorded** career span, and such spans are frequently incomplete.
+        case suspect
+        /// ⭐ Not wrong at all. Worth knowing, and nothing needs fixing.
+        case notable
+    }
+
+    public var severity: Severity {
+        switch kind {
+        case .releasedBeforeBirth: return .certain
+        case .implausibleAge, .beforeCareerStart: return .suspect
+        case .afterCareerEnd: return .notable
+        }
+    }
+
+    public var isCertain: Bool { severity == .certain }
 
     public var title: String {
         switch kind {
         case .releasedBeforeBirth: return "Released before the actor was born"
         case .implausibleAge:      return "Implausible age at release"
         case .beforeCareerStart:   return "Released before the recorded career started"
-        case .afterCareerEnd:      return "Released after the recorded career ended"
+        case .afterCareerEnd:      return "Worked after their recorded career ended"
         }
     }
 
@@ -89,7 +115,7 @@ public struct GraphCheck: Equatable, Sendable, Identifiable {
         case .beforeCareerStart:
             return "The video predates the career start on record. Often the recorded span is simply incomplete — sources rarely know the earliest work — so treat this as a prompt to check, not a verdict."
         case .afterCareerEnd:
-            return "The video postdates the recorded career end. A missing end means \"still working\" and is never flagged; these have an end recorded and a release after it."
+            return "Nothing here needs fixing. A performer can return from retirement, and footage shot earlier is often released later — a recorded end year is a source's summary, not a fact about the world. Listed because it is interesting: these are the late credits in a career. A missing end means \"still working\" and is never flagged."
         }
     }
 
@@ -126,16 +152,32 @@ public enum GraphAudit {
         for finding in findings(input) {
             byKind[finding.kind, default: []].append(finding)
         }
-        return GraphFinding.Kind.allCases
-            .compactMap { kind in
-                guard let found = byKind[kind], !found.isEmpty else { return nil }
-                return GraphCheck(kind: kind, findings: found)
+        return ordered(GraphFinding.Kind.allCases.compactMap { kind in
+            guard let found = byKind[kind], !found.isEmpty else { return nil }
+            return GraphCheck(kind: kind, findings: found)
+        })
+    }
+
+    /// Worst first, then by size — the same ordering rule Studio Health uses,
+    /// so the two screens read the same way.
+    ///
+    /// ⭐ `.notable` always sorts LAST regardless of size. It is not a problem,
+    /// and a large pile of interesting-but-fine findings must never push a
+    /// genuine contradiction below the fold.
+    ///
+    /// Extracted so it can be asserted: the app target has no test target, so a
+    /// presentation rule left inside a `View` is a rule nothing checks.
+    public static func ordered(_ checks: [GraphCheck]) -> [GraphCheck] {
+        func rank(_ check: GraphCheck) -> Int {
+            switch check.severity {
+            case .certain: return 0
+            case .suspect: return 1
+            case .notable: return 2
             }
-            // Certain first, then by size — the same ordering rule Studio
-            // Health uses, so the two screens read the same way.
-            .sorted {
-                $0.isCertain != $1.isCertain ? $0.isCertain : $0.count > $1.count
-            }
+        }
+        return checks.sorted {
+            rank($0) != rank($1) ? rank($0) < rank($1) : $0.count > $1.count
+        }
     }
 
     static func findings(_ input: Input) -> [GraphFinding] {

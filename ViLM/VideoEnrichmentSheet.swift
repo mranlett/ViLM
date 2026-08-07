@@ -469,9 +469,15 @@ struct VideoEnrichmentSheet: View {
                                              ? .accentColor : .secondary)
                         Text(option.name)
                         Spacer()
-                        // Marks the ones already in the library's vocabulary,
-                        // which is also the rule that decided what was ticked.
-                        if option.isKnown {
+                        // 🚨 Says WHY a familiar-looking tag is not ticked.
+                        // These describe a performer, and the source puts them
+                        // on its scenes — so "Redhead" arrived looking exactly
+                        // like a tag about the video, and being classified was
+                        // what made it tick by default.
+                        if option.describesPerformer {
+                            Text("describes a performer")
+                                .font(.caption2).foregroundStyle(.orange)
+                        } else if option.isKnown {
                             Text("in use").font(.caption2).foregroundColor(.secondary)
                         }
                     }
@@ -487,7 +493,7 @@ struct VideoEnrichmentSheet: View {
                 Button("None") { model.selectNoTags() }.font(.caption)
             }
         } footer: {
-            Text("Tags already on this video are ticked — unticking one removes it. Tags you already use elsewhere are ticked too; the rest are offered but left off, so one match can't flood your tag list.")
+            Text("Tags already on this video are ticked — unticking one removes it. Tags you already use elsewhere are ticked too; the rest are offered but left off, so one match can't flood your tag list. Tags your vocabulary says describe a performer are never ticked automatically: a video isn't a redhead, a performer is.")
         }
     }
 }

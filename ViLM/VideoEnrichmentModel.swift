@@ -116,6 +116,15 @@ final class VideoEnrichmentModel: ObservableObject {
     private let asset: Asset
     private let libraryURL: URL
     private let knownTags: Set<String>
+    /// 🚨 Folded identities the vocabulary says describe a PERFORMER. Without
+    /// these the review pre-ticked "Redhead" onto the video itself, because
+    /// being classified is exactly what made it look familiar.
+    private lazy var performerTraits: Set<String> = {
+        guard let records = try? LibraryStore(at: libraryURL).fetchTagVocabulary() else { return [] }
+        return Set(records
+            .filter { $0.resolvedKind()?.canAttach(to: .video) == false }
+            .map(\.identityKey))
+    }()
     private var proposal: VideoMetadataProposal?
     /// The imprint and the network, when verification could not choose between
     /// them. Non-nil means the review is waiting on a person.
@@ -386,7 +395,8 @@ final class VideoEnrichmentModel: ObservableObject {
         changes = VideoEnrichmentReview.changes(for: asset, proposal: resolved,
                                                 knownTags: knownTags)
         tagOptions = VideoEnrichmentReview.tagOptions(for: asset, proposal: resolved,
-                                                      knownTags: knownTags)
+                                                      knownTags: knownTags,
+                                                      performerTraits: performerTraits)
         // Fills are pre-ticked; a conflict never is. Tags follow their own
         // rule — only ones already in the vocabulary.
         accepted = Set(changes.filter { $0.kind == .fill }.map(\.field))

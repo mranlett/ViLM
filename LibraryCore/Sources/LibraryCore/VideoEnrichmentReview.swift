@@ -56,11 +56,24 @@ public struct VideoTagOption: Equatable, Sendable, Identifiable {
     /// one-way door: a tag applied by mistake is invisible here and can only be
     /// undone somewhere else, which is where a wrong tag quietly survives.
     public let isExisting: Bool
+    /// 🚨 The vocabulary says this tag describes a PERFORMER, not a video.
+    ///
+    /// A source tags its scenes with performer attributes — hair colour,
+    /// ethnicity, body type — and those arrived here indistinguishable from a
+    /// tag about the video. Worse, they were classified, so `isKnown` was true
+    /// and they were **pre-ticked**: matching a video silently proposed filing
+    /// the video itself as a redhead, and accepting the defaults applied it.
+    ///
+    /// Still offered, never pre-selected. The graph's standing rule is to show
+    /// the operator and refuse to guess, and a person may genuinely want one.
+    public let describesPerformer: Bool
 
-    public init(name: String, isKnown: Bool, isExisting: Bool = false) {
+    public init(name: String, isKnown: Bool, isExisting: Bool = false,
+                describesPerformer: Bool = false) {
         self.name = name
         self.isKnown = isKnown
         self.isExisting = isExisting
+        self.describesPerformer = describesPerformer
     }
 }
 
@@ -217,21 +230,29 @@ public enum VideoEnrichmentReview {
     /// quietly lossy. What differs is the DEFAULT — see `defaultSelection`.
     /// Sorted known-first so the ones that will be applied sit together at the
     /// top instead of scattered through a list of seventy.
+    /// - Parameter performerTraits: folded identities the vocabulary classifies
+    ///   as describing a performer. Pass empty to keep the old behaviour.
     public static func tagOptions(for asset: Asset,
                                   proposal: VideoMetadataProposal,
-                                  knownTags: Set<String>) -> [VideoTagOption] {
+                                  knownTags: Set<String>,
+                                  performerTraits: Set<String> = []) -> [VideoTagOption] {
         let held = Set(asset.actions.map { $0.lowercased() })
         let vocabulary = Set(knownTags.map { $0.lowercased() })
+        func isTrait(_ name: String) -> Bool {
+            performerTraits.contains(TagNormalizer.identityKey(name))
+        }
 
         // The video's OWN tags first, ticked — so the list is the whole picture
         // rather than only what the source wants to add.
         var options = asset.actions.map {
-            VideoTagOption(name: $0, isKnown: true, isExisting: true)
+            VideoTagOption(name: $0, isKnown: true, isExisting: true,
+                           describesPerformer: isTrait($0))
         }
         for tag in proposal.tags.value ?? [] where !held.contains(tag.lowercased()) {
             options.append(VideoTagOption(name: tag,
                                           isKnown: vocabulary.contains(tag.lowercased()),
-                                          isExisting: false))
+                                          isExisting: false,
+                                          describesPerformer: isTrait(tag)))
         }
         // Existing first, then ones already in the vocabulary, then the rest —
         // which is also the order they are ticked in.
@@ -252,8 +273,18 @@ public enum VideoEnrichmentReview {
     /// in a tag they meant to add.
     public static func defaultSelection(_ options: [VideoTagOption]) -> Set<String> {
         // Existing tags start ticked because they ARE the current state —
-        // opening this screen must not propose removing everything.
-        Set(options.filter { $0.isExisting || $0.isKnown }.map(\.name))
+        // opening this screen must not propose removing everything. That
+        // includes ones describing a performer: unticking is how they come off,
+        // and silently proposing removal of tags already applied would be a
+        // different kind of surprise.
+        //
+        // 🚨 A NEW tag describing a performer is never pre-ticked, however
+        // familiar it looks. Being in the vocabulary is exactly why these were
+        // ticked before — they are classified, so `isKnown` was true — and that
+        // is how a video came to be filed as a redhead.
+        Set(options.filter {
+            $0.isExisting || ($0.isKnown && !$0.describesPerformer)
+        }.map(\.name))
     }
 
     /// - Parameter acceptedTags: the exact tag names to add, chosen

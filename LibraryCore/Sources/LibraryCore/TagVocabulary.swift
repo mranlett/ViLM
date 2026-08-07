@@ -80,10 +80,24 @@ public enum TagVocabulary {
     /// casings, 15 uses against 1; rejecting the pair would have stranded real
     /// data on a technicality, and picking the wrong spelling would have shown
     /// the operator the rarer one.
-    public static func promoting(_ assets: [Asset]) -> [TagRecord] {
+    /// - Parameter performerTags: tag names carried on ACTOR profiles.
+    ///
+    /// 🚨 Promotion used to read videos only, and `connectAllEdges` reports
+    /// unknown tags from BOTH videos and actor profiles. So a tag that lives
+    /// only on a performer — a trait the operator typed by hand and never put
+    /// on a video — was reported as "not in the vocabulary" forever, and the
+    /// tool the report pointed at could never promote it. Measured on the real
+    /// library: 0 unknown tags on videos, 6 unknown on actor profiles, all six
+    /// unreachable.
+    public static func promoting(_ assets: [Asset],
+                                 performerTags: [String] = []) -> [TagRecord] {
         var usesBySpelling: [String: Int] = [:]
         for asset in assets {
             for name in asset.actions { usesBySpelling[name, default: 0] += 1 }
+        }
+        for name in performerTags
+        where !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            usesBySpelling[name, default: 0] += 1
         }
 
         // The winning spelling and the merged total are tracked SEPARATELY.
