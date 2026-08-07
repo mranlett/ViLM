@@ -103,7 +103,35 @@ public enum AssetSort {
         ascending: Bool,
         fileSizes: [Asset.ID: Int64] = [:]
     ) -> [Asset] {
-        assets.sorted { a, b in
+        // 🚨 Undated videos are held out and appended, rather than left to the
+        // comparator.
+        //
+        // `precedes` cannot express "last in both directions": descending
+        // negates it, so a rule that put undated last ascending necessarily put
+        // them FIRST descending — which is what shipped, and it contradicted
+        // this type's own documented contract. Found by an independent audit,
+        // 2026-08-07.
+        //
+        // They are not "very old"; they are unknown, and a chronological view
+        // must not open on the records that say nothing about the chronology.
+        if option == .releaseDate {
+            let dated = assets.filter { normalizedReleaseDate($0) != nil }
+            let undated = assets.filter { normalizedReleaseDate($0) == nil }
+            // ⚠️ Direction applies to the DATE only. Negating the whole
+            // comparison also reversed the series-order tie-break, so episodes
+            // released on one day read backwards in a descending view — the
+            // opposite of what the tie-break exists for. Found by an
+            // independent audit, 2026-08-07.
+            let ordered = dated.sorted { a, b in
+                let da = normalizedReleaseDate(a) ?? ""
+                let db = normalizedReleaseDate(b) ?? ""
+                if da != db { return ascending ? da < db : da > db }
+                return seriesOrderPrecedes(a, b)
+            }
+            return ordered + undated
+        }
+
+        return assets.sorted { a, b in
             let compare = precedes(a, b, by: option, fileSizes: fileSizes)
             return ascending ? compare : !compare
         }

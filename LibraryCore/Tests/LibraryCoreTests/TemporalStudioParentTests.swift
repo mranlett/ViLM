@@ -78,6 +78,25 @@ final class TemporalStudioParentTests: XCTestCase {
         XCTAssertEqual(try store.studioParentHistory(of: imprint).count, 1)
     }
 
+    /// 🚨 With no `since`, the boundary is still ONE date used twice.
+    ///
+    /// Closing the old row at today while opening the new one at NULL made the
+    /// new period cover all of history, so an as-of query returned BOTH
+    /// parents. The earlier tests missed it by always passing `since`.
+    func testReplacingAParentWithNoDateStillLeavesOnePeriodPerDay() throws {
+        let imprint = try studio("Coast Line")
+        let old = try studio("Old Network")
+        let new = try studio("Example Network")
+
+        try store.setStudioParent(old, forStudio: imprint)
+        try store.setStudioParent(new, forStudio: imprint)   // no `since`
+
+        for day in ["1999-01-01", "2012-06-01", "2099-01-01"] {
+            let owners = try store.studioParentPairs(asOf: day).filter { $0.from == imprint }
+            XCTAssertEqual(owners.count, 1, "one parent on \(day)")
+        }
+    }
+
     // MARK: - T3 — the database, not the application, enforces it
 
     /// ⭐ "At most one OPEN parent per studio" is a partial unique index. The

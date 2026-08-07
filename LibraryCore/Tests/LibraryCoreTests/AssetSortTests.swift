@@ -143,6 +143,40 @@ final class AssetSortTests: XCTestCase {
         XCTAssertEqual(out.map(\.fileName), ["a.mp4", "b.mp4"])
     }
 
+    /// 🚨 Descending too. `precedes` cannot express "last in both directions"
+    /// — negating it necessarily flips the undated to the front, which is what
+    /// shipped and what contradicted the documented contract.
+    func testUndatedVideosSortLastDescendingAsWell() {
+        let dated = Asset(relativePath: "a.mp4", fileName: "a.mp4",
+                          tags: [], releaseDate: "2020-01-01")
+        let older = Asset(relativePath: "c.mp4", fileName: "c.mp4",
+                          tags: [], releaseDate: "2010-01-01")
+        let undated = Asset(relativePath: "b.mp4", fileName: "b.mp4", tags: [])
+
+        XCTAssertEqual(AssetSort.sorted([undated, dated, older],
+                                        by: .releaseDate, ascending: false)
+                        .map(\.fileName),
+                       ["a.mp4", "c.mp4", "b.mp4"],
+                       "newest first, and the undated still last")
+    }
+
+    /// ⚠️ Direction applies to the DATE only. Negating the whole comparison
+    /// also reversed the series-order tie-break, so same-day episodes read
+    /// backwards in a descending view.
+    func testSameDayEpisodesKeepReadingOrderWhenDescending() {
+        var first = Asset(relativePath: "e1.mp4", fileName: "e1.mp4",
+                          tags: [], releaseDate: "2020-01-01")
+        first.seasonNumber = 1; first.episodeNumber = 1
+        var second = Asset(relativePath: "e2.mp4", fileName: "e2.mp4",
+                           tags: [], releaseDate: "2020-01-01")
+        second.seasonNumber = 1; second.episodeNumber = 2
+
+        XCTAssertEqual(AssetSort.sorted([second, first], by: .releaseDate, ascending: false)
+                        .map(\.fileName),
+                       ["e1.mp4", "e2.mp4"],
+                       "the tie-break is reading order regardless of direction")
+    }
+
     func testReleaseOrderIsChronological() {
         let older = Asset(relativePath: "a.mp4", fileName: "a.mp4",
                           tags: [], releaseDate: "2018-03-04")

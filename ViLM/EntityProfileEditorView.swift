@@ -71,7 +71,6 @@ struct EntityProfileEditorView: View {
     // Enrichment. The button exists only when a plugin that can do it is
     // installed — in a default build there is no such plugin, so this section
     // is absent rather than disabled (D3).
-    @State private var isShowingEnrichment = false
 
     /// A canonical name the operator accepted, applied on Save.
     ///
@@ -209,27 +208,17 @@ struct EntityProfileEditorView: View {
                         .foregroundColor(.secondary)
                     }
                 }
-                // ⚠️ Actors only. `ActorEnrichmentSheet` searches the source's
-                // PERFORMERS, so offering it on a studio would look up a
-                // company name against a list of people and either find
-                // nothing or, worse, find a person who happens to share it.
+                // 🚨 REMOVED 2026-08-07. Matching is not an editing action, and
+                // this was the third route to it.
                 //
-                // Studios are matched by Match All Studios, which uses the
-                // studio provider. Per-studio enrichment from this sheet is not
-                // built; the button is absent rather than misleading.
-                if !isStudio, let provider = installedActorProvider {
-                    Section {
-                        Button {
-                            isShowingEnrichment = true
-                        } label: {
-                            Label("Import from \(provider.displayName)", systemImage: "sparkles")
-                        }
-                        .buttonStyle(.plain)
-                    } footer: {
-                        Text("Looks this actor up by name and shows you what it found. "
-                             + "Nothing changes until you review it and press Save.")
-                    }
-                }
+                // It survived only because the actor batch queue handed off to
+                // this form and this button was how the operator reached the
+                // candidates. That is fixed — the queue opens the picker
+                // directly — and matching now lives on the profile page's ⋯
+                // menu, beside the other actions on the record, which is where
+                // the video inspector has always put it.
+                //
+                // An edit form should edit what is there, not go and fetch more.
 
                 // A studio's images are logos, not photographs of anyone.
                 Section(header: Text(isStudio ? "Logos" : "Photo Gallery").font(.headline)) {
@@ -587,28 +576,6 @@ struct EntityProfileEditorView: View {
             }
             .padding()
             .navigationTitle(isStudio ? "Edit Studio" : "Edit Profile")
-            .sheet(isPresented: $isShowingEnrichment) {
-                if let provider = installedActorProvider {
-                    ActorEnrichmentSheet(
-                        provider: provider,
-                        entityId: entityId,
-                        actorName: displayName,
-                        // Built from the LIVE field values, not the profile this
-                        // view opened with — otherwise an edit made just now
-                        // would read as an empty field and be "filled" with the
-                        // source's value.
-                        currentProfile: editedProfile,
-                        libraryURL: libraryURL,
-                        onApply: { merged, renameTo in
-                            applyEnrichment(merged)
-                            // Held until Save: the rename rewrites this record's
-                            // identity, so it must not happen while the form is
-                            // still open against the old one.
-                            pendingCanonicalName = renameTo
-                        }
-                    )
-                }
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -774,18 +741,6 @@ struct EntityProfileEditorView: View {
         return String(entityId[entityId.index(after: colon)...])
     }
 
-    /// The first installed plugin that can enrich an actor.
-    ///
-    /// `installed` is the only list the enrichment UI may consult — an available
-    /// but uninstalled plugin must have no affordance anywhere (D3). Takes the
-    /// first because provider precedence is still an open spec decision; with
-    /// one plugin installed the question does not arise.
-    private var installedActorProvider: (any ActorMetadataProvider)? {
-        PluginEnvironment.registry.installed
-            .compactMap { $0 as? any ActorMetadataProvider }
-            .first
-    }
-
     /// A candidate link built from the two entry fields, or nil when the URL
     /// is blank or unusable.
     ///
@@ -852,34 +807,6 @@ struct EntityProfileEditorView: View {
         )
         profile.enrichmentSourceId = enrichmentSourceId
         return profile
-    }
-
-    /// Drops accepted values into the form. Deliberately NOT a save: the user
-    /// still reviews the populated fields and presses Save, and the gallery
-    /// downloads happen on that existing save path.
-    private func applyEnrichment(_ merged: EntityProfile) {
-        bio = merged.bio ?? bio
-        photoUrl = merged.photoUrl ?? photoUrl
-        gender = merged.gender ?? gender
-        hairColor = merged.hairColor ?? hairColor
-        birthYearString = merged.birthYear.map(String.init) ?? birthYearString
-        countryOfOrigin = merged.countryOfOrigin ?? countryOfOrigin
-        tags = merged.tags
-        akas = merged.akas
-        // The merge already unioned these against what the form holds, so
-        // assigning the result is what keeps an accepted "Links" row from
-        // being silently discarded on the way back into the editor.
-        links = merged.links
-        galleryUrls = merged.galleryUrls
-        birthDate = merged.birthDate ?? birthDate
-        careerSpanRaw = merged.careerSpanRaw ?? careerSpanRaw
-        careerStartYear = merged.careerStartYear ?? careerStartYear
-        careerEndYear = merged.careerEndYear ?? careerEndYear
-        ageAtCareerStart = merged.ageAtCareerStart ?? ageAtCareerStart
-        enrichmentState = merged.enrichmentState ?? enrichmentState
-        enrichmentSource = merged.enrichmentSource ?? enrichmentSource
-        enrichmentSourceId = merged.enrichmentSourceId ?? enrichmentSourceId
-        enrichmentCheckedAt = merged.enrichmentCheckedAt ?? enrichmentCheckedAt
     }
 
     /// Applies an accepted canonical name across every open library.

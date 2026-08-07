@@ -118,3 +118,19 @@ The app federates across libraries, and **a uid minted in one library means noth
 - **V8 — Renaming becomes free.** After migration, renaming a node changes one row and moves no edges — the property this entire spec exists to buy (Epic T7).
 ## Evidence
 `EntityProfile.id` format and `ProfileImageNaming.safeId(for:)` read at commit `adb457a`, 2026-08-05. `EntityTombstone` is keyed by entity id and exists for federation sync. Library scale: 1,386 performer profiles, of which 1,204 carry full birth dates; gallery photo counts are per-profile and unmeasured for this spec — **measure before sizing phase 1's disk requirement.**
+## 🚨 D6 — v28 must NOT be a registered migration
+Added 2026-08-06, from reading `LibraryStore.init(at:)`. This follows directly from the operator's observation that **D5's prerequisites are per library, not global.**
+`LibraryStore(at:)` calls `migrate()` on open, and the migrator runs every unapplied migration immediately. So a `registerMigration("v28")` block would run **the moment any library is opened** — including one whose prerequisites are not met.
+Concretely, with the phone library cleaned up and the drive library still holding 63 two-studio videos: registering v28 would migrate the phone library correctly and then migrate the **drive** library the instant it is attached, bypassing every gate this spec defines — the studio-conflict prerequisite, the free-space pre-flight, the four-phase photo copy, and the requirement for a verified backup taken immediately before.
+⭐ **Therefore v28 is an operator-invoked, per-library operation**, not a schema migration. Precedent exists: *Migrate Episode Info* is invoked from Settings → Maintenance and runs against the selected library only.
+| Part | Where it belongs |
+| --- | --- |
+| Additive columns (`uid`, `entity_type`, `display_name`) and the lookup index | a registered migration — additive, reversible, harmless on any library |
+| Minting uids, re-pointing edges and tombstones, renaming photos, retiring the old id | **operator-invoked**, gated on the pre-flight checks, run per library |
+⚠️ Splitting it this way also makes the mixed state D4 already designs for **explicit rather than incidental**: a library can carry the new columns while still being keyed the old way, and D4's rule — federation resolves by the name triple, never by uid — is what keeps that safe.
+⚠️ **This changes the migration numbering.** The additive half is a migration; the re-keying half is not, so calling the whole thing "schema v28" is now imprecise. The additive migration is the only part with a version number.
+### Also affected by v30
+*Temporal Edges* (phase 2) shipped first, so `studio_parent` can now hold **several rows per studio** — one current, plus closed historical periods.
+- The re-pointing statements are unaffected: they update **by column**, not by row.
+- 🚨 **V3 must be re-derived.** It asserts per-table edge counts before and after, and `studio_parent`'s count is no longer bounded by the number of studios.
+- The partial unique index `studio_parent_current` is over `studio_id`, which the re-keying rewrites in place. Verify it still holds **after** re-pointing, since re-pointing two former parents of one studio to the same uid cannot create a second open row — but that reasoning should be asserted, not assumed.

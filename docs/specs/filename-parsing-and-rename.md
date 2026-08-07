@@ -3,7 +3,7 @@
 
 ---
 spec: "Filename Parsing & Bulk Rename Utility"
-status: Draft
+status: Approved
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf42881638590ee35f41e3870
@@ -11,7 +11,9 @@ notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf4
 
 # Filename Parsing & Bulk Rename Utility
 
-> ⚠️ **Status: Draft — rewritten 2026-08-05 as a spec DERIVED from *****The Library Graph*****, awaiting re-approval** (Constitution Art. II). The previous version was Approved and much of its Phase 1 is built; this rewrite changes how the parser decides, not what it decides about.
+> ✅ **Approved by the Human Operator, 2026-08-06.** Implementation may proceed (Constitution Art. II). Rewritten 2026-08-05 as a spec DERIVED from *The Library Graph*; the rewrite changes how the parser decides, not what it decides about, and much of Phase 1 was already built under the previous approval.
+> 
+> **Open questions resolved 2026-08-06** — see the resolution notes inline, each pointing at where the answer actually lives.
 **Parent:** *The Library Graph* (Epic, Approved). **This spec owns two directions of one relationship:** reading metadata **out of** filenames into the graph, and generating filenames **from** the graph.
 ## ⚠️ The ordering is still the whole point
 The original proposal was to rename files from the metadata already held. **Measured against the real library, that would have destroyed data.**
@@ -95,7 +97,9 @@ Where no lexicon resolves a token, the corpus itself distinguishes the fields, n
 ### Manual invocation only
 **Human Operator:** *"Only trigger the bulk rename utility on manual invocation. Do not automatically rename files in bulk upon import."* Nothing renames and nothing bulk-parses as a side effect of importing.
 **Human Operator, 2026-08-05:** *"I'd like to ensure the user has the opportunity to clean metadata and file names up manually before invoking a bulk update process."*
-❓ **Out of scope rather than decided against — SINGLE-file parsing on import.** One new file with a descriptive name is a different case: one proposal, operator present. Worth revisiting once the parser's real accuracy is known. Note the Epic's D9 makes new arrivals routine, so this will come up.
+✅ **RESOLVED 2026-08-06 — answered by the Epic, not here.** This was left open pending the parser's real accuracy. *The Library Graph*'s **D9** and its test **T29** settle it: *"A file appearing after the migration arrives **`unreviewed`**, undeclared, unmatched and in the root, and proceeds through declaration, parsing, matching and relocation by the same code path."*
+So a single new arrival **is** parsed, and specifically by the same path a legacy file takes — there is no separate import-time parser to design.
+⚠️ **That does not contradict "manual invocation only" above.** The rule there is that nothing **bulk**-parses or bulk-renames as a side effect of importing. One arriving file going through the ordinary pipeline is not a bulk run, and D9's own framing — *"the migration is the steady-state process applied to a backlog"* — is that the two are the same code with different cardinality.
 ### ✅ What is already built
 | Capability | State |
 | --- | --- |
@@ -109,8 +113,18 @@ Where no lexicon resolves a token, the corpus itself distinguishes the fields, n
 | **Lexicon as a data source (D2 amended)** | **not built** |
 | **Node resolution (D3)** | **not built** |
 | **Attribute-tag routing (D4)** | **not built** |
-| **Provenance (D5)** | **not built** |
+| **Provenance (D5)** — vocabulary now exists; ⚠️ see note below | **partly unblocked** |
 | **Small-library decline** | **not built** |
+### ⚠️ D5's status, checked against the code 2026-08-06
+**Edge Attributes phase 1 (migration v29) shipped ****`EdgeProvenance`** — `download` / `operator` / `filename` / `inferred`, carrying D7's precedence exactly as D5 requires. So the **vocabulary D5 asks for now exists and is tested.**
+🚨 **But it is on EDGES, and the parser does not write edges.** `FileNameParser` produces values for `Asset` fields — `videoName`, the `studio:` and `actor:` tag strings — and **`Asset`**** has no per-field provenance at all** (verified by reading it: no provenance property, no map).
+| D5 asks for | State |
+| --- | --- |
+| An origin vocabulary with precedence | ✅ built, v29 |
+| Origin recorded on an **edge** the parser creates | ✅ possible now |
+| Origin recorded on a **field value** the parser writes | ❌ does not exist |
+⚠️ So D5 is **not** answered elsewhere in full. The half that matters most for this spec — *"a parsed value never overwrites a **`download`** or **`operator`** value"*, which is test **P2** — needs field-level provenance on `Asset`, and nothing has built it. The Epic's D7 specifies it as *one provenance map, not one property per field*; that remains unimplemented and is the real prerequisite for P2.
+Until it exists, a parsed value can only be made safe the way the parser already is — by filling blanks and never overwriting — which is weaker than D5, because it cannot tell a blank that was never known from one a source will fill better tomorrow.
 ## Phase 2 — Generating names from the graph
 ### ⭐ D6 — AMENDED: renaming rides matching; the bulk run is a backstop
 Per the Epic's D8, a video is relocated when its match is confirmed. **This changes Phase 2 from a campaign into a per-video consequence**, and the Epic's D9 makes it the same path a newly-added file takes.

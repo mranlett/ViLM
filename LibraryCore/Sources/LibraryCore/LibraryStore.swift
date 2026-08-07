@@ -1081,10 +1081,20 @@ public class LibraryStore {
         if !dryRun {
             try dbQueue.write { db in
                 for (videoId, studioId) in wanted {
+                    // Provenance, same as the performer path. v29 added these
+                    // columns and only that one path filled them, so studio and
+                    // tag edges were being created with NULL provenance —
+                    // D7 says every value carries its source, and an edge kind
+                    // that quietly does not is worse than none doing it.
                     try db.execute(sql: """
-                        INSERT INTO video_studio (video_id, studio_id) VALUES (?, ?)
-                        ON CONFLICT(video_id) DO UPDATE SET studio_id = excluded.studio_id
-                        """, arguments: [videoId.uuidString, studioId])
+                        INSERT INTO video_studio
+                            (video_id, studio_id, source, recorded_at) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(video_id) DO UPDATE SET
+                            studio_id = excluded.studio_id,
+                            source = excluded.source,
+                            recorded_at = excluded.recorded_at
+                        """, arguments: [videoId.uuidString, studioId,
+                                         EdgeProvenance.inferred.rawValue, Date()])
                 }
             }
         }
@@ -1231,13 +1241,17 @@ public class LibraryStore {
             try dbQueue.write { db in
                 for (videoId, tagId) in videoEdges {
                     try db.execute(sql: """
-                        INSERT OR IGNORE INTO video_tag (video_id, tag_id) VALUES (?, ?)
-                        """, arguments: [videoId.uuidString, tagId])
+                        INSERT OR IGNORE INTO video_tag
+                            (video_id, tag_id, source, recorded_at) VALUES (?, ?, ?, ?)
+                        """, arguments: [videoId.uuidString, tagId,
+                                         EdgeProvenance.inferred.rawValue, Date()])
                 }
                 for (performerId, tagId) in performerEdges {
                     try db.execute(sql: """
-                        INSERT OR IGNORE INTO performer_tag (performer_id, tag_id) VALUES (?, ?)
-                        """, arguments: [performerId, tagId])
+                        INSERT OR IGNORE INTO performer_tag
+                            (performer_id, tag_id, source, recorded_at) VALUES (?, ?, ?, ?)
+                        """, arguments: [performerId, tagId,
+                                         EdgeProvenance.inferred.rawValue, Date()])
                 }
                 for (videoId, tagId) in pending {
                     try db.execute(sql: """
@@ -1714,20 +1728,34 @@ public class LibraryStore {
 
             if existing == parentId { return }
 
+            // 🚨 The boundary is ONE date used twice, so the periods meet.
+            //
+            // Closing the old row at today while inserting the new one with
+            // `valid_from = NULL` made the new period cover all of history —
+            // and `studioParentPairs(asOf:)` then returned BOTH parents for any
+            // past date, breaking the one-parent-at-a-time invariant the whole
+            // temporal shape exists to hold. Found by an independent audit,
+            // 2026-08-07; the existing tests missed it by always passing an
+            // explicit `since`.
+            //
+            // NULL stays correct for a FIRST parent — "as far back as we know"
+            // — and is only wrong when it follows something.
+            let boundary = since ?? Self.isoDay(Date())
+
             if existing != nil {
-                // Closed at the moment the new one begins, so the two periods
-                // meet rather than overlapping or leaving a gap.
                 try db.execute(sql: """
                     UPDATE studio_parent SET valid_to = ?
                      WHERE studio_id = ? AND valid_to IS NULL
-                    """, arguments: [since ?? Self.isoDay(Date()), studioId])
+                    """, arguments: [boundary, studioId])
             }
 
             try db.execute(sql: """
                 INSERT INTO studio_parent
                     (studio_id, parent_studio_id, valid_from, valid_to, source, recorded_at)
                 VALUES (?, ?, ?, NULL, ?, ?)
-                """, arguments: [studioId, parentId, since, source.rawValue, Date()])
+                """, arguments: [studioId, parentId,
+                                 existing == nil ? since : boundary,
+                                 source.rawValue, Date()])
         }
     }
 

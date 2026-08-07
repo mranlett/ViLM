@@ -221,15 +221,19 @@ public enum StudioAudit {
     /// ran the spaces out of, so a case-only fold — which is what the tag audit
     /// does — would miss the most common half of them.
     static func spellingCollisions(_ input: Input) -> StudioCheck {
-        var byIdentity: [String: Set<String>] = [:]
-        for name in allStudioNames(input) {
-            byIdentity[StudioResolution.identity(name), default: []].insert(name)
-        }
-        let items = byIdentity.values
-            .filter { $0.count > 1 }
-            .map { $0.sorted().joined(separator: " · ") }
-            .sorted()
-        return StudioCheck(kind: .spellingCollision, items: items)
+        // ⚠️ Delegated, not reimplemented. This had its own inline grouping
+        // while `StudioSpellingAudit` — the type behind the tool that FIXES
+        // these — had another, so the audit and the repair screen could have
+        // disagreed about what counts as a collision. Flagged by an
+        // independent audit, 2026-08-07; the same reason `multiStudioVideos`
+        // delegates to `StudioConflictAudit`.
+        StudioCheck(
+            kind: .spellingCollision,
+            // Explicit closure rather than a key path: `spellings` is an array
+            // of TUPLES, and a key path onto a tuple label does not compile.
+            items: StudioSpellingAudit.collisions(in: input.assets).map { collision in
+                collision.spellings.map { $0.spelling }.sorted().joined(separator: " · ")
+            })
     }
 
     /// A studio named on a video that no `video_studio` edge records.
