@@ -254,6 +254,11 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     public var bio: ProposedField<String> = .absent
     public var gender: ProposedField<String> = .absent
     public var hairColor: ProposedField<String> = .absent
+    /// ⭐ Identifying marks — carried because telling two performers of one
+    /// name apart is the recurring difficulty, and a tattoo discriminates where
+    /// a birth year does not.
+    public var tattoos: ProposedField<String> = .absent
+    public var piercings: ProposedField<String> = .absent
     public var countryOfOrigin: ProposedField<String> = .absent
     public var birthYear: ProposedField<Int> = .absent
     public var birthDate: ProposedField<String> = .absent

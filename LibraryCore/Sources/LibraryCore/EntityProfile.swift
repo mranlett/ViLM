@@ -61,6 +61,21 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public var gender: String?
     public var hairColor: String?
+
+    /// Identifying marks, as the source describes them (v33).
+    ///
+    /// ⭐ Held for IDENTIFICATION rather than description. Two performers of
+    /// one name is the recurring difficulty in this app, and a tattoo
+    /// distinguishes them where a birth year does not.
+    ///
+    /// ⚠️ A SNAPSHOT, not a standing fact. Piercings come out and tattoos are
+    /// reworked, and nothing here records when the description was true — so it
+    /// is shown with `enrichmentCheckedAt` beside it. See `marksAsOf`.
+    ///
+    /// ⚠️ Free text. Not filterable, deliberately: it cannot reliably answer
+    /// "who has a back piece", and a filter that half works is worse than none.
+    public var tattoos: String?
+    public var piercings: String?
     public var birthYear: Int?
     public var countryOfOrigin: String?
     /// 1–5 star favorite rating (nil = unrated). Added in schema v15.
@@ -131,6 +146,20 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     /// systems, and a bare URL with no label renders poorly. Populated by the
     /// operator, by a provider, or both. Core stores them and never fetches them.
     public var links: [EntityLink] = []
+
+    /// The identifying marks with the date they were last checked, or nil when
+    /// there are none.
+    ///
+    /// ⚠️ Exists so no caller renders these as a permanent truth about someone.
+    /// The date is the profile's, not the marks' — the source does not say when
+    /// a tattoo appeared — so it answers "as of when did we look", which is the
+    /// most that can honestly be claimed.
+    public var marksAsOf: (marks: [(String, String)], checked: Date?)? {
+        var found: [(String, String)] = []
+        if let tattoos, !tattoos.isEmpty { found.append(("Tattoos", tattoos)) }
+        if let piercings, !piercings.isEmpty { found.append(("Piercings", piercings)) }
+        return found.isEmpty ? nil : (found, enrichmentCheckedAt)
+    }
 
     /// True only when a lookup has run and concluded something needing a person.
     /// An entity never checked is not "needing attention"; it is unknown.
@@ -218,7 +247,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
+    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
         self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
@@ -235,6 +264,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.homePage = homePage
         self.gender = gender
         self.hairColor = hairColor
+        self.tattoos = tattoos
+        self.piercings = piercings
         self.birthYear = birthYear
         self.countryOfOrigin = countryOfOrigin
         self.rating = rating
@@ -260,6 +291,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
             homePage: homePage,
             gender: gender,
             hairColor: hairColor,
+            tattoos: tattoos,
+            piercings: piercings,
             birthYear: birthYear,
             countryOfOrigin: countryOfOrigin,
             rating: rating,
@@ -287,6 +320,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case homePage = "home_page"
         case gender
         case hairColor = "hair_color"
+        case tattoos
+        case piercings
         case birthYear = "birth_year"
         case countryOfOrigin = "country_of_origin"
         case rating
@@ -314,6 +349,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.homePage = try container.decodeIfPresent(String.self, forKey: .homePage)
         self.gender = try container.decodeIfPresent(String.self, forKey: .gender)
         self.hairColor = try container.decodeIfPresent(String.self, forKey: .hairColor)
+        self.tattoos = try container.decodeIfPresent(String.self, forKey: .tattoos)
+        self.piercings = try container.decodeIfPresent(String.self, forKey: .piercings)
         self.birthYear = try container.decodeIfPresent(Int.self, forKey: .birthYear)
         self.countryOfOrigin = try container.decodeIfPresent(String.self, forKey: .countryOfOrigin)
         self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
@@ -379,6 +416,8 @@ extension EntityProfile {
         container["home_page"] = homePage
         container["gender"] = gender
         container["hair_color"] = hairColor
+        container["tattoos"] = tattoos
+        container["piercings"] = piercings
         container["birth_year"] = birthYear
         container["country_of_origin"] = countryOfOrigin
         container["rating"] = rating

@@ -25,7 +25,7 @@ public enum ActorCSV {
     /// 1 Bio           4 Gender      7 CountryOfOrigin   10 Tags
     /// 2 PhotoURL      5 HairColor   8 Rating
     /// ```
-    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId"
+    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId,Tattoos,Piercings"
 
     /// Rows with fewer cells than this are skipped. Historic guard: a row must at
     /// least carry Name/Bio/PhotoURL/HomePage to be worth merging.
@@ -150,6 +150,8 @@ public enum ActorCSV {
             escape(profile?.enrichmentSource ?? ""),
             escape(profile?.enrichmentCheckedAt.map(timestamp) ?? ""),
             escape(profile?.enrichmentSourceId ?? ""),
+            escape(profile?.tattoos ?? ""),
+            escape(profile?.piercings ?? ""),
         ]
         return cells.joined(separator: ",") + "\n"
     }
@@ -246,6 +248,12 @@ public enum ActorCSV {
         /// anything already `.matched` — the tool that would have supplied the
         /// id refuses to look at them.
         public static let sourceId = 19
+        /// ⚠️ Appended AFTER the enrichment cells, so `width` below — which is
+        /// how far a short row must be padded to WRITE those cells — is
+        /// unchanged. Two different lengths: this format has 22 columns, and
+        /// stamping enrichment needs the first 20.
+        public static let tattoos = 20
+        public static let piercings = 21
         /// ⚠️ `public` so tests can assert against the CURRENT width rather
         /// than a literal. A plugin test hard-coded 19 and went red the moment
         /// this format gained a column — the property worth asserting is that a
@@ -401,6 +409,8 @@ public enum ActorCSV {
         // Falls back to what the library already holds, so importing a CSV
         // written before this column existed cannot blank an id.
         let sourceId = cell(19) ?? existing?.enrichmentSourceId
+        let tattoos = cell(20) ?? existing?.tattoos
+        let piercings = cell(21) ?? existing?.piercings
         let mergedTags: [String] = cell(10)
             .map { union(existing?.tags ?? [], splitList($0), excludingName: name) }
             ?? existing?.tags ?? []
@@ -438,6 +448,8 @@ public enum ActorCSV {
             homePage: homePage,
             gender: gender,
             hairColor: hairColor,
+            tattoos: tattoos,
+            piercings: piercings,
             birthYear: birthYear,
             // Re-attach the flag emoji the export stripped out.
             countryOfOrigin: country,

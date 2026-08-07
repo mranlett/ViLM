@@ -53,7 +53,7 @@ final class EntityProfilePreservationTests: XCTestCase {
     /// and look at the copy sites listed below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 23, """
+        XCTAssertEqual(count, 25, """
             EntityProfile gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds a profile.
@@ -253,5 +253,66 @@ extension EntityProfilePreservationTests {
         let decoded = try JSONDecoder().decode(EntityProfile.self,
                                                from: JSONEncoder().encode(profile))
         XCTAssertEqual(decoded.enrichmentSourceId, "abc-123")
+    }
+}
+
+/// Identifying marks, and the honesty of how they are presented.
+///
+/// ⚠️ The operator and I agreed these are worth holding DESPITE being
+/// time-varying: piercings come out, tattoos are covered and reworked, and
+/// nothing here records when a description was true. The mitigation is that no
+/// reader may render them as a standing fact — `marksAsOf` pairs them with the
+/// date the profile was checked so that cannot be forgotten.
+final class IdentifyingMarksTests: XCTestCase {
+
+    func testMarksAreReportedWithTheDateTheProfileWasChecked() {
+        var p = EntityProfile(id: "actor:Alice")
+        p.tattoos = "Left forearm — script"
+        p.enrichmentCheckedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let marks = p.marksAsOf
+        XCTAssertEqual(marks?.marks.first?.0, "Tattoos")
+        XCTAssertEqual(marks?.checked, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testBothKindsAreListedWhenBothArePresent() throws {
+        var p = EntityProfile(id: "actor:Alice")
+        p.tattoos = "Back — floral"
+        p.piercings = "Navel"
+
+        let marks = try XCTUnwrap(p.marksAsOf)
+        XCTAssertEqual(marks.marks.map(\.0), ["Tattoos", "Piercings"])
+    }
+
+    /// ⚠️ nil rather than an empty list, so a caller cannot render a heading
+    /// above nothing.
+    func testAProfileWithNoMarksReportsNone() {
+        XCTAssertNil(EntityProfile(id: "actor:Alice").marksAsOf)
+
+        var blank = EntityProfile(id: "actor:Alice")
+        blank.tattoos = ""
+        blank.piercings = ""
+        XCTAssertNil(blank.marksAsOf, "empty strings are not marks")
+    }
+
+    /// A profile never looked up has marks but no date — and says so rather
+    /// than inventing one.
+    func testMarksWithNoCheckDateReportNilRatherThanNow() throws {
+        var p = EntityProfile(id: "actor:Alice")
+        p.tattoos = "Left arm"
+
+        XCTAssertNil(try XCTUnwrap(p.marksAsOf).checked)
+    }
+
+    /// They survive a rename, like every other field.
+    func testMarksSurviveARename() {
+        var p = EntityProfile(id: "actor:Alice")
+        p.tattoos = "Back — floral"
+        p.piercings = "Navel"
+
+        let renamed = p.renamed(to: "actor:Alice Smith")
+
+        XCTAssertEqual(renamed.tattoos, "Back — floral")
+        XCTAssertEqual(renamed.piercings, "Navel")
     }
 }

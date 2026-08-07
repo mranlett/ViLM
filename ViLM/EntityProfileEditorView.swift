@@ -40,6 +40,43 @@ struct EntityProfileEditorView: View {
     @State private var homePage: String = ""
     @State private var gender: String = ""
     @State private var hairColor: String = ""
+    /// ⚠️ Identifying marks. Editable because they go stale — a piercing comes
+    /// out and the source may not know — and the operator is the only one who
+    /// can say so.
+    @State private var tattoos: String = ""
+    @State private var piercings: String = ""
+
+    /// ⚠️ Extracted rather than inline. The surrounding `Form` was already at
+    /// the type-checker's limit, and two more fields in it tipped it over —
+    /// "unable to type-check this expression in reasonable time" is a size
+    /// problem, not a syntax one.
+    /// Same star control as videos; tapping the current rating clears it.
+    ///
+    /// ⚠️ Extracted for the same reason as `marksFields`: this `Form` sits at
+    /// the type-checker's limit, and it reported the failure HERE while the
+    /// cause was two fields added elsewhere in the same body.
+    @ViewBuilder
+    private var ratingRow: some View {
+        HStack(spacing: 6) {
+            Text("Rating:").font(.subheadline).foregroundColor(.secondary)
+            ForEach(1...5, id: \.self) { star in
+                Image(systemName: star <= rating ? "star.fill" : "star")
+                    .foregroundColor(.yellow)
+                    .onTapGesture { rating = (rating == star) ? 0 : star }
+                    .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var marksFields: some View {
+        TextField("Tattoos", text: $tattoos, axis: .vertical)
+            .lineLimit(1...3)
+        TextField("Piercings", text: $piercings, axis: .vertical)
+            .lineLimit(1...3)
+    }
     @State private var birthYearString: String = ""
     @State private var countryOfOrigin: String = ""
     @State private var rating: Int = 0
@@ -139,6 +176,8 @@ struct EntityProfileEditorView: View {
         _homePage = State(initialValue: profile?.homePage ?? "")
         _gender = State(initialValue: profile?.gender ?? "")
         _hairColor = State(initialValue: profile?.hairColor ?? "")
+        _tattoos = State(initialValue: profile?.tattoos ?? "")
+        _piercings = State(initialValue: profile?.piercings ?? "")
         _birthYearString = State(initialValue: profile?.birthYear.map { String($0) } ?? "")
         var initialCountry = profile?.countryOfOrigin ?? ""
         if !initialCountry.isEmpty {
@@ -344,6 +383,7 @@ struct EntityProfileEditorView: View {
                         
                     TextField("Hair Color", text: $hairColor)
                         .focused($focusedField, equals: .hairColor)
+                    marksFields
                         .submitLabel(.next)
                         .onSubmit { focusedField = .birthYear }
                     
@@ -376,21 +416,7 @@ struct EntityProfileEditorView: View {
                             }
                         }
 
-                    // Favorite rating — same star control as videos; tapping
-                    // the current rating clears it.
-                    HStack(spacing: 6) {
-                        Text("Rating:").font(.subheadline).foregroundColor(.secondary)
-                        ForEach(1...5, id: \.self) { star in
-                            Image(systemName: star <= rating ? "star.fill" : "star")
-                                .foregroundColor(.yellow)
-                                .onTapGesture {
-                                    rating = (rating == star) ? 0 : star
-                                }
-                                .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
-                        }
-                        Spacer()
-                    }
-                    .accessibilityElement(children: .contain)
+                    ratingRow
 
                     // "Notes" rather than "Bio": no external source supplies a
                     // biography here (the chosen provider carries none at all,
@@ -618,6 +644,8 @@ struct EntityProfileEditorView: View {
                             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,
                             gender: gender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : gender,
                             hairColor: hairColor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : hairColor,
+                            tattoos: tattoos.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : tattoos,
+                            piercings: piercings.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : piercings,
                             birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
                             countryOfOrigin: finalCountry.isEmpty ? nil : finalCountry,
                             rating: rating == 0 ? nil : rating,
@@ -788,6 +816,8 @@ struct EntityProfileEditorView: View {
             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,
             gender: gender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : gender,
             hairColor: hairColor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : hairColor,
+            tattoos: tattoos.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : tattoos,
+            piercings: piercings.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : piercings,
             birthYear: Int(birthYearString.trimmingCharacters(in: .whitespacesAndNewlines)),
             countryOfOrigin: countryOfOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : countryOfOrigin,
             rating: rating == 0 ? nil : rating,

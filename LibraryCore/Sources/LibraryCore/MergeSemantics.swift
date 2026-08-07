@@ -58,6 +58,8 @@ public enum MergeSemantics {
             homePage: coalesce(higher.homePage, lower.homePage),
             gender: coalesce(higher.gender, lower.gender),
             hairColor: coalesce(higher.hairColor, lower.hairColor),
+            tattoos: coalesce(higher.tattoos, lower.tattoos),
+            piercings: coalesce(higher.piercings, lower.piercings),
             birthYear: higher.birthYear ?? lower.birthYear,
             countryOfOrigin: coalesce(higher.countryOfOrigin, lower.countryOfOrigin),
             rating: higher.rating ?? lower.rating,

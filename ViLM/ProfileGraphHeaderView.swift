@@ -412,6 +412,31 @@ struct ProfileGraphHeaderView: View {
                                 .foregroundColor(.secondary)
                         }
 
+                        // ⚠️ Their own lines, WITH the date they were checked.
+                        //
+                        // Free text that can run long, so joining the bulleted
+                        // list above would swamp it. And they are the one thing
+                        // here that goes stale on its own — a piercing comes
+                        // out, a tattoo is covered — so they are shown as of
+                        // when the profile was last looked up rather than as a
+                        // standing fact about a person. `marksAsOf` pairs them
+                        // with that date precisely so no caller can forget.
+                        if !isStudio, let marks = profile.marksAsOf {
+                            VStack(alignment: .leading, spacing: 1) {
+                                ForEach(marks.marks, id: \.0) { label, value in
+                                    Text("\(label): \(value)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                if let checked = marks.checked {
+                                    Text("as recorded \(checked.formatted(date: .abbreviated, time: .omitted))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+
                         // Career span gets its own line rather than joining the
                         // bulleted list: it is a sentence, not a field, and it
                         // would crowd the line out on a phone.

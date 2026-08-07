@@ -83,6 +83,8 @@ public enum ActorEnrichment {
         public static let bio = "bio"
         public static let gender = "gender"
         public static let hairColor = "hairColor"
+        public static let tattoos = "tattoos"
+        public static let piercings = "piercings"
         public static let countryOfOrigin = "countryOfOrigin"
         public static let birthYear = "birthYear"
         public static let photoUrl = "photoUrl"
@@ -97,7 +99,7 @@ public enum ActorEnrichment {
         // Schema v19.
         public static let links = "links"
 
-        public static let all = [bio, gender, hairColor, countryOfOrigin,
+        public static let all = [bio, gender, hairColor, tattoos, piercings, countryOfOrigin,
                                  birthYear, photoUrl, akas, tags,
                                  birthDate, careerSpanRaw, careerStartYear,
                                  careerEndYear, ageAtCareerStart, links]
@@ -126,6 +128,8 @@ public enum ActorEnrichment {
         scalar(Field.bio, "Bio", current: profile?.bio, proposed: proposal.bio)
         scalar(Field.gender, "Gender", current: profile?.gender, proposed: proposal.gender)
         scalar(Field.hairColor, "Hair Colour", current: profile?.hairColor, proposed: proposal.hairColor)
+        scalar(Field.tattoos, "Tattoos", current: profile?.tattoos, proposed: proposal.tattoos)
+        scalar(Field.piercings, "Piercings", current: profile?.piercings, proposed: proposal.piercings)
         // Country is compared with its flag stripped. Stored values carry one
         // ("US 🇺🇸"); a provider proposes a bare name ("US"), so a raw string
         // comparison reported a conflict on EVERY enrichment — noise that
@@ -210,6 +214,8 @@ public enum ActorEnrichment {
             homePage: profile?.homePage,          // not proposable today
             gender: take(Field.gender, proposal.gender, profile?.gender),
             hairColor: take(Field.hairColor, proposal.hairColor, profile?.hairColor),
+            tattoos: take(Field.tattoos, proposal.tattoos, profile?.tattoos),
+            piercings: take(Field.piercings, proposal.piercings, profile?.piercings),
             birthYear: take(Field.birthYear, proposal.birthYear, profile?.birthYear),
             countryOfOrigin: take(Field.countryOfOrigin, proposal.countryOfOrigin, profile?.countryOfOrigin),
             rating: profile?.rating,              // user-authored, never proposable

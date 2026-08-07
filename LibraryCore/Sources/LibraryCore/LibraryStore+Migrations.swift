@@ -579,6 +579,30 @@ extension LibraryStore {
             }
         }
 
+        // v33: identifying marks.
+        //
+        // ⭐ Recorded because IDENTIFICATION is the recurring difficulty, not
+        // because more biography is better. Telling two performers of one name
+        // apart is what queues a disambiguation, what the alias-split tool
+        // cleans up after, and what "Known for" was added to help with — and a
+        // tattoo is far more discriminating than a birth year.
+        //
+        // ⚠️ Time-varying, and the schema cannot say so. Piercings come out;
+        // tattoos are added, covered and reworked. Nothing here dates the
+        // description, so every reader must present it as a snapshot — see
+        // `EntityProfile.marksAsOf`, which pairs it with `enrichmentCheckedAt`
+        // rather than letting it read as a standing fact about a person.
+        //
+        // ⚠️ Free text, and deliberately NOT queryable. It cannot reliably
+        // answer "who has a back piece", and a filter built on it would half
+        // work — which is worse than not offering one.
+        migrator.registerMigration("v33") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "tattoos", .text)
+                t.add(column: "piercings", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

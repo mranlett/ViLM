@@ -25,7 +25,7 @@ import Foundation
 /// The scalar profile fields sync reasons about (tags/AKAs/galleries always
 /// union and never conflict).
 public enum ActorSyncField: String, CaseIterable, Sendable {
-    case bio, homePage, gender, hairColor, birthYear, countryOfOrigin, rating
+    case bio, homePage, gender, hairColor, tattoos, piercings, birthYear, countryOfOrigin, rating
     // Career span (v17). Without these, syncing two libraries would leave
     // career data behind in whichever one happened to have it.
     case birthDate, careerSpanRaw, careerStartYear, careerEndYear, ageAtCareerStart
@@ -46,6 +46,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .homePage: return "Home Page"
         case .gender: return "Gender"
         case .hairColor: return "Hair Color"
+        case .tattoos: return "Tattoos"
+        case .piercings: return "Piercings"
         case .birthYear: return "Birth Year"
         case .countryOfOrigin: return "Country"
         case .rating: return "Rating"
@@ -66,6 +68,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .homePage: raw = profile.homePage
         case .gender: raw = profile.gender
         case .hairColor: raw = profile.hairColor
+        case .tattoos: raw = profile.tattoos
+        case .piercings: raw = profile.piercings
         case .birthYear: raw = profile.birthYear.map(String.init)
         case .countryOfOrigin: raw = profile.countryOfOrigin
         case .rating: raw = profile.rating.map(String.init)
@@ -88,6 +92,8 @@ public enum ActorSyncField: String, CaseIterable, Sendable {
         case .homePage: profile.homePage = value
         case .gender: profile.gender = value
         case .hairColor: profile.hairColor = value
+        case .tattoos: profile.tattoos = value
+        case .piercings: profile.piercings = value
         case .birthYear: profile.birthYear = value.flatMap(Int.init)
         case .countryOfOrigin: profile.countryOfOrigin = value
         case .rating: profile.rating = value.flatMap(Int.init)
