@@ -438,6 +438,15 @@ public class LibraryStore {
         if let sourceId, !sourceId.isEmpty { profile.enrichmentSourceId = sourceId }
         profile.enrichmentCheckedAt = Date()
         try saveEntityProfile(profile)
+
+        // The edge as well as the columns (v31). A studio confirmed as a side
+        // effect of matching a video is still a match, and leaving it column-
+        // only is how the id went missing on 51 of 62 studios.
+        if let sourceId, !sourceId.isEmpty, let source {
+            try recordMatch(NodeMatch(nodeId: id, source: source,
+                                      sourceId: sourceId, method: .name),
+                            isVideo: false)
+        }
     }
 
     public func fetchAllAssets() throws -> [Asset] {

@@ -133,6 +133,18 @@ final class VideoRefreshModel: ObservableObject {
             return
         }
 
+        // ⚠️ Backfills the match EDGE as it goes, and only where none exists.
+        //
+        // The fetch just succeeded against this id, which proves the identity
+        // resolves — but not HOW it was originally found, so the method stays
+        // `.backfill` rather than being upgraded to something this pass cannot
+        // know. A refresh must not make an old title guess look like a
+        // fingerprint.
+        if (try? store.matches(forVideo: asset.id).isEmpty) == true {
+            try? store.confirmVideoMatch(asset.id, source: provider.displayName,
+                                         sourceId: sourceId, method: .backfill)
+        }
+
         // ⚠️ knownTags empty and tags never applied — see `refreshesTags`.
         let changes = VideoEnrichmentReview.changes(for: asset, proposal: proposal)
         let fills = VideoRefreshPolicy.autoApplicable(changes)

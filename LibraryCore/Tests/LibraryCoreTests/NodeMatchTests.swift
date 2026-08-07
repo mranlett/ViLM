@@ -229,3 +229,103 @@ final class NodeMatchTests: XCTestCase {
         XCTAssertTrue(try store.matches(forVideo: asset.id).isEmpty)
     }
 }
+
+/// Writing the edge at MATCH time rather than only in a migration.
+///
+/// ⚠️ The single entry point exists because the two representations must not
+/// drift: every call site that set `enrichmentSourceId` by hand was a site that
+/// could forget the edge, and "forgot" is exactly how 1,287 nodes came to claim
+/// they were matched with nothing to look up.
+final class MatchAtWriteTimeTests: XCTestCase {
+
+    private var directory: URL!
+    private var store: LibraryStore!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory,
+                                                withIntermediateDirectories: true)
+        store = try LibraryStore(at: directory)
+    }
+
+    override func tearDownWithError() throws {
+        store = nil
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testConfirmingAnEntityWritesBothTheColumnsAndTheEdge() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Alice"))
+
+        try store.confirmEntityMatch("actor:Alice", source: "A Source",
+                                     sourceId: "a-1", method: .name)
+
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Alice"))
+        XCTAssertEqual(profile.enrichmentState, .matched)
+        XCTAssertEqual(profile.enrichmentSourceId, "a-1")
+        XCTAssertEqual(try store.matches(forEntity: "actor:Alice").first?.method, .name)
+    }
+
+    /// ⚠️ An id the library already holds is never replaced — the same rule
+    /// `confirmStudio` follows, because replacing one silently re-points a
+    /// confirmed match at something else.
+    func testConfirmingDoesNotReplaceAnIdAlreadyHeld() throws {
+        var p = EntityProfile(id: "actor:Alice")
+        p.enrichmentSourceId = "original"
+        try store.saveEntityProfile(p)
+
+        try store.confirmEntityMatch("actor:Alice", source: "A Source",
+                                     sourceId: "different", method: .name)
+
+        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Alice")?.enrichmentSourceId,
+                       "original")
+    }
+
+    /// 🚨 The regression this whole spec exists to prevent: a confirm that
+    /// writes the column and not the edge.
+    func testAConfirmedEntityNeverAppearsInTheMissingList() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Alice"))
+
+        try store.confirmEntityMatch("actor:Alice", source: "A Source",
+                                     sourceId: "a-1", method: .name)
+
+        XCTAssertTrue(try store.nodesMatchedWithoutAnEdge().entities.isEmpty)
+    }
+
+    /// Confirming a studio — the path that runs as a side effect of matching a
+    /// video, and the one that left 51 of 62 studios without an id.
+    func testConfirmingAStudioWritesAMatchEdge() throws {
+        try store.confirmStudio("Example Network", source: "A Source", sourceId: "s-1")
+
+        XCTAssertEqual(try store.matches(forEntity: "studio:Example Network").first?.sourceId,
+                       "s-1")
+    }
+
+    /// ⚠️ No id means no edge — the absence stays visible rather than being
+    /// papered over with an empty row.
+    func testConfirmingAStudioWithNoIdWritesNoEdge() throws {
+        try store.confirmStudio("Example Network", source: "A Source")
+
+        XCTAssertTrue(try store.matches(forEntity: "studio:Example Network").isEmpty)
+        XCTAssertEqual(try store.nodesMatchedWithoutAnEdge().entities,
+                       ["studio:Example Network"])
+    }
+
+    func testConfirmingAVideoWritesTheEdgeWithItsMethod() throws {
+        let name = "\(UUID().uuidString).mp4"
+        let asset = Asset(relativePath: name, fileName: name)
+        try store.insertAsset(asset)
+
+        try store.confirmVideoMatch(asset.id, source: "A Source",
+                                    sourceId: "v-1", method: .fingerprint)
+
+        XCTAssertEqual(try store.matches(forVideo: asset.id).first?.method, .fingerprint)
+    }
+
+    /// ⭐ An actor is matched by an exact name plus a disambiguation, which is
+    /// neither a title guess nor a cast search — and ranks between them.
+    func testAnExactNameMatchOutranksATitleGuessButNotAPersonsChoice() {
+        XCTAssertGreaterThan(MatchMethod.name.trust, MatchMethod.cast.trust)
+        XCTAssertLessThan(MatchMethod.name.trust, MatchMethod.operator.trust)
+    }
+}

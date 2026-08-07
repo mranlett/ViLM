@@ -136,6 +136,17 @@ final class StudioBatchMatchModel: ObservableObject {
                         updated.enrichmentSourceId = nil
                     }
                     try? store.saveEntityProfile(updated)
+
+                    // The match edge as well as the columns (v31).
+                    if case .applied = outcome, let sourceId = updated.enrichmentSourceId {
+                        try? store.recordMatch(
+                            NodeMatch(nodeId: updated.id, source: providerName,
+                                      sourceId: sourceId, method: .name),
+                            isVideo: false)
+                    } else if case .applied = outcome {} else {
+                        try? store.removeMatch(nodeId: updated.id,
+                                               source: providerName, isVideo: false)
+                    }
                     // The parent is written only once the studio itself has
                     // been saved — an edge to a row that does not exist yet is
                     // an edge pointing at nothing.

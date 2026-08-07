@@ -50,6 +50,46 @@ extension LibraryStore {
         }
     }
 
+    /// Records a match on a PROFILE — the columns and the edge together.
+    ///
+    /// ⭐ One entry point, because the two must not drift. Every call site that
+    /// set `enrichmentSourceId` by hand is a site that could forget the edge,
+    /// and "forgot" is exactly how 1,287 nodes ended up claiming to be matched
+    /// with nothing to look up.
+    ///
+    /// ⚠️ The columns are still written. They stay authoritative until a
+    /// per-node check shows the edges reproduce them, so writing only the edge
+    /// would make a node look unmatched to every existing reader.
+    public func confirmEntityMatch(_ entityId: String, source: String,
+                                   sourceId: String?, method: MatchMethod) throws {
+        guard var profile = try fetchEntityProfile(for: entityId) else { return }
+        profile.enrichmentState = .matched
+        profile.enrichmentSource = source
+        profile.enrichmentCheckedAt = Date()
+        // ⚠️ Never blanks an id this library holds — the same rule
+        // `confirmStudio` follows, and for the same reason: replacing one would
+        // silently re-point a confirmed match at something else.
+        if let sourceId, !sourceId.isEmpty, (profile.enrichmentSourceId ?? "").isEmpty {
+            profile.enrichmentSourceId = sourceId
+        }
+        try saveEntityProfile(profile)
+
+        if let sourceId, !sourceId.isEmpty {
+            try recordMatch(NodeMatch(nodeId: entityId, source: source,
+                                      sourceId: sourceId, method: method),
+                            isVideo: false)
+        }
+    }
+
+    /// The same for a video.
+    public func confirmVideoMatch(_ videoId: UUID, source: String,
+                                  sourceId: String?, method: MatchMethod) throws {
+        guard let sourceId, !sourceId.isEmpty else { return }
+        try recordMatch(NodeMatch(nodeId: videoId.uuidString, source: source,
+                                  sourceId: sourceId, method: method),
+                        isVideo: true)
+    }
+
     // MARK: - Reading
 
     /// Every source that has identified this node, newest first.

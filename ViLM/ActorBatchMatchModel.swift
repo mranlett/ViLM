@@ -145,6 +145,23 @@ final class ActorBatchMatchModel: ObservableObject {
                         updated.enrichmentSourceId = nil
                     }
                     try? store.saveEntityProfile(updated)
+
+                    // The match edge as well as the columns (v31). An actor is
+                    // matched by an EXACT name plus a disambiguation, which is
+                    // neither a title guess nor a cast search — see
+                    // `MatchMethod.name`.
+                    if case .applied = outcome, let sourceId = updated.enrichmentSourceId {
+                        try? store.recordMatch(
+                            NodeMatch(nodeId: updated.id, source: provider.displayName,
+                                      sourceId: sourceId, method: .name),
+                            isVideo: false)
+                    } else if case .applied = outcome {} else {
+                        // ⚠️ The edge goes when the id does. A non-match that
+                        // cleared the column but left the edge would leave the
+                        // graph asserting an identity the node no longer claims.
+                        try? store.removeMatch(nodeId: updated.id,
+                                               source: provider.displayName, isVideo: false)
+                    }
                 }
                 appliedProfile = nil
                 try? await Task.sleep(nanoseconds: delay)

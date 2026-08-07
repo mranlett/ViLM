@@ -333,6 +333,14 @@ struct StudioMatchReviewView: View {
         updated.enrichmentState = .matched
         updated.enrichmentSource = provider?.displayName
         updated.enrichmentSourceId = proposal.sourceId.value ?? chosen.id
+        // ⭐ `.operator`: the studio was chosen from a list by a person, which
+        // is stronger evidence than the name search that produced the list.
+        defer {
+            try? store.recordMatch(
+                NodeMatch(nodeId: updated.id, source: provider?.displayName ?? "unknown",
+                          sourceId: updated.enrichmentSourceId ?? "", method: .operator),
+                isVideo: false)
+        }
         updated.enrichmentCheckedAt = Date()
         try? store.saveEntityProfile(updated)
 

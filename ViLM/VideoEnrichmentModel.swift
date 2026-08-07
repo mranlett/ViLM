@@ -55,6 +55,11 @@ final class VideoEnrichmentModel: ObservableObject {
     /// How the match was found, shown so the operator can weigh it: an exact
     /// fingerprint deserves more trust than a name search.
     @Published private(set) var matchRoute: String?
+    /// ⭐ The route as a STORED fact rather than a sentence. `matchRoute` is
+    /// localised prose for the screen; this is what goes on the match edge, and
+    /// it is the thing the app used to compute, render with a green seal, and
+    /// then discard on dismissal.
+    private var matchMethod: MatchMethod?
     /// The candidate that was chosen, kept so the review screen can show its
     /// picture. Metadata alone frequently is not enough to be sure, and the
     /// image is what actually settles it.
@@ -184,6 +189,7 @@ final class VideoEnrichmentModel: ObservableObject {
             let hits = try await provider.match(perceptualHash: hash, distance: 0)
             if !hits.isEmpty {
                 matchRoute = "Matched by visual fingerprint"
+                matchMethod = .fingerprint
                 await present(hits)
                 return
             }
@@ -206,6 +212,7 @@ final class VideoEnrichmentModel: ObservableObject {
                                                      studio: asset.studios.first),
                !hits.isEmpty {
                 matchRoute = "Matched on cast — check this is the right scene"
+                matchMethod = .cast
                 await present(hits)
                 return
             }
@@ -219,6 +226,7 @@ final class VideoEnrichmentModel: ObservableObject {
         if title.count >= 3 {
             if let hits = try? await provider.search(title: title, year: nil), !hits.isEmpty {
                 matchRoute = "Matched on title — check this is the right scene"
+                matchMethod = .title
                 await present(hits)
                 return
             }
@@ -597,6 +605,19 @@ final class VideoEnrichmentModel: ObservableObject {
         let credits = VideoEnrichmentReview.credits(from: proposal, accepting: accepted)
         if !credits.isEmpty, let url = LibrarySession.shared.url(for: asset.id) {
             try? LibraryStore(at: url).recordCredits(credits, forVideo: asset.id)
+        }
+
+        // The match edge (v31), beside the columns `recordingOutcome` sets.
+        //
+        // ⭐ `.operator` when a person chose from a list, whatever route found
+        // the candidates. Someone looked at the picture and decided, and that
+        // is different evidence from the search that produced the shortlist —
+        // recording the route here would understate it.
+        if let sourceId = chosenCandidate?.id, let source = providerName,
+           let url = LibrarySession.shared.url(for: asset.id) {
+            let method: MatchMethod = canReturnToPicker ? .operator : (matchMethod ?? .operator)
+            try? LibraryStore(at: url).confirmVideoMatch(
+                asset.id, source: source, sourceId: sourceId, method: method)
         }
 
         return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,

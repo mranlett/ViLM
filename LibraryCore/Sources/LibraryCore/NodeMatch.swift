@@ -31,6 +31,12 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
     case cast
     /// A text search on the title. The weakest.
     case title
+    /// ⚠️ An EXACT name match, disambiguated where several people shared it.
+    /// The only route an actor or studio has — they have no fingerprint and no
+    /// cast — so without this they would all have to be recorded as `title`,
+    /// which understates a match that required an exact name AND a
+    /// disambiguation to survive.
+    case name
     /// A person chose it from a list. Trustworthy for a different reason than
     /// a fingerprint: someone looked.
     case `operator`
@@ -45,8 +51,9 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
     /// correct; it just carries no evidence that it is.
     public var trust: Int {
         switch self {
-        case .fingerprint: return 4
-        case .operator:    return 3
+        case .fingerprint: return 5
+        case .operator:    return 4
+        case .name:        return 3
         case .cast:        return 2
         case .backfill:    return 1
         case .title:       return 0
@@ -58,6 +65,7 @@ public enum MatchMethod: String, Codable, Equatable, Sendable, CaseIterable {
         case .fingerprint: return "visual fingerprint"
         case .cast:        return "cast"
         case .title:       return "title"
+        case .name:        return "exact name"
         case .operator:    return "your choice"
         case .backfill:    return "recorded before the method was"
         }

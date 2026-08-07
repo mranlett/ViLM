@@ -215,6 +215,17 @@ final class VideoBatchMatchModel: ObservableObject {
                         updated, state: state, source: provider.displayName,
                         sourceId: matchedSourceId)
                     try? store.updateAsset(updated)
+
+                    // The match edge as well as the columns (v31).
+                    //
+                    // ⭐ Always `.fingerprint` here: this loop only APPLIES on
+                    // the fingerprint route — cast and title findings are
+                    // queued for a person rather than written — so the method
+                    // is not a guess about which path was taken.
+                    if let sourceId = matchedSourceId {
+                        try? store.confirmVideoMatch(updated.id, source: provider.displayName,
+                                                     sourceId: sourceId, method: .fingerprint)
+                    }
                     if !pendingCredits.isEmpty {
                         try? store.recordCredits(pendingCredits, forVideo: updated.id)
                     }
