@@ -31,6 +31,21 @@ struct ActorEnrichmentSheet: View {
     /// ten candidates and the text tells you nothing.
     @State private var examining: PluginCandidate?
 
+    /// The name actually being searched for, which starts as the library's
+    /// spelling and is editable.
+    ///
+    /// ⭐ Because the library's spelling is frequently the problem. A typo or a
+    /// misspelling returns nothing, or returns the wrong people — and the fix
+    /// was to cancel out, open the profile, rename globally, and start the
+    /// match again. Four steps to correct one letter, at exactly the moment the
+    /// operator can see it is wrong.
+    ///
+    /// ⚠️ Searching a different spelling changes NOTHING in the library. The
+    /// rename happens only if a match is then accepted, through the existing
+    /// canonical-name field — so trying three spellings costs nothing.
+    @State private var searchTerm: String = ""
+    @FocusState private var searchFieldFocused: Bool
+
     /// Show the proposed photos large.
     ///
     /// The default grid packs many small tiles, which is right for ticking
@@ -111,7 +126,12 @@ struct ActorEnrichmentSheet: View {
                         }
                     }
                 }
-                .task { await model.search(name: actorName) }
+                .task {
+                    // Seeded once. Re-entering the sheet keeps whatever the
+                    // operator last typed for this actor.
+                    if searchTerm.isEmpty { searchTerm = actorName }
+                    await model.search(name: actorName)
+                }
         }
         .frame(minWidth: 380, minHeight: 480)
         .sheet(item: $examining) { candidate in
@@ -185,7 +205,7 @@ struct ActorEnrichmentSheet: View {
     private var content: some View {
         switch model.phase {
         case .idle, .searching:
-            progress("Searching for \(actorName)…")
+            progress("Searching for \(searchedName)…")
 
         case .fetching:
             progress("Loading details…")
@@ -205,9 +225,11 @@ struct ActorEnrichmentSheet: View {
                 ContentUnavailableView(
                     "No Matches",
                     systemImage: "person.fill.questionmark",
-                    description: Text("\(model.provider.displayName) has no record under “\(actorName)”. "
-                                      + "If this actor is known by another name, try renaming or adding an AKA.")
+                    description: Text("\(model.provider.displayName) has no record under “\(searchedName)”. "
+                                      + "If the name is misspelled here, correct it below and search again.")
                 )
+                respellRow
+                    .frame(maxWidth: 420)
                 markUnmatchableButton
             }
 
@@ -280,10 +302,18 @@ struct ActorEnrichmentSheet: View {
                     .buttonStyle(.plain)
                 }
             } header: {
-                Text("\(candidates.count) performers match “\(actorName)”")
+                Text("\(candidates.count) performers match “\(searchedName)”")
             } footer: {
                 Text("Pick the right one. Tap a photo count to see all of someone's pictures. "
                      + "Nothing is changed until you review and apply.")
+            }
+
+            Section {
+                respellRow
+            } header: {
+                Text("Wrong person?")
+            } footer: {
+                Text("If none of these is right, the spelling here may be. Searching a different one changes nothing until you apply.")
             }
 
             Section {
@@ -292,6 +322,50 @@ struct ActorEnrichmentSheet: View {
                 Text("Use this when none of these is the right person.")
             }
         }
+    }
+
+    /// Search under a different spelling.
+    ///
+    /// Offered in the two phases where a bad spelling reveals itself: no
+    /// matches at all, and a list of candidates that are plainly other people.
+    @ViewBuilder
+    private var respellRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                TextField("Search for a different spelling", text: $searchTerm)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($searchFieldFocused)
+#if os(iOS)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+#endif
+                    .onSubmit { Task { await research() } }
+                Button("Search") { Task { await research() } }
+                    .disabled(!canResearch)
+            }
+            Text(searchTerm.trimmingCharacters(in: .whitespacesAndNewlines) == actorName
+                 ? "Correct a typo here rather than renaming the actor first — nothing changes in your library until you apply a match."
+                 : "Searching “\(searchTerm)” instead of “\(actorName)”. Applying a match can rename the actor to the source's spelling.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    /// What the picker and progress lines should NAME. Saying "3 performers
+    /// match Rowena Calder" while the results came from "Rowena Tiplin" is a
+    /// screen lying about the question it asked.
+    private var searchedName: String {
+        let trimmed = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? actorName : trimmed
+    }
+
+    private var canResearch: Bool {
+        let trimmed = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != actorName
+    }
+
+    private func research() async {
+        searchFieldFocused = false
+        await model.search(name: searchTerm.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Records the operator's judgement that this person is not in the source.
