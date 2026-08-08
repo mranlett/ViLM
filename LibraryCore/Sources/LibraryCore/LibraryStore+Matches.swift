@@ -272,6 +272,24 @@ extension LibraryStore {
         }
     }
 
+    /// Entities whose identity was HANDED DOWN, never looked up.
+    ///
+    /// 🚨 `propagateIdentities` learns who someone is from a matched video's
+    /// cast links — which is what it is for — and fetches nothing. So these
+    /// carry an id and no bio, links, photos or career span, while their state
+    /// reads `matched` and every enrichment tool skips them.
+    ///
+    /// ⭐ `.linked` is a precise signal rather than a heuristic: any later
+    /// lookup through the actor path records `.name` over it, so a row still
+    /// reading `.linked` has never been fetched.
+    public func entityIdsAwaitingEnrichment() throws -> Set<String> {
+        try dbQueue.read { db in
+            Set(try String.fetchAll(db, sql: """
+                SELECT entity_id FROM entity_match WHERE method = ?
+                """, arguments: [MatchMethod.linked.rawValue]))
+        }
+    }
+
     /// The missing-identity worklist, with a route back for each entry.
     ///
     /// ⚠️ Counts videos across BOTH representations. Most of a library is still

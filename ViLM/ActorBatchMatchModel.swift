@@ -94,11 +94,19 @@ final class ActorBatchMatchModel: ObservableObject {
             let profiles = examinable(in: store)
             existingProfileIds = Set(((try? store.fetchAllEntityProfiles()) ?? []).map(\.id))
 
+            // ⭐ Actors whose identity was handed down by a video match and
+            // never looked up. They read as `matched` and hold nothing else, so
+            // without this they are skipped forever. Read ONCE per library
+            // rather than per actor — it is a whole-table query.
+            let awaitingEnrichment = (try? store.entityIdsAwaitingEnrichment()) ?? []
+
             for profile in profiles {
                 if cancelled { break }
                 current = displayName(profile)
 
-                if let reason = ActorBatchPolicy.skipReason(for: profile) {
+                if let reason = ActorBatchPolicy.skipReason(
+                    for: profile,
+                    identityNeedsEnrichment: awaitingEnrichment.contains(profile.id)) {
                     report.record(.skipped(reason: reason))
                     continue
                 }

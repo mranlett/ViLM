@@ -50,7 +50,24 @@ public enum ActorBatchPolicy {
     /// spends a rate-limited request to reach the same dead end. Left out, a
     /// library accumulating ambiguities gets slower every run while doing no
     /// more work.
-    public static func skipReason(for profile: EntityProfile) -> String? {
+    /// - Parameter identityNeedsEnrichment: this actor was IDENTIFIED without
+    ///   ever being fetched — their id was handed down by a matched video's
+    ///   cast links rather than looked up.
+    ///
+    ///   🚨 Such an actor is marked `matched` and has nothing else: no bio, no
+    ///   links, no photos, no career span. Skipping them as "already matched"
+    ///   is how 394 identified actors in a real library ended up permanently
+    ///   un-enriched — the identity arrived, the state said done, and the tool
+    ///   that would have filled the rest refused to look.
+    ///
+    ///   ⭐ Examining them is cheap and decision-free: the id is already known,
+    ///   so it is one direct fetch with no search and no disambiguation.
+    public static func skipReason(for profile: EntityProfile,
+                                  identityNeedsEnrichment: Bool = false) -> String? {
+        // ⚠️ Checked BEFORE the state switch. The state genuinely is `matched`
+        // — that is not wrong, it is incomplete — so the exception has to
+        // precede it rather than being folded into it.
+        if identityNeedsEnrichment, profile.enrichmentState == .matched { return nil }
         switch profile.enrichmentState {
         case .matched: return "already matched"
         case .unmatchable: return "you ruled this one out"
