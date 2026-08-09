@@ -52,6 +52,43 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
 
     public var minVideos: Int? = nil
     public var maxVideos: Int? = nil
+    /// Which age a range means.
+    ///
+    /// ⭐ STORED with the filter, not implied by it. The operator's reasoning:
+    /// *"A person may have been 20 when they started, 22 at the time of filming
+    /// the video in question, and 47 today. All three data points may be
+    /// interesting."* They answer different questions and none substitutes for
+    /// another — so the range needs to say which one it means, and a saved
+    /// filter has to carry that meaning with it rather than inherit whatever
+    /// the default happens to be later.
+    ///
+    /// ⚠️ Age at FILMING is deliberately absent. It selects videos, not people
+    /// — "show me videos where she was 20–25" — so it lives on the video panel
+    /// as `AssetFilterCriteria.minAgeAtRelease`. Putting it here would be a
+    /// category error, and it needs a release date the library mostly lacks.
+    public enum AgeMode: String, CaseIterable, Equatable, Codable, Sendable {
+        /// How old they are now. 1,230 actors have a birth year.
+        case current
+        /// How old they were when their career began. 1,100 have one.
+        case atCareerStart
+
+        public var displayName: String {
+            switch self {
+            case .current:        return "Age now"
+            case .atCareerStart:  return "Age at career start"
+            }
+        }
+
+        /// What the range is asking, said plainly under the control.
+        public var question: String {
+            switch self {
+            case .current:        return "How old is this person today?"
+            case .atCareerStart:  return "Who started young?"
+            }
+        }
+    }
+
+    public var ageMode: AgeMode = .current
     public var minAge: Int? = nil
     public var maxAge: Int? = nil
 
@@ -74,7 +111,7 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
         case matchEmptyHairColor, matchEmptyCountry, matchEmptyBirthYear
         case minRating
         case tagsLogic, selectedTags
-        case minVideos, maxVideos, minAge, maxAge
+        case minVideos, maxVideos, minAge, maxAge, ageMode
         case sortBy, sortDescending
     }
 
@@ -103,6 +140,10 @@ public struct ActorFilterCriteria: Equatable, Codable, Sendable {
         maxVideos = try c.decodeIfPresent(Int.self, forKey: .maxVideos)
         minAge = try c.decodeIfPresent(Int.self, forKey: .minAge)
         maxAge = try c.decodeIfPresent(Int.self, forKey: .maxAge)
+        // ⚠️ Absent means CURRENT age — that is what every filter saved before
+        // the mode existed meant, so an old smart collection keeps answering
+        // the question it was built to answer.
+        ageMode = try c.decodeIfPresent(AgeMode.self, forKey: .ageMode) ?? .current
         sortBy = try c.decodeIfPresent(SortOption.self, forKey: .sortBy) ?? .name
         sortDescending = try c.decodeIfPresent(Bool.self, forKey: .sortDescending) ?? false
     }

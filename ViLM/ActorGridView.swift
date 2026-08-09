@@ -264,17 +264,27 @@ struct ActorGridView: View {
         if let maxVid = filterCriteria.maxVideos {
             result = result.filter { actor in assetsCount(for: actor) <= maxVid }
         }
-        if let minAge = filterCriteria.minAge {
-            result = result.filter { actor in
-                let profile = actorProfiles[actor: actor]
-                return (profile?.age ?? 0) >= minAge
+        // ⭐ The range means whatever the filter says it means. `age` and
+        // `careerStartAge` answer different questions, and the mode travels
+        // with a saved filter so it keeps answering the one it was built for.
+        //
+        // ⚠️ An actor the chosen mode cannot answer for is EXCLUDED, not
+        // treated as zero. `(age ?? 0) >= minAge` quietly admitted every actor
+        // with no birth year into a "18 and over" filter.
+        func ageForFilter(_ actor: String) -> Int? {
+            let profile = actorProfiles[actor: actor]
+            switch filterCriteria.ageMode {
+            case .current:       return profile?.age
+            case .atCareerStart: return profile?.careerStartAge
             }
         }
+        if let minAge = filterCriteria.minAge {
+            result = result.filter { (ageForFilter($0) ?? -1) >= minAge }
+        }
         if let maxAge = filterCriteria.maxAge {
-            result = result.filter { actor in
-                let profile = actorProfiles[actor: actor]
-                if let age = profile?.age { return age <= maxAge }
-                return false
+            result = result.filter { age in
+                guard let value = ageForFilter(age) else { return false }
+                return value <= maxAge
             }
         }
         

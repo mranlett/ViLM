@@ -21,6 +21,13 @@ struct SidebarView: View {
     // Loaded once at the ContentView level and shared across every screen
     // that needs entity profiles, instead of re-fetching independently here.
     let entityProfiles: EntityProfileIndex
+    /// Every profile photo filename across the open libraries.
+    ///
+    /// ⚠️ Passed in rather than listed here. `ContentView` already unions the
+    /// directories on each profile reload; listing them again would put a
+    /// filesystem walk on the sidebar's recompute, which runs on every asset
+    /// change.
+    var profileImageFileNames: Set<String> = []
     let onApplyFilters: () -> Void
     /// Multi-library session: attach a picked library / detach an open one.
     var onAttachLibrary: (URL) -> Void = { _ in }
@@ -66,6 +73,16 @@ struct SidebarView: View {
     @State private var studioCounts: [String: Int] = [:]
     @State private var reviewProgress: Double = 0
     @State private var unreviewedCount: Int = 0
+    /// Actors with no photograph anywhere, for the badge beside Actors Gallery.
+    ///
+    /// ⚠️ COMPUTED, never assumed. A batch enrichment run filled 137 photo
+    /// URLs, so any figure written down goes stale the moment one is added.
+    ///
+    /// ⚠️ Federation-aware by construction: `entityProfiles` is the merged view
+    /// across every open library and `profileImageFileNames` is their union, so
+    /// an actor whose only photo lives in an attachment does not read as
+    /// photo-less.
+    @State private var missingPhotoCount: Int = 0
 
     private func recomputeDerivedData() {
         var actorSet = Set<String>()
@@ -130,6 +147,16 @@ struct SidebarView: View {
         tagCounts = newTagCounts
         studioCounts = newStudioCounts
         unreviewedCount = unreviewed
+        // 🚨 The filename comes from the profile's OWN id — photo files are
+        // named after it, so deriving one from the name finds nothing once ids
+        // are uids and every actor would read as photo-less.
+        missingPhotoCount = entityProfiles.actors.reduce(into: 0) { count, profile in
+            if profile.photoUrl != nil { return }
+            let safeId = ProfileImageNaming.safeId(for: profile.id)
+            let hasLocal = profileImageFileNames.contains("\(safeId).jpg")
+                || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
+            if !hasLocal { count += 1 }
+        }
         reviewProgress = assets.isEmpty ? 0 : Double(reviewedCount) / Double(assets.count)
     }
 
@@ -150,7 +177,12 @@ struct SidebarView: View {
                     onApplyFilters()
                 }
 
-                sidebarRow(title: "Actors Gallery", icon: "person.2.crop.square.stack", isSelected: selection == [.actorGallery]) {
+                // ⭐ Mirrors the unreviewed-videos badge exactly — same row
+                // helper, same placement, same styling. A consistency fix, not
+                // a new pattern.
+                sidebarRow(title: "Actors Gallery", icon: "person.2.crop.square.stack",
+                           isSelected: selection == [.actorGallery],
+                           count: missingPhotoCount > 0 ? missingPhotoCount : nil) {
                     selection = [.actorGallery]
                     onApplyFilters()
                 }

@@ -38,32 +38,48 @@ struct ActorFilterBuilderView: View {
     @State private var isHairColorsExpanded = false
     @State private var isCountriesExpanded = false
     @State private var isTagsExpanded = false
+    @State private var isRepairExpanded = false
+
+    /// How many maintenance filters are on, shown on the collapsed accordion.
+    private var repairFilterCount: Int {
+        var n = 0
+        if criteria.showMissingPhotosOnly { n += 1 }
+        if criteria.showMissingGenderOnly { n += 1 }
+        if criteria.enrichment != .any { n += 1 }
+        return n
+    }
     
     @State private var tagAlphaFilter: Character? = nil
     
     var body: some View {
         NavigationStack {
             List {
-                Section("Status Filters") {
-                    Toggle("Missing Photos Only", isOn: $criteria.showMissingPhotosOnly)
-                    Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
-                }
-
+                // ⭐ Data repair, collapsed. These are maintenance tools —
+                // wanted often, but never at the same time as browsing — so
+                // they keep their place at the top and give up their space.
                 Section {
-                    Picker("Lookup Result", selection: $criteria.enrichment) {
-                        ForEach(ActorFilterCriteria.EnrichmentFilter.allCases, id: \.self) { option in
-                            Text(option.displayName).tag(option)
+                    DisclosureGroup(isExpanded: $isRepairExpanded) {
+                        Toggle("Missing Photos Only", isOn: $criteria.showMissingPhotosOnly)
+                        Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
+                        Picker("Lookup Result", selection: $criteria.enrichment) {
+                            ForEach(ActorFilterCriteria.EnrichmentFilter.allCases, id: \.self) { option in
+                                Text(option.displayName).tag(option)
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text("Find problems")
+                            Spacer()
+                            // The count is the reason to open it — a collapsed
+                            // accordion that says nothing gets ignored.
+                            if repairFilterCount > 0 {
+                                Text("\(repairFilterCount)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
-                } header: {
-                    Text("External Lookup")
                 } footer: {
-                    // A separate axis from the completeness filters above: an
-                    // actor can be fully filled in with an unresolved lookup, or
-                    // sparse and never checked. "Not yet checked" is not a
-                    // failure, which is why it is its own option.
-                    Text("Find actors an external lookup could not resolve. "
-                         + "“Needs attention” covers everything waiting on you.")
+                    Text("Maintenance filters. “Needs attention” covers everything waiting on you.")
                 }
 
                 Section("Minimum Rating") {
@@ -83,6 +99,23 @@ struct ActorFilterBuilderView: View {
                     }
                 }
                 
+                // ⭐ Third, not last. A search is almost always a search FOR
+                // a tag — gender has four values, hair eleven, country a
+                // sortable list — so search earns its place here and nowhere
+                // else. A provider vocabulary runs ten thousand long, which is
+                // what makes the alphabet picker load-bearing rather than
+                // decorative.
+                DisclosureGroup("Tags", isExpanded: $isTagsExpanded) {
+                    AlphaPickerView(filter: $tagAlphaFilter)
+                        .padding(.vertical, 4)
+                    filterSection(
+                        items: allUniqueTags,
+                        filter: tagAlphaFilter,
+                        logicBinding: $criteria.tagsLogic,
+                        selectionBinding: $criteria.selectedTags
+                    )
+                }
+
                 DisclosureGroup("Gender", isExpanded: $isGendersExpanded) {
                     multiSelectionSection(
                         items: allUniqueGenders,
@@ -131,7 +164,17 @@ struct ActorFilterBuilderView: View {
                     }
                 }
                 
-                Section("Age Range") {
+                Section {
+                    // ⭐ ONE control with a mode, not three range sliders.
+                    // Three would make the age filter the largest thing in a
+                    // panel this change exists to declutter.
+                    Picker("Measure", selection: $criteria.ageMode) {
+                        ForEach(ActorFilterCriteria.AgeMode.allCases, id: \.self) {
+                            Text($0.displayName).tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
                     Toggle("No Date of Birth", isOn: $criteria.matchEmptyBirthYear)
                     HStack {
                         Picker("Min", selection: Binding(get: { criteria.minAge ?? -1 }, set: { criteria.minAge = $0 == -1 ? nil : $0 })) {
@@ -157,18 +200,14 @@ struct ActorFilterBuilderView: View {
                     // An actor with no DOB has no age, so a range can't apply.
                     .disabled(criteria.matchEmptyBirthYear)
                     .opacity(criteria.matchEmptyBirthYear ? 0.4 : 1)
+                } header: {
+                    Text("Age")
+                } footer: {
+                    // Says which question the range is asking, because the two
+                    // modes look identical once a range is set.
+                    Text(criteria.ageMode.question)
                 }
                 
-                DisclosureGroup("Tags", isExpanded: $isTagsExpanded) {
-                    AlphaPickerView(filter: $tagAlphaFilter)
-                        .padding(.vertical, 4)
-                    filterSection(
-                        items: allUniqueTags,
-                        filter: tagAlphaFilter,
-                        logicBinding: $criteria.tagsLogic,
-                        selectionBinding: $criteria.selectedTags
-                    )
-                }
             }
             .searchable(text: $searchText, prompt: "Search filters")
             .navigationTitle("Actor Filters")

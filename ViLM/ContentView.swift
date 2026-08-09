@@ -546,6 +546,7 @@ struct ContentView: View {
                 assets: assets,
                 libraryURL: selectedLibraryURL,
                 entityProfiles: entityProfiles,
+                profileImageFileNames: profileImageFileNames,
                 onApplyFilters: {},
                 onAttachLibrary: { attachLibrary(at: $0) },
                 onDetachLibrary: { detachLibrary(at: $0) },
