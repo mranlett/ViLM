@@ -3,7 +3,7 @@
 
 ---
 spec: "Tag Intelligence — classification, aliases and descriptions from the source"
-status: In Review
+status: Draft
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Tag-Intelligence-classification-aliases-and-descriptions-from-the-source-3b7adccaf428815aa2f1d91ac7c4b07f
@@ -11,7 +11,15 @@ notion: https://app.notion.com/p/Tag-Intelligence-classification-aliases-and-des
 
 # Tag Intelligence — classification, aliases and descriptions from the source
 
-> ⚠️ **Status: In Review — awaiting Human Operator approval** (Constitution Art. II).
+> ⏸️ **PARKED 2026-08-09, by the Human Operator.** Not rejected — correct and not yet worth building.
+> 
+> All 72 tags are classified and nothing is pending, so the manual work this was ranked first to remove does not exist. Its value is entirely prospective.
+> 
+> ⭐ **What would revive it:** importing a provider vocabulary. The tag-card design already anticipates one "ten thousand long", and arriving pre-classified is what would make this valuable rather than merely available.
+> 
+> ⚠️ **One cheap thing worth doing while parked:** sample `queryTagCategories`. It takes no arguments and returns the whole taxonomy, so it costs one call and answers whether the PEOPLE/SCENE/ACTION mapping holds against our 72 at all. The ecosystem survey found nobody else requests `category { group }`, so its population rate is unestablished — and if the mapping does not hold, this spec is wrong rather than merely early.
+> 
+> Audit findings from 2026-08-09 are left unaddressed deliberately; they belong with whoever revives it.
 > 
 > Report items **1.1** (classification) and half of **1.5** (aliases), plus `Tag.description`. Grouped because all three feed the same two surfaces — the tag vocabulary and Repair Tag Spelling — and share one selection set.
 ## 🚨 Read this before scheduling it: the report ranked this FIRST, and the measurement says otherwise

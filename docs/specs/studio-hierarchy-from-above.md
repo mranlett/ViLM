@@ -25,7 +25,13 @@ Not a library-wide sweep. ⚠️ Pulling every imprint of every network would cr
 | Create the profile | The hierarchy is complete and browsable, but the studio list fills with names the operator owns nothing from |
 | Create nothing, show the gap | Honest, and the hierarchy stays partial |
 | Create, and mark as "not in your library" | Complete AND distinguishable, at the cost of a new state |
-🔴 **Recommend the third.** The orphan audit already tolerates a parentless network, so a childless-but-known imprint is not a new problem — but it must be visibly different from a studio you have, or the library appears to contain things it does not. ⚠️ This is the decision the feature turns on.
+✅ **DECIDED 2026-08-09 — create and mark.** The Human Operator chose the third option.
+The hierarchy is complete and browsable, and an imprint the library owns nothing from is visibly distinct from one it does. ⚠️ The marking is not decoration: without it the studio list would imply the library contains things it does not, which is the same class of quiet wrongness this project keeps finding.
+### What the mark has to survive
+- **Orphan audit.** A known-but-empty imprint has no videos and no children, which is precisely the shape the orphan audit offers to DELETE. 🚨 It must be excluded, or the next cleanup silently undoes this feature. The audit already spares a parentless network for the same kind of reason.
+- **Counts.** "460 studios" must not quietly become "620 studios" including ones you own nothing from. Any count the operator reads has to say which it means.
+- **Its own removal.** ❓ If the operator does not want an imprint listed, they need a way to drop it — and re-fetching the network must not bring it straight back. Recommend the existing tombstone, which already answers exactly this for every other entity.
+- **Acquiring videos.** When a video from that imprint finally arrives, the mark clears by itself. It is derived from "has no local videos", not stored as a state to be maintained.
 ## D2 — Cycle refusal already exists and is not optional
 `studio_parent` already refuses a studio that would become its own ancestor, and carries the path so the message can say which chain closed the loop. ⚠️ Arriving hierarchy is **untrusted input** and goes through the same gate — a source is perfectly capable of describing a cycle.
 ## D3 — Aliases feed Fix Duplicate Studios
@@ -39,6 +45,11 @@ Same shape as tag aliases: a **candidate for review**, never an automatic merge.
 - **H4** — An imprint with no local videos is distinguishable from one with them.
 - **H5** — A studio alias is offered to Fix Duplicate Studios and never merges on its own.
 - **H6** — Fetching the same network twice adds nothing the second time.
+## ⚠️ Added after review 2026-08-09
+Two gaps the auditor found, both real:
+**The matching key is undefined.** An arriving imprint has to be resolved against studios already held, and the spec never said by what. 🔴 By IDENTITY — the name triple — not by the source id and not by raw string equality, because that is what `NodeResolver` already uses everywhere else and a second rule would drift from it.
+- **H7** — An arriving imprint matching a locally RENAMED studio resolves to the local row and does not create a duplicate under the source's spelling.
+**Alias creation behaviour was unstated.** An alias naming a studio the library does not hold must NOT create one; an alias is a spelling, not an entity.
+- **H8** — An alias with no corresponding local studio creates nothing and is reported, not silently discarded.
 ## ❓ Open — Human Operator
-1. **D1** — which of the three treatments for an imprint you own nothing from?
-2. Should this run for a studio FAMILY (a network and everything beneath it) in one action, or strictly one level at a time? Recommend one level — depth is where a cycle or an explosion of imprints would appear.
+1. Should this run for a studio FAMILY (a network and everything beneath it) in one action, or strictly one level at a time? 🔴 Recommend **one level** — depth is where a cycle or an explosion of imprints would appear, and one level at a time keeps both visible before they compound.
