@@ -42,6 +42,13 @@ Both fields carry it: the operator's says it is never transmitted; the source's 
 ## D3 — Attribution travels with the text
 Text from a source is attributed, the way `enrichmentSource` already attributes everything else. A description with no provenance becomes indistinguishable from something the operator wrote — which is the confusion this whole spec exists to prevent.
 ❓ **Open — one field or two?** A single `sourceDescription` plus the existing `enrichmentSource` is enough while there is one source per video. Recommend one field; revisit only if a video can be matched in two sources at once, which `video_match`'s (video, source) key already permits.
+### 🚨 Corrected after review — D3 and S5 contradicted each other
+Reusing `enrichmentSource` for attribution is WRONG, and the auditor found why. Sequence: source A supplies a description; later a match against source B supplies none. S5 says leave the text alone. `enrichmentSource` now reads B. **The description is A's text attributed to B** — silently, and with no way to notice.
+🔴 So the description carries its OWN provenance: which source gave *this text*, and when. Not the record's general `enrichmentSource`, which describes the last match rather than the text.
+⭐ That is the same rule the project already applies everywhere — `marksAsOf` pairs a description with the date it was true, and provenance travels with the value rather than with the row.
+- **S8** — A description keeps its own source attribution when a later match from a DIFFERENT source supplies none.
+- **S9** — A description supplied by source B replaces A's, and the attribution changes with it.
+❓ **Still open:** can a source WITHDRAW a description — is an absent field distinguishable from an explicit null? If the plugin cannot tell them apart, S5 is the only safe behaviour and erroneous text can never be cleared by a re-match, only by hand. Worth confirming against the schema before building.
 ## D4 — It is a proposal, not an assignment
 ⚠️ It goes through the same review as every other proposed field: shown, tickable, refusable. A description that appeared without being accepted would be the first field in the app to write itself, and the review surface exists precisely so nothing does.
 ## Tier 0.2 — `releaseYear` is mapped and never read
@@ -57,6 +64,12 @@ A latent defect rather than a current loss. Our source supplies full dates, so `
 - **S5** — A source supplying no description leaves the field alone rather than blanking it.
 - **S6** — A second match from the same source replaces the source's description and still does not touch the operator's note.
 - **S7** — A year-only release value does not become `YYYY-01-01`, and is not silently dropped either.
+### ⚠️ Where "not silently dropped" actually lands — added after review 2026-08-09
+The auditor was right that S7 could not be implemented or verified as written: it required a gap to be "reported" without naming an observable destination, so a log line and a visible warning would both pass.
+🔴 **The destination is the enrichment review, as an unaccepted proposed field.** Not a log, not telemetry. The review surface already exists to show what a source offered and what was taken, and a value we deliberately refused to store is exactly that — something offered and not taken.
+- **S7a** — A year-only release value appears in the review as offered-but-unusable, naming the year.
+- **S7b** — It cannot be accepted; there is no path from that row to a stored `releaseDate`.
+- **S7c** — Nothing is written to `releaseDate` for that video, and no other field is disturbed.
 ## ✅ Decisions — 2026-08-09
 The Human Operator accepted the recommendations as written. Recorded here as decisions rather than left as questions.
 1. **D1 — no backfill up front.** Ship the field, let descriptions arrive with new matches, and decide a *Refresh Matched Videos* run against how many actually populate. ⚠️ Sequencing 1,378 requests behind an unproven field is the wrong order, and the run remains available at any time.

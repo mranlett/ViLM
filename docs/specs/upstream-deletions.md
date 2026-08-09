@@ -18,7 +18,7 @@ notion: https://app.notion.com/p/Upstream-Deletions-tell-me-when-a-match-has-gon
 🚨 **A match can go stale silently.** A record deleted upstream leaves this library holding an identity that no longer resolves to anything, and nothing would ever say so. The library keeps reporting the node as matched, `Match All Actors` keeps skipping it, and the gap-against-the-source feature keeps comparing against an id that is gone.
 The source publishes a `deleted` flag on every type we read. We do not request it.
 ## ⭐ Why this one first
-It is the cheapest item in the whole report — one field added to four selection sets — and it is the only one that closes a **silent** failure rather than adding information. This project's recurring defect shape is not "the app did something wrong", it is "the app reported success while doing nothing": the studio anti-join that re-minted every launch, two graph audits that reported a clean library while seeing none of it, a sync that imported nothing and said it worked. A dangling match is the same shape.
+It is the cheapest item in the whole report — ⚠️ TWO fields added to four selection sets, `deleted` and the forwarding pointer, since D1 adopts both — and it is the only one that closes a **silent** failure rather than adding information. This project's recurring defect shape is not "the app did something wrong", it is "the app reported success while doing nothing": the studio anti-join that re-minted every launch, two graph audits that reported a clean library while seeing none of it, a sync that imported nothing and said it worked. A dangling match is the same shape.
 ## 📊 Scale, measured on the drive 2026-08-09
 |  |  |
 | --- | --- |
@@ -47,6 +47,22 @@ An audit, because that is the established shape for "here is something wrong tha
 - **U4** — Clearing a stale match is an explicit action, and it removes the match edge and the columns together — the half-cleared state is what `Missing Identities` exists to find.
 - **U5** — A node never matched at all does not appear in this audit; it belongs to the identity-gap worklist.
 - **U6** — The flag is read on all four types, not only the one it was first added for.
+### ⚠️ Persistence and resolution — added after review 2026-08-09
+Two gaps the auditor found, both real:
+**The flag has to be STORED, not just observed.** D4 says it rides along on fetches the app already makes — but the audit is opened later, so a flag seen during a fetch and not persisted is a flag the audit never sees. Nothing in U1–U6 required saving it.
+- **U7** — A `deleted` flag seen during any fetch is persisted, and appears in the audit on a later launch with no further network access.
+- **U8** — The as-of is stored with it. "Deleted upstream" with no date cannot be aged, and a stale flag is indistinguishable from a fresh one.
+**A merge must be resolvable, or the audit is a dead end.** D3 says the right action is to re-point rather than clear, and no criterion required that action to exist — the operator would be shown a finding they cannot act on.
+- **U9** — Accepting a merge re-points the local match to the forwarding id, in one transaction, and the finding clears.
+- **U10** — Refusing it changes nothing, and the finding remains.
+### 🚨 Corrected after review — U4 contradicted Decision 3
+U4 says clearing a stale match removes "the match edge and the columns together". Decision 3 says keep the old source id so the deletion stays auditable. **Both cannot hold** — the columns are where the id lives.
+🔴 Resolution: the id is preserved on the AUDIT RECORD, not on the profile. Clearing a match must leave no half-cleared node — that is precisely the state `Missing Identities` exists to find — so the profile is cleared completely and the history lives beside the finding.
+- **U11** — After clearing, the profile carries no match edge and no source columns; a subsequent `Missing Identities` run does not flag it.
+- **U12** — The audit can still answer "what was this matched to, and when did it go" after the clear.
+### ⚠️ And a flag must be able to go away
+Also missing: nothing said what happens when a record flagged deleted comes BACK. Upstream deletions are reversible — a moderator restores a record, a merge is undone — and a flag that only ever accumulates would leave permanent false findings.
+- **U13** — A successful fetch of a valid, undeleted record clears an existing local deleted flag.
 ## ✅ Decisions — 2026-08-09
 The Human Operator accepted the recommendations as written.
 1. **D3 — adopt the forwarding pointer WITH the flag.** Shipping `deleted` alone would give the audit bad advice: it would send the operator to re-match by hand something the source has already answered. The pointer changes what this audit *recommends*, so it belongs here. ⚠️ The duplicate-merge TOOLING of report 1.4 stays separate — it feeds a different existing tool and has its own decisions.
