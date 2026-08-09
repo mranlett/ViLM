@@ -197,11 +197,19 @@ final class PreferenceScoringTests: XCTestCase {
     ///
     /// ⚠️ Ordering, not identical scores — Elo is path-dependent in the exact
     /// numbers and pretending otherwise would be asserting something false.
-    /// What must hold is that the ranking does not depend on the order the
-    /// operator happened to play in, which is the property a leaderboard rests
-    /// on. This is also why the update factor is constant: a K that shrinks
-    /// with a contender's own history would make the result depend on when
-    /// each comparison arrived.
+    ///
+    /// 🚨 And the guarantee is WEAKER than the spec's T10 implies, now that the
+    /// update factor decays with experience. A factor that depends on how many
+    /// comparisons each side has had ALREADY makes the arithmetic depend on
+    /// when each comparison arrived, so strict order-independence is gone. What
+    /// survives — and what a leaderboard actually needs — is that contenders
+    /// whose true standing differs still come out in the same order. Two
+    /// genuinely indistinguishable contenders may swap, and that is honest
+    /// rather than a defect: they are indistinguishable.
+    ///
+    /// This test therefore uses a fixture with a real separation between
+    /// contenders. Asserting exact score equality would be asserting something
+    /// the implementation does not promise.
     func testT10TheSameComparisonsInADifferentOrderReachTheSameOrdering() {
         let ids = ["a", "b", "c", "d"]
         // A transitive truth for the run to discover: a > b > c > d.
@@ -232,6 +240,54 @@ final class PreferenceScoringTests: XCTestCase {
         XCTAssertEqual(forward, ["a", "b", "c", "d"], "the run found the true order")
         XCTAssertEqual(reversed, forward)
         XCTAssertEqual(shuffled, forward)
+    }
+
+    // MARK: - Settling (the decaying update factor)
+
+    /// ⭐ The behaviour the operator chose: a settled top tier stops
+    /// reshuffling. Two veterans move less on the same result than two
+    /// newcomers do.
+    func testSettledContendersMoveLessThanNewcomers() {
+        let newcomers = PreferenceScoring.apply(.left,
+                                                left: score(1500, 0), right: score(1500, 0))
+        let veterans = PreferenceScoring.apply(.left,
+                                               left: score(1500, 60), right: score(1500, 60))
+
+        XCTAssertGreaterThan(newcomers.left.value - 1500, veterans.left.value - 1500,
+                             "experience damps the move")
+        XCTAssertGreaterThan(veterans.left.value, 1500, "but it never stops entirely")
+    }
+
+    /// 🚨 The trap in decaying K, and the reason the factor is SHARED by the
+    /// pair rather than applied per side.
+    ///
+    /// Per-side factors — what chess federations use — make the two moves
+    /// unequal, so a newcomer beating a veteran gains more than the veteran
+    /// loses and the pool inflates. D9 seeds every new contender at a FIXED
+    /// middle, so an inflating pool would push each newcomer further below the
+    /// pack than the last: a bias that grows with use and is nearly invisible.
+    func testAMixedExperiencePairConservesTheTotal() {
+        let (left, right) = PreferenceScoring.apply(.left,
+                                                    left: score(1500, 0),
+                                                    right: score(1500, 80))
+        XCTAssertEqual(left.value + right.value, 3000, accuracy: 0.000_001,
+                       "no score is created or destroyed by the experience gap")
+    }
+
+    /// ⚠️ And the pool's middle does not drift over a long run of mixed
+    /// pairings — the property the conservation above exists to protect.
+    func testThePoolMeanIsStableOverManyMixedComparisons() {
+        var scores = ["a": score(1500, 0), "b": score(1500, 40), "c": score(1500, 100)]
+        let ids = ["a", "b", "c"]
+        for round in 0..<200 {
+            let l = ids[round % 3], r = ids[(round + 1) % 3]
+            let updated = PreferenceScoring.apply(round % 2 == 0 ? .left : .right,
+                                                  left: scores[l]!, right: scores[r]!)
+            scores[l] = updated.left
+            scores[r] = updated.right
+        }
+        let mean = scores.values.map(\.value).reduce(0, +) / 3
+        XCTAssertEqual(mean, 1500, accuracy: 0.000_001)
     }
 
     // MARK: - T11 — one ladder, whatever the filter

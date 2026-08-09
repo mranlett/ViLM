@@ -102,16 +102,41 @@ public struct PreferenceComparison: Equatable, Sendable {
 
 public enum PreferenceScoring {
 
-    /// How far a single comparison can move a score.
+    /// How far a single comparison can move a score, given how settled the two
+    /// contenders are.
     ///
-    /// ⚠️ CONSTANT, and that is a decision. The obvious refinement is to shrink
-    /// it as a contender accumulates comparisons, so settled scores stop
-    /// drifting. It is not done here because T10 asks that the same comparisons
-    /// in a different order reach the same ordering, and a K that depends on
-    /// how many comparisons a contender happens to have had ALREADY makes the
-    /// result depend on the order they arrived in. Confidence is expressed by
-    /// reporting the comparison count (D8), not by damping the update.
-    static let k: Double = 32
+    /// ⭐ Decays with experience, at the operator's direction: the point of the
+    /// feature is a trustworthy top tier, and a top tier that reshuffles on
+    /// every comparison is not one. Two contenders with thirty comparisons each
+    /// have already told us where they belong.
+    ///
+    /// 🚨 SHARED by the pair — the average of what each side would use alone —
+    /// rather than each side moving by its own. This is the part that is easy
+    /// to get wrong. Per-side factors are what chess federations do, but they
+    /// make the two adjustments unequal, so the pool's total score is no longer
+    /// conserved: a newcomer beating a veteran gains more than the veteran
+    /// loses, and the whole pool inflates over time. D9 seeds every new
+    /// contender at a FIXED middle, so an inflating pool would quietly push
+    /// each newcomer further below the pack than the last — a bias that grows
+    /// with use and would be very hard to see.
+    ///
+    /// Averaging keeps the two moves equal and opposite while still giving the
+    /// behaviour asked for: two newcomers move fast, two veterans barely move,
+    /// and a mixed pair lands in between.
+    ///
+    /// ⚠️ The tiers are anchored on `confidenceThreshold`, so "provisional" and
+    /// "moves fast" are the same idea rather than two numbers to keep in step.
+    static func updateFactor(_ a: PreferenceScore, _ b: PreferenceScore) -> Double {
+        (soloFactor(a.comparisons) + soloFactor(b.comparisons)) / 2
+    }
+
+    static func soloFactor(_ comparisons: Int) -> Double {
+        switch comparisons {
+        case ..<PreferenceScore.confidenceThreshold: return 32   // still finding its level
+        case ..<(PreferenceScore.confidenceThreshold * 3): return 20
+        default: return 12                                       // settled
+        }
+    }
 
     /// The classic logistic curve: a 400-point gap means the favourite is
     /// expected to win about ten times in eleven.
@@ -139,7 +164,7 @@ public enum PreferenceScoring {
         // The right-hand side is the mirror: expectations sum to 1, as do
         // outcomes, so the two adjustments are equal and opposite. Computing
         // them independently would let rounding pull the pair apart.
-        let delta = k * (actualLeft - expectedLeft)
+        let delta = updateFactor(left, right) * (actualLeft - expectedLeft)
         return (PreferenceScore(value: left.value + delta, comparisons: left.comparisons + 1),
                 PreferenceScore(value: right.value - delta, comparisons: right.comparisons + 1))
     }
