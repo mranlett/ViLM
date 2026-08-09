@@ -592,7 +592,10 @@ struct ProfileGraphHeaderView: View {
                               ?? libraryURL)
         }
         .sheet(isPresented: $isShowingEnrichment) {
-            if let provider = installedActorProvider, let id = currentEntityId,
+            // ⚠️ `writableEntityId()`, not `currentEntityId`. This sheet can
+            // CREATE the profile row, so it must key it the way the library
+            // keys things — see the note on that method.
+            if let provider = installedActorProvider, let id = writableEntityId(),
                let name = currentName {
                 ActorEnrichmentSheet(
                     provider: provider,
@@ -933,6 +936,34 @@ struct ProfileGraphHeaderView: View {
     private var currentEntityId: String? {
         if let loaded = entityProfile?.id { return loaded }
         return nameFormEntityId
+    }
+
+    /// 🚨 The id to WRITE a new profile through, which is not always the id to
+    /// display by.
+    ///
+    /// `currentEntityId` falls back to the name form when no profile row
+    /// exists, and that is right for reading — photo filenames, renames and
+    /// lookups all key off it. It is WRONG for creating a row: on a re-keyed
+    /// library it mints a legacy `actor:Name` key and leaves the library
+    /// half-migrated, one performer at a time.
+    ///
+    /// ⚠️ This is exactly how three actors were created on the phone on
+    /// 2026-08-09, hours after its re-key. Matching a video lands its cast as
+    /// `actor:` TAGS with no profile row; opening one of those performers and
+    /// marking them unmatchable then persisted the name form. The batch matcher
+    /// mints correctly and `ActorInspectorView` already resolves — this screen
+    /// was the one path left.
+    ///
+    /// ⚠️ Computed on demand rather than in `body`. It touches the store, and
+    /// the sheet that needs it is presented far less often than the view
+    /// renders.
+    private func writableEntityId() -> String? {
+        if let loaded = entityProfile?.id { return loaded }
+        guard case .actor(let name) = currentSelection,
+              let id = nameFormEntityId,
+              let owner = try? LibrarySession.shared.store(forProfile: id)
+        else { return currentEntityId }
+        return (try? owner.entityIdForWriting(named: name, type: "actor")) ?? currentEntityId
     }
 
     private var nameFormEntityId: String? {

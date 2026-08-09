@@ -201,4 +201,45 @@ final class MintingPolicyTests: XCTestCase {
                                                                 type: "studio"))
         XCTAssertNil(NodeIdentity.parse(studio.id))
     }
+
+    // MARK: - 🚨 The path that leaked on the phone, 2026-08-09
+
+    /// Three actors were created with legacy `actor:Name` keys hours after the
+    /// phone library was re-keyed. The chain: matching a video lands its cast
+    /// as `actor:` TAGS with no profile row, so the profile page falls back to
+    /// the name form for display — and the enrichment sheet then persisted THAT
+    /// as the new row's key.
+    ///
+    /// ⭐ The fix is at the call site (it now resolves a writable id), but this
+    /// pins the property the fix relies on: given a cast name with no row,
+    /// a re-keyed library hands back something to write under that is NOT the
+    /// name form.
+    func testACastNameWithNoRowStillMintsTheLibrarysShape() throws {
+        try markRekeyed()
+
+        // Exactly what a video match leaves behind: a name, and nothing else.
+        let id = try store.entityIdForWriting(named: "Newly Credited", type: "actor")
+
+        XCTAssertNotEqual(id, "actor:Newly Credited")
+        XCTAssertNil(NodeIdentity.parse(id),
+                     "a uid, so the library does not become half-migrated one cast member at a time")
+    }
+
+    /// ⚠️ And marking that performer unmatchable — which is what actually
+    /// happened — writes a row that is still findable by name afterwards.
+    func testAProfileCreatedForACastNameIsFoundByNameAfterwards() throws {
+        try markRekeyed()
+        let id = try store.entityIdForWriting(named: "Newly Credited", type: "actor")
+
+        var profile = EntityProfile(id: id, entityType: "actor",
+                                    displayName: "Newly Credited")
+        profile.enrichmentState = .unmatchable
+        try store.saveEntityProfile(profile)
+
+        let found = try XCTUnwrap(try store.fetchEntityProfile(named: "Newly Credited",
+                                                                type: "actor"))
+        XCTAssertEqual(found.id, id)
+        XCTAssertEqual(found.enrichmentState, .unmatchable)
+        XCTAssertNil(NodeIdentity.parse(found.id))
+    }
 }
