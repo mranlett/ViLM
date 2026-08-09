@@ -40,8 +40,20 @@ struct LibraryBackupView: View {
 
     // Back up
     @State private var isBuilding = false
+    /// 🚨 The archive being exported, and the ONLY thing that decides whether
+    /// the save sheet is up.
+    ///
+    /// This used to be two independent pieces of state — `archiveURL` plus an
+    /// `isShowingSaveSheet` flag — and they were allowed to disagree. The
+    /// exporter's completion handler nilled the URL while the flag was still
+    /// true, so SwiftUI re-evaluated the body with `isPresented == true` and
+    /// `document == nil`, logged "Attempting to export a nil document", and
+    /// dismissed the picker on its own. Every retry re-entered the same state
+    /// immediately, which is what "the save window closes itself" was.
+    ///
+    /// ⚠️ Presentation is DERIVED from this below rather than tracked beside
+    /// it. Two states that must agree will eventually not.
     @State private var archiveURL: URL?
-    @State private var isShowingSaveSheet = false
     @State private var didSave = false
 
     // Restore
@@ -82,17 +94,33 @@ struct LibraryBackupView: View {
                 Button("OK", role: .cancel) {}
             } message: { Text(errorMessage ?? "") }
             .fileExporter(
-                isPresented: $isShowingSaveSheet,
+                // ⭐ Derived, so `isPresented` and `document` cannot contradict
+                // each other. When SwiftUI dismisses, both go nil in the same
+                // pass; there is no render in which the sheet is up without a
+                // document to hand it.
+                isPresented: Binding(get: { archiveURL != nil },
+                                     set: { if !$0 { archiveURL = nil } }),
                 document: archiveURL.map(BackupDocument.init(sourceURL:)),
                 contentType: BackupDocument.backupType,
                 defaultFilename: defaultBackupName
             ) { result in
-                if case .failure(let error) = result { errorMessage = "Save failed: \(error.localizedDescription)" }
-                else { didSave = true }
+                if case .failure(let error) = result {
+                    // ⚠️ The domain and code as well as the description. The
+                    // description alone said "you do not have permission to
+                    // read it", which named neither the file nor the failure
+                    // and sent this diagnosis down two wrong paths.
+                    let ns = error as NSError
+                    errorMessage = "Save failed: \(error.localizedDescription) "
+                        + "[\(ns.domain) \(ns.code)]"
+                } else { didSave = true }
                 // Saved or failed, the temp archive has served its purpose —
                 // these are multi-hundred-MB files that otherwise linger
                 // until an OS purge (DEFECT_INVENTORY M3).
-                deleteTempArchive()
+                //
+                // ⚠️ The FILE is removed; the state is cleared by the binding
+                // above. Nilling `archiveURL` here is what put the view into
+                // "presented with no document" in the first place.
+                if let archiveURL { try? FileManager.default.removeItem(at: archiveURL) }
             }
             .fileImporter(isPresented: $isShowingArchivePicker, allowedContentTypes: [BackupDocument.backupType]) {
                 handlePickedArchive($0)
@@ -161,7 +189,7 @@ struct LibraryBackupView: View {
             let result = try await ScopedOperation.run(holding: [url]) {
                 try await Task.detached(priority: .userInitiated) { try LibraryBackupService().exportBackup(of: url) }.value
             }
-            await MainActor.run { archiveURL = result.archiveURL; isBuilding = false; isShowingSaveSheet = true }
+            await MainActor.run { isBuilding = false; archiveURL = result.archiveURL }
         } catch {
             await MainActor.run { isBuilding = false; errorMessage = "Couldn't create the backup: \(error.localizedDescription)" }
         }
