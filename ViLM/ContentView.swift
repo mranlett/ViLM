@@ -1191,10 +1191,16 @@ struct ContentView: View {
         case .batchActors(let ids):
             BatchEntityProfileEditorView(
                 libraryURL: selectedLibraryURL,
-                // ⭐ Resolved through the index — the batch editor writes
-                // through these ids, so a name-form one would have it saving
-                // to rows that do not exist after the re-key.
-                entityIds: ids.map { entityProfiles[actor: $0]?.id ?? "actor:\($0)" },
+                // 🚨 The batch editor SAVES through these ids. An actor with
+                // no row yet must get a MINTED id, not the name form —
+                // falling back created four legacy-keyed rows in a re-keyed
+                // library on 2026-08-09.
+                entityIds: ids.map { name in
+                    if let existing = entityProfiles[actor: name]?.id { return existing }
+                    let owner = try? LibrarySession.shared.store(forProfile: "actor:\(name)")
+                    return (try? owner?.entityIdForWriting(named: name, type: "actor"))
+                        .flatMap { $0 } ?? "actor:\(name)"
+                },
                 onSave: { _ in
                     gridRefreshID = UUID()
                     if let url = selectedLibraryURL { loadEntityProfiles(from: url) }

@@ -623,6 +623,27 @@ public class LibraryStore {
         }
     }
 
+    /// The id to WRITE under for a node with this name.
+    ///
+    /// 🚨 The distinction this exists to make impossible to get wrong. A caller
+    /// that only DISPLAYS may fall back to the name form — a photo filename or
+    /// a label is harmless if the row does not exist. A caller that SAVES may
+    /// not: falling back to `"actor:\(name)"` in a re-keyed library creates a
+    /// row with a legacy key, and the library is then permanently half
+    /// migrated, one profile at a time.
+    ///
+    /// ⚠️ That is not hypothetical. Four actors were created exactly this way
+    /// on 2026-08-09, minutes after the drive library was re-keyed — the editor
+    /// was handed a name-form fallback because the actor had no row yet, and
+    /// saved under it.
+    ///
+    /// Returns the existing row's id, or the id a new row would take. Does not
+    /// save; minting and persisting stay separate.
+    public func entityIdForWriting(named name: String, type: String) throws -> String {
+        if let existing = try entityId(named: name, type: type) { return existing }
+        return try newEntityProfile(named: name, type: type).id
+    }
+
     /// The LOCAL id for a node named this, or nil when the library has none.
     ///
     /// ⭐ For the callers that need an id to hand to an edge writer —

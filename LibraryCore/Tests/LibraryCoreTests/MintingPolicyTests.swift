@@ -124,6 +124,57 @@ final class MintingPolicyTests: XCTestCase {
                        minted.id)
     }
 
+    // MARK: - 🚨 Writing under a name that has no row yet
+
+    /// The defect that reached the live library. Four actors were created with
+    /// legacy `actor:Name` keys minutes AFTER the drive library was re-keyed:
+    /// a screen resolved the name, found no row, fell back to the name form,
+    /// and the editor saved under it. One profile at a time, the library
+    /// becomes permanently half-migrated.
+    func testWritingUnderANewNameMintsTheLibrarysOwnShape() throws {
+        try markRekeyed()
+
+        let id = try store.entityIdForWriting(named: "Brand New", type: "actor")
+
+        XCTAssertNil(NodeIdentity.parse(id),
+                     "a re-keyed library must not hand back a name-form id to write under")
+    }
+
+    /// ⭐ And it returns the EXISTING row when there is one — it resolves
+    /// first, mints second. Minting unconditionally would create a duplicate
+    /// of every actor anyone edited.
+    func testWritingUnderAKnownNameReturnsThatRow() throws {
+        try markRekeyed()
+        let existing = try store.newEntityProfile(named: "Already Here", type: "actor")
+        try store.saveEntityProfile(existing)
+
+        XCTAssertEqual(try store.entityIdForWriting(named: "Already Here", type: "actor"),
+                       existing.id)
+    }
+
+    /// ⚠️ Before the re-key it still answers the name form, so this changes
+    /// nothing on a library that has not been upgraded.
+    func testWritingUnderANewNameIsUnchangedBeforeTheRekey() throws {
+        XCTAssertEqual(try store.entityIdForWriting(named: "Brand New", type: "actor"),
+                       "actor:Brand New")
+    }
+
+    /// The round trip: mint an id to write under, save through it, find it by
+    /// name. This is what the editor actually does.
+    func testAProfileSavedUnderAMintedIdIsFoundByName() throws {
+        try markRekeyed()
+
+        let id = try store.entityIdForWriting(named: "Brand New", type: "actor")
+        try store.saveEntityProfile(EntityProfile(id: id, entityType: "actor",
+                                                  displayName: "Brand New", bio: "written"))
+
+        let found = try XCTUnwrap(try store.fetchEntityProfile(named: "Brand New",
+                                                               type: "actor"))
+        XCTAssertEqual(found.id, id)
+        XCTAssertEqual(found.bio, "written")
+        XCTAssertNil(NodeIdentity.parse(found.id))
+    }
+
     // MARK: - The callers that mint
 
     // ⚠️ `confirmStudio` must find the EXISTING studio after the re-key rather

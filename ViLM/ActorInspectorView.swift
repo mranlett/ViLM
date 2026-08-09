@@ -18,6 +18,8 @@ struct ActorInspectorView: View {
     /// editor writes through the id it is handed, so after the re-key a
     /// name-form id would have it saving to a row that does not exist.
     @State private var resolvedEntityIds: [String] = []
+    /// The id a first save would land on, when the actor has no row yet.
+    @State private var standInId: String = ""
     @State private var isLoading = true
     
     var body: some View {
@@ -28,7 +30,7 @@ struct ActorInspectorView: View {
                 if selectedActors.count == 1, let profile = singleProfile {
                     EntityProfileEditorView(
                         libraryURL: libraryURL,
-                        entityId: resolvedEntityIds.first ?? "actor:\(selectedActors[0])",
+                        entityId: resolvedEntityIds.first ?? standInId,
                         profile: profile,
                         embedsInNavigationStack: false,
                         onSave: { profile in
@@ -114,17 +116,20 @@ struct ActorInspectorView: View {
                 let standIn = (try? store.newEntityProfile(named: name, type: "actor"))
                     ?? EntityProfile(id: "actor:\(name)", entityType: "actor",
                                      displayName: name)
+                // 🚨 These ids are what the EDITOR SAVES THROUGH, so a
+                // missing row must mint rather than fall back to the name
+                // form — that fallback is how four actors were created with
+                // legacy keys minutes after the library was re-keyed.
                 let resolved = selectedActors.map { each -> String in
-                    // ⚠️ The name form is the fallback, and is also a valid
-                    // argument to `store(forProfile:)` — that lookup resolves
-                    // a legacy name-form id through the node's identity.
                     let nameForm = "actor:\(each)"
                     guard let owner = try? LibrarySession.shared.store(forProfile: nameForm),
-                          let resolvedId = try? owner.entityId(named: each, type: "actor")
+                          let writable = try? owner.entityIdForWriting(named: each,
+                                                                       type: "actor")
                     else { return nameForm }
-                    return resolvedId ?? nameForm
+                    return writable
                 }
                 await MainActor.run {
+                    self.standInId = standIn.id
                     self.singleProfile = profile ?? standIn
                     self.resolvedEntityIds = resolved
                     self.isLoading = false
