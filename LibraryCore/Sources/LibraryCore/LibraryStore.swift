@@ -387,12 +387,26 @@ public class LibraryStore {
     /// the common case — nothing new — touches almost nothing.
     @discardableResult
     public func promoteStudioProfiles() throws -> [String] {
+        // 🚨 The anti-join is on the NAME, not the id.
+        //
+        // It used to compare the tag string `studio:Silver River` against
+        // `entity_profiles.id`, which worked only because the id WAS that
+        // string. After the re-key an id is a uid, so no tag ever matched,
+        // every studio in the library looked missing, and a fresh row was
+        // minted for all of them — once per library per session. Three
+        // launches against the drive produced three copies of 469 studios.
+        //
+        // ⚠️ The mistake was narrow and worth naming: the minting inside this
+        // function was updated for the re-key and the QUERY that feeds it was
+        // not. Both halves have to move together.
         let missing: [String] = try dbQueue.read { db in
             try String.fetchAll(db, sql: """
                 SELECT DISTINCT j.value
                 FROM assets, json_each(assets.tags) j
                 WHERE j.value LIKE 'studio:_%'
-                  AND j.value NOT IN (SELECT id FROM entity_profiles)
+                  AND substr(j.value, 8) NOT IN (
+                        SELECT display_name FROM entity_profiles
+                         WHERE entity_type = 'studio' AND display_name IS NOT NULL)
                 ORDER BY j.value
                 """)
         }

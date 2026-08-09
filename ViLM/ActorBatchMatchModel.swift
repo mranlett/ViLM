@@ -202,14 +202,21 @@ final class ActorBatchMatchModel: ObservableObject {
         // ⭐ Cast names with no profile row get a stand-in — never saved
         // unless a match is applied. Keyed and minted the way this library
         // keys things, so the stand-in a match writes lands on a real row.
-        let existingByName = EntityProfileIndex(Array(byId.values))
+        // 🚨 Deduplicated by NAME, not by the minted id.
+        //
+        // This keyed on `byId[standIn.id]`, which worked while a stand-in's id
+        // was the stable `"actor:\(name)"`. Minting now returns a FRESH uid on
+        // every call, so that key never repeated and an actor appearing on
+        // twelve videos produced twelve stand-ins — each of which becomes a
+        // real duplicate row the moment a match is applied to it.
+        var standInNames = Set(byId.values.map(\.name))
         for asset in (try? store.fetchAllAssets()) ?? [] {
             for name in asset.actors where !name.isEmpty {
-                guard existingByName[actor: name] == nil else { continue }
+                guard standInNames.insert(name).inserted else { continue }
                 let standIn = (try? store.newEntityProfile(named: name, type: "actor"))
                     ?? EntityProfile(id: "actor:\(name)", entityType: "actor",
                                      displayName: name)
-                if byId[standIn.id] == nil { byId[standIn.id] = standIn }
+                byId[standIn.id] = standIn
             }
         }
         return byId.values.sorted { $0.id < $1.id }

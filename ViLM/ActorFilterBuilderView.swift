@@ -141,27 +141,8 @@ struct ActorFilterBuilderView: View {
                 }
                 
                 Section("Video Count") {
-                    HStack {
-                        Picker("Min", selection: Binding(get: { criteria.minVideos ?? -1 }, set: { criteria.minVideos = $0 == -1 ? nil : $0 })) {
-                            Text("Any").tag(-1 as Int)
-                            ForEach(0...1000, id: \.self) { count in Text("\(count)").tag(count) }
-                        }
-                        #if os(iOS)
-                        .pickerStyle(.wheel)
-                        #else
-                        .pickerStyle(.menu)
-                        #endif
-                        
-                        Picker("Max", selection: Binding(get: { criteria.maxVideos ?? -1 }, set: { criteria.maxVideos = $0 == -1 ? nil : $0 })) {
-                            Text("Any").tag(-1 as Int)
-                            ForEach(0...1000, id: \.self) { count in Text("\(count)").tag(count) }
-                        }
-                        #if os(iOS)
-                        .pickerStyle(.wheel)
-                        #else
-                        .pickerStyle(.menu)
-                        #endif
-                    }
+                    boundPicker("Minimum", value: $criteria.minVideos, range: 0...1000)
+                    boundPicker("Maximum", value: $criteria.maxVideos, range: 0...1000)
                 }
                 
                 Section {
@@ -176,26 +157,10 @@ struct ActorFilterBuilderView: View {
                     .pickerStyle(.segmented)
 
                     Toggle("No Date of Birth", isOn: $criteria.matchEmptyBirthYear)
-                    HStack {
-                        Picker("Min", selection: Binding(get: { criteria.minAge ?? -1 }, set: { criteria.minAge = $0 == -1 ? nil : $0 })) {
-                            Text("Any").tag(-1 as Int)
-                            ForEach(18...100, id: \.self) { age in Text("\(age)").tag(age) }
-                        }
-                        #if os(iOS)
-                        .pickerStyle(.wheel)
-                        #else
-                        .pickerStyle(.menu)
-                        #endif
 
-                        Picker("Max", selection: Binding(get: { criteria.maxAge ?? -1 }, set: { criteria.maxAge = $0 == -1 ? nil : $0 })) {
-                            Text("Any").tag(-1 as Int)
-                            ForEach(18...100, id: \.self) { age in Text("\(age)").tag(age) }
-                        }
-                        #if os(iOS)
-                        .pickerStyle(.wheel)
-                        #else
-                        .pickerStyle(.menu)
-                        #endif
+                    Group {
+                        boundPicker("Minimum", value: $criteria.minAge, range: 18...100)
+                        boundPicker("Maximum", value: $criteria.maxAge, range: 18...100)
                     }
                     // An actor with no DOB has no age, so a range can't apply.
                     .disabled(criteria.matchEmptyBirthYear)
@@ -239,6 +204,38 @@ struct ActorFilterBuilderView: View {
         #endif
     }
     
+
+    /// One end of a numeric range, as a compact row.
+    ///
+    /// 🚨 NOT a wheel. A wheel picker reserves its full intrinsic height inside
+    /// a `List` row — two side by side turned each card into a mostly empty
+    /// box with the values crushed against the bottom, which is what the
+    /// operator reported on iOS.
+    ///
+    /// ⭐ `.navigationLink` on iOS gives a one-line row that pushes the choices,
+    /// which also handles a thousand entries without becoming a scroll trap.
+    /// macOS keeps `.menu`, where a popup is the native idiom and the height
+    /// problem does not exist.
+    ///
+    /// ⚠️ `-1` is the sentinel for "no bound". The model stores `Int?`, and a
+    /// `Picker` cannot bind to an optional without one.
+    @ViewBuilder
+    private func boundPicker(_ label: String, value: Binding<Int?>,
+                             range: ClosedRange<Int>) -> some View {
+        Picker(label, selection: Binding(
+            get: { value.wrappedValue ?? -1 },
+            set: { value.wrappedValue = $0 == -1 ? nil : $0 })
+        ) {
+            Text("Any").tag(-1 as Int)
+            ForEach(range, id: \.self) { Text("\($0)").tag($0) }
+        }
+        #if os(iOS)
+        .pickerStyle(.navigationLink)
+        #else
+        .pickerStyle(.menu)
+        #endif
+    }
+
     private func singleSelectionSection(items: [String], selectionBinding: Binding<String>, emptyBinding: Binding<Bool>) -> some View {
         let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
 
