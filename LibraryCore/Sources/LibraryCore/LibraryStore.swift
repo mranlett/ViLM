@@ -593,6 +593,36 @@ public class LibraryStore {
                       displayName: name)
     }
 
+    /// Display names by node id, for one entity type.
+    ///
+    /// ⭐ Two columns, not whole profiles. Callers that need to LABEL a set of
+    /// ids — the lineage view, a studio family — were decoding every column of
+    /// every row in the library to read one string off a handful of them. This
+    /// reads `(id, display_name)` straight off the `entity_lookup` index
+    /// instead.
+    public func entityNamesById(ofType type: String) throws -> [String: String] {
+        try dbQueue.read { db in
+            var out: [String: String] = [:]
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, display_name FROM entity_profiles WHERE entity_type = ?
+                """, arguments: [type])
+            for row in rows {
+                let id: String = row["id"]
+                // A row with no name still answers — with its id, which is
+                // unreadable but never blank. Dropping it would make a damaged
+                // studio vanish from the page instead of being fixable.
+                //
+                // ⚠️ EMPTY counts as absent, not just NULL — the same rule
+                // `NodeResolver` and `EntityProfileIndex` apply. A blank string
+                // would render as nothing at all, which is the one outcome
+                // worse than a uid.
+                let name = row["display_name"] as String?
+                out[id] = (name?.isEmpty == false) ? name! : id
+            }
+            return out
+        }
+    }
+
     /// The LOCAL id for a node named this, or nil when the library has none.
     ///
     /// ⭐ For the callers that need an id to hand to an edge writer —

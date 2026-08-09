@@ -187,6 +187,12 @@ struct ActorPhotoCleanupView: View {
         }
     }
 
+    /// ⚠️ Derived from the id, and correct only until the re-key.
+    ///
+    /// This screen is handed bare actor ids from a photo scan and has no
+    /// profile in scope, so there is nothing better to read here yet. After
+    /// the re-key it will show uids — the scan needs to carry the name, the
+    /// same way `ActorSyncPlan` and `AliasSplitCandidate.Claimant` now do.
     private func displayName(_ actorId: String) -> String {
         actorId.hasPrefix("actor:") ? String(actorId.dropFirst(6)) : actorId
     }

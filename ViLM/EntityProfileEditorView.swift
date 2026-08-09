@@ -160,7 +160,20 @@ struct EntityProfileEditorView: View {
     /// so this form offered a studio a gender, a hair colour and a birth year —
     /// the same defect the profile page had, one layer down and reached through
     /// its own menu.
-    private var isStudio: Bool { entityId.hasPrefix("studio:") }
+    /// ⚠️ Reads the loaded profile's TYPE, falling back to the id's prefix
+    /// only before the record has loaded. Testing the prefix alone answers
+    /// false for every studio after the re-key, and this flag decides whether
+    /// the form offers a gender, a hair colour and a birth year — so a studio
+    /// would silently get the actor form back.
+    private var isStudio: Bool {
+        loadedEntityType.map { $0 == "studio" } ?? entityId.hasPrefix("studio:")
+    }
+
+    /// This record's `entity_type`, read once the profile is available.
+    ///
+    /// ⭐ Nil until then, which is why `isStudio` keeps the prefix as a
+    /// fallback — the form has to render something on the first frame.
+    @State private var loadedEntityType: String?
 
     /// What this record is, for labels that would otherwise say "actor".
     private var noun: String { isStudio ? "studio" : "actor" }
@@ -722,6 +735,10 @@ struct EntityProfileEditorView: View {
 
                 let gendersSet = Set(profiles.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
                 allUniqueGenders = Array(gendersSet).sorted()
+
+                // The record's own type, so the form stops inferring it from
+                // the id's prefix.
+                loadedEntityType = profiles.first { $0.id == entityId }?.type
             } catch {
                 print("Failed to fetch unique tags/genders: \(error)")
             }

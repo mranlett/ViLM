@@ -171,9 +171,10 @@ public struct ActorSyncPlan: Sendable, Identifiable, Equatable {
 
     public var id: String { actorId }
     public let actorId: String
-    public var displayName: String {
-        actorId.hasPrefix("actor:") ? String(actorId.dropFirst(6)) : actorId
-    }
+    /// 🚨 Carried, not sliced off the id. This is what the sync screen lists
+    /// each plan under; deriving it puts a raw uid on every row after the
+    /// re-key, and the operator is being asked to approve these one by one.
+    public let displayName: String
 
     /// Libraries that don't have this actor at all (full record + photos copy).
     public let missingFrom: [URL]
@@ -333,6 +334,8 @@ public enum ActorSync {
                     .map { snapshots[$0.index].url }
                 if !removeFrom.isEmpty {
                     plans.append(ActorSyncPlan(actorId: actorId,
+                                               displayName: holders.first?.profile.name
+                                                   ?? actorId,
                                                missingFrom: [],
                                                deletionFrom: removeFrom,
                                                blankFills: [:], photoAdds: [:],
@@ -399,6 +402,7 @@ public enum ActorSync {
 
             let plan = ActorSyncPlan(
                 actorId: actorId,
+                displayName: holders.first?.profile.name ?? actorId,
                 missingFrom: missingFrom,
                 blankFills: rekey(fillsByIndex, snapshots: snapshots),
                 photoAdds: rekey(photoAddsByIndex, snapshots: snapshots),

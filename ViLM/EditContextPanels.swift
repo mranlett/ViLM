@@ -170,6 +170,11 @@ struct ActorContextPanel: View {
     /// a computed property would re-run it on every redraw of the picker.
     @State private var localVideos: [Asset] = []
 
+    /// ⚠️ Derived from the id, and correct only until the re-key.
+    ///
+    /// The panel receives an `entityId` and no profile. Fixing it means the
+    /// caller passing the name it already holds — a signature change on a
+    /// shared panel, so it is left for the pass that does the editors.
     private var displayName: String {
         entityId.hasPrefix("actor:") ? String(entityId.dropFirst(6)) : entityId
     }

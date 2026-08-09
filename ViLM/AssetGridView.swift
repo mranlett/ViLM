@@ -1024,9 +1024,15 @@ struct AssetsGridView: View {
             familyStudios = [root]
             return
         }
-        familyStudios = Set(ids.map {
-            $0.hasPrefix("studio:") ? String($0.dropFirst(7)) : $0
-        })
+        // ⭐ Named from the profile rows, not sliced out of the ids. These
+        // strings are matched against `asset.studios` — tag strings — so a uid
+        // here would make a network's family match nothing at all.
+        //
+        // ⚠️ Two columns for studios only. This runs on every sidebar
+        // selection change, so decoding every profile in the library would put
+        // a full table read on a UI path.
+        let namesById = (try? store.entityNamesById(ofType: "studio")) ?? [:]
+        familyStudios = Set(ids.map { namesById[$0] ?? $0 })
     }
 
     /// The family's videos, split by which studio in it released them.

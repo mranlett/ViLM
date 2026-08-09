@@ -376,9 +376,12 @@ extension LibraryStore {
 
     /// A studio's network, its sibling imprints and its own imprints.
     public func studioLineage(for studioId: String) throws -> StudioLineage {
-        StudioLineage.build(for: studioId,
-                            pairs: try studioParentPairs(),
-                            videoCounts: try studioVideoCounts())
+        // ⭐ Two columns for the studios, not every profile in the library.
+        let names = try entityNamesById(ofType: "studio")
+        return StudioLineage.build(for: studioId,
+                                   pairs: try studioParentPairs(),
+                                   videoCounts: try studioVideoCounts(),
+                                   names: names)
     }
 
     /// The imprints directly beneath a network — one level, not the whole tree.

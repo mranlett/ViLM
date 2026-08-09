@@ -262,7 +262,12 @@ final class StudioBatchMatchModel: ObservableObject {
               // flattened here rather than double-unwrapped in a condition.
               let parentId = (try? store.parentStudioId(of: queued.profile.id)) ?? nil
         else { return nil }
-        return parentId.hasPrefix("studio:") ? String(parentId.dropFirst(7)) : parentId
+        // ⭐ The name comes from the parent's own row. Slicing the id answers
+        // a uid after the re-key, and this string names the network on screen.
+        // Flattened with `?? nil` to match the same pattern two lines above:
+        // `try?` on a method returning `EntityProfile?` gives a double optional.
+        let parent = (try? store.fetchEntityProfile(for: parentId)) ?? nil
+        return parent?.name ?? parentId
     }
 
     /// Creates the network as a studio in its own right, then records the edge.

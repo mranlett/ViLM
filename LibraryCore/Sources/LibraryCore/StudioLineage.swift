@@ -91,9 +91,17 @@ public struct StudioLineage: Equatable, Sendable {
     ///   - studioId: the node id, `studio:Name`.
     ///   - pairs: every `studio_parent` edge; `from` is the imprint, `to` the network.
     ///   - videoCounts: videos per studio node id.
+    ///   - names: node id → display name.
+    ///
+    /// 🚨 `names` is supplied rather than derived. The name used to be sliced
+    /// off the id, which answers a raw uid after the re-key — and these strings
+    /// are what the lineage view files studios under and what a pivot filters
+    /// on, so a network would appear on screen as a UUID and its filter would
+    /// match nothing.
     public static func build(for studioId: String,
                              pairs: [GraphEdgePair],
-                             videoCounts: [String: Int]) -> StudioLineage {
+                             videoCounts: [String: Int],
+                             names: [String: String] = [:]) -> StudioLineage {
         var parentOf: [String: String] = [:]
         var childrenOf: [String: [String]] = [:]
         for pair in pairs {
@@ -102,7 +110,7 @@ public struct StudioLineage: Equatable, Sendable {
         }
 
         func relative(_ id: String) -> Relative {
-            Relative(name: displayName(id), videoCount: videoCounts[id] ?? 0)
+            Relative(name: names[id] ?? displayName(id), videoCount: videoCounts[id] ?? 0)
         }
 
         let parentId = parentOf[studioId]
@@ -131,6 +139,11 @@ public struct StudioLineage: Equatable, Sendable {
         a.videoCount != b.videoCount ? a.videoCount > b.videoCount : a.name < b.name
     }
 
+    /// ⚠️ LAST RESORT, for a caller that supplied no name map.
+    ///
+    /// Answers correctly only while an id encodes its name. After the re-key it
+    /// returns the uid — which is honest (never blank) but unreadable, so every
+    /// caller that can supply `names` must.
     static func displayName(_ id: String) -> String {
         id.hasPrefix("studio:") ? String(id.dropFirst(7)) : id
     }
