@@ -42,6 +42,9 @@ final class AssetPreservationTests: XCTestCase {
             tags: ["actor:Alice Example", "tag:Outdoors", "studio:Example Studio"],
             externalLink: "https://example.com/video",
             notes: "a note",
+            sourceDescription: "what the source says about this scene",
+            sourceDescriptionFrom: "TestSource",
+            sourceDescriptionAt: Date(timeIntervalSince1970: 1_690_000_000),
             rating: 4,
             videoName: "Example Series",
             seasonNumber: 2,
@@ -67,7 +70,7 @@ final class AssetPreservationTests: XCTestCase {
     /// look at the copy sites below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 22, """
+        XCTAssertEqual(count, 25, """
             Asset gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds an asset.

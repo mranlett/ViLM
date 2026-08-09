@@ -14,7 +14,46 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public let createdAt: Date
     public var tags: [String]
     public var externalLink: String?
+    /// 🚨 The OPERATOR's own note. Local to this app, and **never submitted
+    /// anywhere, ever** — not now, and explicitly not in any future where a
+    /// write path is reconsidered.
+    ///
+    /// This is stated here, at the point of use, rather than only in the spec,
+    /// because the reader who needs it is the one deciding what goes into a
+    /// submission payload. They will open this field, not the spec.
+    ///
+    /// ⚠️ A private note is private in PRINCIPLE, not by accident of nothing
+    /// currently uploading it. The boundary was drawn while the write path was
+    /// out of scope precisely so it would not have to be argued about later.
+    ///
+    /// A description fetched from a source is a different thing and lives in
+    /// `sourceDescription`.
     public var notes: String?
+
+    /// The source's description of this video.
+    ///
+    /// ⚠️ NOT `notes`. `notes` is where the operator states something; this is
+    /// evidence gathered about it, and the two must not compete — the same
+    /// separation `rating` keeps from a preference score.
+    ///
+    /// ⭐ Free, in the sense that matters: the plugin already requests this,
+    /// decodes it and maps it to `VideoMetadataProposal.notes`. Nothing read it
+    /// until now, so every match threw it away.
+    public var sourceDescription: String?
+
+    /// Which source supplied `sourceDescription`, and when.
+    ///
+    /// 🚨 Its OWN provenance, not the record's `enrichmentSource`. Reusing that
+    /// one looks correct and mis-attributes silently: source A supplies a
+    /// description, a later match against source B supplies none, the text
+    /// stays and `enrichmentSource` now reads B. A's writing, credited to B,
+    /// with nothing to notice it by.
+    ///
+    /// ⭐ Provenance travels with the VALUE, not the row — the same rule
+    /// `marksAsOf` already applies to identifying marks.
+    public var sourceDescriptionFrom: String?
+    public var sourceDescriptionAt: Date?
+
     public var rating: Int?
     public var videoName: String?          // Series Name
     public var seasonNumber: Int?          // Season / Movie number (Star Wars 3, MWC Season 4)
@@ -80,6 +119,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 tags: [String] = [],
                 externalLink: String? = nil,
                 notes: String? = nil,
+                sourceDescription: String? = nil,
+                sourceDescriptionFrom: String? = nil,
+                sourceDescriptionAt: Date? = nil,
                 rating: Int? = nil,
                 videoName: String? = nil,
                 seasonNumber: Int? = nil,
@@ -107,6 +149,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.tags = tags.map { TagNormalizer.normalize(fullTag: $0) }
         self.externalLink = externalLink
         self.notes = notes
+        self.sourceDescription = sourceDescription
+        self.sourceDescriptionFrom = sourceDescriptionFrom
+        self.sourceDescriptionAt = sourceDescriptionAt
         self.rating = rating
         self.videoName = videoName
         self.seasonNumber = seasonNumber
@@ -136,6 +181,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.externalLink = try container.decodeIfPresent(String.self, forKey: .externalLink)
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        self.sourceDescription = try container.decodeIfPresent(String.self, forKey: .sourceDescription)
+        self.sourceDescriptionFrom = try container.decodeIfPresent(String.self, forKey: .sourceDescriptionFrom)
+        self.sourceDescriptionAt = try container.decodeIfPresent(Date.self, forKey: .sourceDescriptionAt)
         self.rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         self.videoName = try container.decodeIfPresent(String.self, forKey: .videoName)
         self.seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
@@ -182,6 +230,9 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case tags
         case externalLink = "external_link"
         case notes
+        case sourceDescription = "source_description"
+        case sourceDescriptionFrom = "source_description_from"
+        case sourceDescriptionAt = "source_description_at"
         case rating
         case videoName = "video_name"
         case seasonNumber = "season_number"
@@ -220,6 +271,12 @@ extension Asset {
         container["created_at"] = createdAt
         container["external_link"] = externalLink
         container["notes"] = notes
+        // ⚠️ Omitting these here would mean no UPDATE ever writes them, and
+        // nothing would say so — the exact defect `AssetPreservationTests`
+        // exists for, and the one it caught when these fields were added.
+        container["source_description"] = sourceDescription
+        container["source_description_from"] = sourceDescriptionFrom
+        container["source_description_at"] = sourceDescriptionAt
         container["rating"] = rating
         container["video_name"] = videoName
         container["season_number"] = seasonNumber

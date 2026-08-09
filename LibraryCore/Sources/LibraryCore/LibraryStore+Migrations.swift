@@ -724,6 +724,26 @@ extension LibraryStore {
                           on: "preference_score", columns: ["subject", "score"])
         }
 
+        // v36 — the source's description, which we already fetch and discard.
+        //
+        // 🚨 Three columns, not one, and the two extra are the point. The
+        // description carries its OWN provenance rather than borrowing the
+        // record's `enrichment_source`: that one describes the LAST MATCH, and
+        // a description outlives the match that brought it. Source A supplies
+        // text, a later match against B supplies none, the text stays and
+        // `enrichment_source` reads B — A's writing credited to B, silently.
+        //
+        // ⚠️ `notes` is untouched and stays the operator's own. See the note on
+        // `Asset.notes`, which says so at the point of use because that is
+        // where the reader who needs it will be.
+        migrator.registerMigration("v36") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "source_description", .text)
+                t.add(column: "source_description_from", .text)
+                t.add(column: "source_description_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

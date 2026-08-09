@@ -20,6 +20,16 @@ public struct VideoFieldChange: Equatable, Sendable, Identifiable {
     public enum Kind: String, Equatable, Sendable {
         case fill
         case conflict
+        /// ⭐ Offered by the source and deliberately NOT storable.
+        ///
+        /// The review exists to show what a source offered and what was taken.
+        /// A value we refuse on purpose is exactly that, and it needs saying —
+        /// discarding it in silence is how `releaseYear` sat mapped and unread
+        /// with nobody noticing the gap.
+        ///
+        /// ⚠️ A row of this kind must not be tickable. It is information about
+        /// the source, not a change on offer.
+        case unusable
     }
 
     public var id: String { field }
@@ -120,7 +130,10 @@ public enum VideoEnrichmentReview {
         public static let releaseDate = "releaseDate"
         public static let studio = "studio"
         public static let externalLink = "externalLink"
+        public static let sourceDescription = "sourceDescription"
         public static let performers = "performers"
+        /// A year where a full date was needed. Never storable — see below.
+        public static let releaseYearOnly = "releaseYearOnly"
     }
 
     /// Every row worth showing, fills first.
@@ -165,6 +178,34 @@ public enum VideoEnrichmentReview {
                note: proposal.episodeTitle.sourceNote ?? proposal.title.sourceNote)
         scalar(Field.releaseDate, "Release Date", current: asset.releaseDate,
                proposed: proposal.releaseDate.value, note: proposal.releaseDate.sourceNote)
+        // 🔴 A year is NOT a date, and must never be stored as one.
+        //
+        // Fabricating `YYYY-01-01` would make an approximation
+        // indistinguishable from a known day, and every consumer of
+        // `releaseDate` would treat it as exact — the age-at-release filter,
+        // and the original-versus-redistribution ordering `releaseDate` was
+        // made structured for in the first place.
+        //
+        // ⚠️ Dead against our own source, which supplies full dates. It is
+        // written now because the failure only appears when a SECOND provider
+        // arrives, and at that point it looks like that provider is broken.
+        if proposal.releaseDate.value == nil, let year = proposal.releaseYear.value {
+            rows.append(.init(field: Field.releaseYearOnly, label: "Release Year",
+                              kind: .unusable, current: asset.releaseDate ?? "",
+                              proposed: String(year),
+                              sourceNote: proposal.releaseYear.sourceNote))
+        }
+
+        // ⭐ The description the plugin already fetches, decodes and maps —
+        // and that nothing read until now. Offered like any other field.
+        //
+        // 🚨 Compared against `sourceDescription`, NOT against `notes`. Notes
+        // are the operator's own; a source description that showed as a
+        // conflict with them would invite replacing one with the other, which
+        // is the confusion this whole field exists to prevent.
+        scalar(Field.sourceDescription, "Description", current: asset.sourceDescription,
+               proposed: proposal.notes.value, note: proposal.notes.sourceNote)
+
         // The release's own page. Only one is storable, and the provider puts
         // the studio's own site first — the durable one, and the one someone
         // following the link actually wants.
@@ -458,6 +499,20 @@ public enum VideoEnrichmentReview {
         if accepting.contains(Field.releaseDate), let v = proposal.releaseDate.value { merged.releaseDate = v }
         if accepting.contains(Field.externalLink),
            let v = proposal.externalLinks.value?.first { merged.externalLink = v.absoluteString }
+
+        // 🚨 Writes `sourceDescription` and its own provenance TOGETHER, and
+        // never `notes`. Storing the text without recording who supplied it is
+        // how it later gets credited to whichever source matched last.
+        if accepting.contains(Field.sourceDescription), let v = proposal.notes.value {
+            merged.sourceDescription = v
+            merged.sourceDescriptionFrom = proposal.notes.sourceNote
+            merged.sourceDescriptionAt = Date()
+        }
+
+        // ⚠️ `Field.releaseYearOnly` is deliberately absent from this block. It
+        // is `.unusable` — offered, refused, and unstorable — so accepting it
+        // must do nothing even if a caller passes it. Silence here is the
+        // behaviour, not an omission.
 
         var tags = merged.tags
         func addTag(_ raw: String) {

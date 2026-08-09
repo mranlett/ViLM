@@ -262,6 +262,12 @@ public final class VideoTransferService {
                 tags: asset.tags,
                 externalLink: asset.externalLink,
                 notes: asset.notes,
+                // ⚠️ Carried with its provenance. A description moved to
+                // another library without the source that wrote it becomes
+                // indistinguishable from something the operator typed.
+                sourceDescription: asset.sourceDescription,
+                sourceDescriptionFrom: asset.sourceDescriptionFrom,
+                sourceDescriptionAt: asset.sourceDescriptionAt,
                 rating: asset.rating,
                 videoName: asset.videoName,
                 seasonNumber: asset.seasonNumber,
