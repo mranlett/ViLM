@@ -39,6 +39,7 @@ struct HeadToHeadView: View {
     @StateObject private var model = HeadToHeadModel()
     @Environment(\.dismiss) private var dismiss
     @State private var isShowingPool = false
+    @State private var isShowingStandings = false
 
     /// 🚨 The game's OWN pool, not the actor grid's saved default.
     ///
@@ -73,6 +74,11 @@ struct HeadToHeadView: View {
                         Button("Done") { dismiss() }
                     }
                     ToolbarItem(placement: .primaryAction) {
+                        Button { isShowingStandings = true } label: {
+                            Label("Standings", systemImage: "trophy")
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
                         Button {
                             isShowingPool = true
                         } label: {
@@ -85,6 +91,10 @@ struct HeadToHeadView: View {
                     await model.load(profiles: entityProfiles, assets: assets,
                                      photoFileNames: profileImageFileNames,
                                      pool: pool, fallbackLibrary: libraryURL)
+                }
+                .sheet(isPresented: $isShowingStandings) {
+                    PreferenceLeaderboardView(entityProfiles: entityProfiles,
+                                              libraryURL: libraryURL)
                 }
                 .sheet(isPresented: $isShowingPool) {
                     PoolPicker(initial: pool,

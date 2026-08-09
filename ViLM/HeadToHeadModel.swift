@@ -103,8 +103,8 @@ final class HeadToHeadModel: ObservableObject {
                 return
             }
 
-            let standings = try Self.standings(for: eligible, subject: subject,
-                                               fallback: fallbackLibrary)
+            let standings = PreferenceStandings.load(for: eligible, subject: subject,
+                                                     fallback: fallbackLibrary)
             var built: [String: PreferenceContender] = [:]
             var sides: [String: Side] = [:]
             for profile in eligible {
@@ -158,31 +158,6 @@ final class HeadToHeadModel: ObservableObject {
     private static func hasAnImage(_ profile: EntityProfile) -> Bool {
         if let url = profile.photoUrl, !url.isEmpty { return true }
         return profile.galleryUrls.contains { !$0.isEmpty }
-    }
-
-    /// Standings for every contender, read from the library that OWNS each.
-    ///
-    /// ⭐ Grouped by owner so each library is opened and read once, rather than
-    /// once per contender.
-    private static func standings(for profiles: [EntityProfile],
-                                  subject: PreferenceSubject,
-                                  fallback: URL?) throws -> [String: PreferenceRecord] {
-        var byOwner: [URL: [String]] = [:]
-        for profile in profiles {
-            guard let owner = LibrarySession.shared.url(forProfile: profile.id) ?? fallback
-            else { continue }
-            byOwner[owner, default: []].append(profile.id)
-        }
-
-        var out: [String: PreferenceRecord] = [:]
-        for (owner, ids) in byOwner {
-            // A library that cannot be opened costs its contenders their
-            // history, not the session — they simply start unscored.
-            guard let records = try? LibraryStore(at: owner).preferenceRecords(subject: subject)
-            else { continue }
-            for id in ids where records[id] != nil { out[id] = records[id] }
-        }
-        return out
     }
 
     // MARK: - Playing
