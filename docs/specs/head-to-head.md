@@ -11,7 +11,11 @@ notion: https://app.notion.com/p/Head-to-Head-Preference-by-Comparison-3b6adccaf
 
 # Head to Head — Preference by Comparison
 
-> ⚠️ **Not scheduled.** For after the metadata campaign, when the downloaded images are complete. Recorded 2026-08-08.
+> ✅ **Unblocked 2026-08-09.** The metadata campaign is done — match-all completed against both libraries after the opaque-identity re-key. Remaining unmatched videos and actors will feather in as the operator identifies them against online sources, which is ongoing work rather than a gate.
+> 
+> The material condition this waited on is met: 98% of actors have a primary photo and 85% a gallery, and D9 already excludes a contender with no image rather than showing it blank.
+> 
+> ⚠️ One thing further down this page IS still gated, and differently: "what else are they in that I do not have" depends on how much of the library carries an identity edge, and over-reports while that is partial. That is a separate spec and its own timing.
 > 
 > 🔴 **Opinions are marked.** The operator asked for strong recommendations rather than a menu, so where I think there is a right answer I have said so and given the reasoning. Disagree with any of them and the design still stands.
 ## The evidence this is worth building
@@ -89,6 +93,20 @@ Stated because it is a design constraint, not decoration:
 - **The next pair is prefetched.** A wait between taps ends the session faster than anything else.
 - **No wrong answers, no score shown mid-game.** The moment it feels like a test it stops being a game.
 - **A visible payoff.** A leaderboard worth reaching — "your top 20" — is the reason to keep playing, and it is also the feature's actual output.
+## 📊 Implementation status — sliced 2026-08-09
+Traceability: Notion spec → GitHub issue → code → device verification. A row is **Done** only once the Human Operator has confirmed it on a device.
+| Item | Issue | State |
+| --- | --- | --- |
+| Scoring engine + pairing rule (D2, D4, D6–D9) | [#31](https://github.com/mranlett/ViLM/issues/31) | 🟡 Implemented — `c9d487d`, 22 tests numbered to T1–T12, mutation-checked. Pure logic, nothing to verify on a device |
+| Schema: preferenceScore + count (D3) | [#32](https://github.com/mranlett/ViLM/issues/32) | 🟡 Implemented — `12d8f21`, migration v35. A TABLE, not columns — seven places rebuild an EntityProfile field-by-field and each would drop a defaulted argument |
+| Store: record and undo a comparison (D2, D7) | [#33](https://github.com/mranlett/ViLM/issues/33) | 🟡 Implemented — `0ec94e9`. Undoing a first-ever comparison DELETES the row rather than writing the seed back |
+| The game screen (D1, D5, D6, D7) | [#34](https://github.com/mranlett/ViLM/issues/34) | 🟡 Implemented — `279447b`. ⚠️ Awaiting device verification: layout, thumb reach and whether browse-then-choose feels right are what a build cannot confirm |
+| Leaderboard + derived stars (D2, D8) | [#35](https://github.com/mranlett/ViLM/issues/35) | ⚪ Not started |
+| Choose the pool (D1b) | [#36](https://github.com/mranlett/ViLM/issues/36) | ⚪ Not started |
+| Apply as ratings (D3) | [#37](https://github.com/mranlett/ViLM/issues/37) | ⚪ Not started |
+| Videos as a subject (D1) | [#38](https://github.com/mranlett/ViLM/issues/38) | ⚪ Not started |
+⚠️ #31 was built BEFORE the spec was sliced, which is the wrong order. The issue was opened and closed after the fact so the work is traceable; recorded here rather than tidied away.
+⭐ Sequenced for **top tier first**, per the open question below: 32 → 33 → 34 → 35 is the shortest path to something playable that produces a usable ranking. 36–38 follow.
 ## Test strategy (Constitution Art. III)
 - **T1** — A win moves both contenders: winner up, loser down.
 - **T2** — Beating a much higher scorer moves the winner MORE than beating a lower one.

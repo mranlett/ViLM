@@ -3,7 +3,7 @@
 
 ---
 spec: "Actor & Tag Browsing — UX Corrections"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P1
 notion: https://app.notion.com/p/Actor-Tag-Browsing-UX-Corrections-3b1adccaf428818480bcde52fc138392
@@ -11,20 +11,22 @@ notion: https://app.notion.com/p/Actor-Tag-Browsing-UX-Corrections-3b1adccaf4288
 
 # Actor & Tag Browsing — UX Corrections
 
-> ⚠️ **PARTIAL as of 2026-08-08.** Reconciled against GitHub. Shipped: [#13](https://github.com/mranlett/ViLM/issues/13) gallery thumbnail, [#18](https://github.com/mranlett/ViLM/issues/18) actor sort, [#21](https://github.com/mranlett/ViLM/issues/21) starred photo, [#23](https://github.com/mranlett/ViLM/issues/23) / [#25](https://github.com/mranlett/ViLM/issues/25) tag-page Actors tab.
+> *(Superseded 2026-08-09, retained for the record)* ⚠️ **PARTIAL as of 2026-08-08.** Reconciled against GitHub. Shipped: [#13](https://github.com/mranlett/ViLM/issues/13) gallery thumbnail, [#18](https://github.com/mranlett/ViLM/issues/18) actor sort, [#21](https://github.com/mranlett/ViLM/issues/21) starred photo, [#23](https://github.com/mranlett/ViLM/issues/23) / [#25](https://github.com/mranlett/ViLM/issues/25) tag-page Actors tab.
 > 
-> **Still open — this is why the spec is not Implemented:** [#19](https://github.com/mranlett/ViLM/issues/19) actor filter panel + age filter, [#20](https://github.com/mranlett/ViLM/issues/20) missing-photo sidebar count, [#22](https://github.com/mranlett/ViLM/issues/22) tag card truncation.
+> **✅ COMPLETE as of 2026-08-09.** The last three closed: [#19](https://github.com/mranlett/ViLM/issues/19) actor filter panel + age modes, [#20](https://github.com/mranlett/ViLM/issues/20) missing-photo sidebar count, [#22](https://github.com/mranlett/ViLM/issues/22) tag card truncation. Every R1–R7 row is operator-verified.
+> 
+> ⚠️ R8 is an AMENDMENT added after approval and is NOT covered by this status. Its graph-backed browse work (attribute-tag two-hop filtering, parent-studio inclusion, the undeclared-content surface) remains unbuilt and needs its own confirmation into the baseline.
 ## 📊 Implementation status — updated 2026-08-03
 Traceability: Notion spec → GitHub issue → code → device verification. A row is **Done** only when the Human Operator has confirmed it on a device; "Implemented" means the code exists and the automated tests pass but nobody has run it yet.
 | Item | Issue | State | Evidence |
 | --- | --- | --- | --- |
-| **R1** Sort blocks / crashes | [#18](https://github.com/mranlett/ViLM/issues/18) | 🟡 Implemented | ✅ DONE — operator-verified: "much more rapidly and without locking the UI". 478 tests incl. equivalence with the replaced computation |
-| **R2** Filter panel + age modes | [#19](https://github.com/mranlett/ViLM/issues/19) | ⚪ Not started |  |
-| **R3** Missing-photo badge | [#20](https://github.com/mranlett/ViLM/issues/20) | ⚪ Not started |  |
+| **R1** Sort blocks / crashes | [#18](https://github.com/mranlett/ViLM/issues/18) | ✅ **Done** | Operator-verified: "much more rapidly and without locking the UI". 478 tests incl. equivalence with the replaced computation |
+| **R2** Filter panel + age modes | [#19](https://github.com/mranlett/ViLM/issues/19) | ✅ **Done** | Operator-verified on device with two libraries mounted. Panel reordered to the specified order, data-repair filters moved into a collapsed accordion, and the two age controls replaced by ONE control with a stored mode. A follow-up fixed the iOS layout, where the video-count and age-at controls carried excess whitespace |
+| **R3** Missing-photo badge | [#20](https://github.com/mranlett/ViLM/issues/20) | ✅ **Done** | Operator-verified. Derived from the profile index so it is federation-aware, and suppressed at zero so a healthy library shows no badge rather than a 0 |
 | **R4** Starred photo | [#21](https://github.com/mranlett/ViLM/issues/21) | ✅ **Done** | Operator-verified. Three stacked bugs — see below |
-| **R5** Tag card truncation | [#22](https://github.com/mranlett/ViLM/issues/22) | ⚪ Not started | Blocked on measuring the tag vocabulary |
-| **R6** Tag page Actors tab | [#23](https://github.com/mranlett/ViLM/issues/23) | 🟡 Implemented | ✅ DONE — operator-verified. Derivation shared across entity types; only the tag case changed |
-| **R7** Enrichment state (v18) — ✅ **DONE**, operator-verified incl. migration on a live library, 497 tests. Population of the backlog deferred to [#26](https://github.com/mranlett/ViLM/issues/26) | [#24](https://github.com/mranlett/ViLM/issues/24) | ⚪ Not started |  |
+| **R5** Tag card truncation | [#22](https://github.com/mranlett/ViLM/issues/22) | ✅ **Done** | Operator-verified. Option 4 shipped in `143f812`, measurement recorded in the source. Re-measured 2026-08-09: the vocabulary has grown 30 to 45 tags and the longest 18 to 20 characters, and it still does not truncate — the binding constraint is the longest unbreakable TOKEN, which is 11 characters with none longer |
+| **R6** Tag page Actors tab | [#23](https://github.com/mranlett/ViLM/issues/23) | ✅ **Done** | Operator-verified. Derivation shared across entity types; only the tag case changed |
+| **R7** Enrichment state (v18) | [#24](https://github.com/mranlett/ViLM/issues/24) | ✅ **Done** | Operator-verified incl. migration on a live library, 497 tests. Population of the backlog deferred to [#26](https://github.com/mranlett/ViLM/issues/26), now also closed. The State column previously read Not started while this cell said DONE — a contradiction, corrected 2026-08-09 |
 | *Gallery off-by-one* | [#13](https://github.com/mranlett/ViLM/issues/13) | ✅ **Done** | Operator-verified. Pre-existing issue, folded into this effort |
 | *AppleDouble forks* | [#16](https://github.com/mranlett/ViLM/issues/16) | ✅ **Closed — not a defect** | 2,101 videos scanned, 0 leaked |
 ### New, surfaced during implementation
