@@ -309,6 +309,50 @@ final class VideoTransferServiceTests: XCTestCase {
 
     // MARK: - Actor profile + photo travels with the moved video
 
+    /// 🚨 A moved video's studio is matched between libraries by NAME.
+    ///
+    /// The copy used to check the destination for `"studio:Name"` and, finding
+    /// nothing, write the SOURCE's profile across verbatim — key included.
+    /// Once each library mints its own uid that check always misses and the
+    /// sender's uid becomes a key in the receiver: a duplicate studio, which
+    /// is exactly what the federation rule exists to prevent.
+    func testAMovedVideosStudioIsMatchedByNameNotByKey() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let sourceLib = tempDir.appendingPathComponent("src", isDirectory: true)
+        let destLib = tempDir.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceLib, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destLib, withIntermediateDirectories: true)
+        let payload = Data((0..<200_000).map { UInt8($0 % 251) })
+        try payload.write(to: sourceLib.appendingPathComponent("clip.mp4"))
+
+        // The SAME studio, keyed differently in each library — the state the
+        // re-key produces.
+        let sourceStore = try LibraryStore(at: sourceLib)
+        let destStore = try LibraryStore(at: destLib)
+        try sourceStore.saveEntityProfile(EntityProfile(id: UUID().uuidString,
+                                                        entityType: "studio",
+                                                        displayName: "Silver River",
+                                                        bio: "from source"))
+        let destUid = UUID().uuidString
+        try destStore.saveEntityProfile(EntityProfile(id: destUid, entityType: "studio",
+                                                      displayName: "Silver River",
+                                                      bio: "already here"))
+
+        let asset = Asset(relativePath: "clip.mp4", fileName: "clip.mp4",
+                          tags: ["studio:Silver River"])
+        try sourceStore.insertAsset(asset)
+
+        _ = try await VideoTransferService().moveVideo(asset, from: sourceLib, to: destLib)
+
+        let studios = try destStore.fetchAllEntityProfiles().filter { $0.type == "studio" }
+        XCTAssertEqual(studios.count, 1, "the destination already had this studio by name")
+        XCTAssertEqual(studios.first?.id, destUid, "its own key must survive")
+        XCTAssertEqual(studios.first?.bio, "already here",
+                       "the richer local copy is not overwritten")
+    }
+
     func testMoveCarriesActorProfileAndPhoto() async throws {
         let sourceLib = tempDir.appendingPathComponent("src2", isDirectory: true)
         let destLib = tempDir.appendingPathComponent("dst2", isDirectory: true)

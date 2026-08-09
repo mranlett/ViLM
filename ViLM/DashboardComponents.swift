@@ -152,7 +152,9 @@ struct ActorCircleCard: View {
         }
         .task(id: actorName) {
             loadedImage = await ProfileAvatarLoader.image(
-                actorName: actorName,
+                // The profile's own id, with the name form as the fallback the
+                // renderer has always used for an actor with no profile row.
+                entityId: profile?.id ?? "actor:\(actorName)",
                 fileNames: profileImageFileNames,
                 libraryURL: libraryURL,
                 maxPixelSize: 150
@@ -182,9 +184,13 @@ enum ProfileAvatarLoader {
         return c
     }()
 
-    static func image(actorName: String, fileNames: Set<String>, libraryURL: URL?, maxPixelSize: Int) async -> PlatformImage? {
+    /// - Parameter entityId: the actor's OWN id.
+    ///
+    /// 🚨 Takes an id, not a name. Photo files are named after the entity id,
+    /// so building `"actor:\(name)"` here finds nothing once ids are uids and
+    /// every avatar on the dashboard falls back to initials.
+    static func image(entityId: String, fileNames: Set<String>, libraryURL: URL?, maxPixelSize: Int) async -> PlatformImage? {
         guard let url = libraryURL else { return nil }
-        let entityId = "actor:\(actorName)"
         let exactMatch = ProfileImageNaming.primaryFileName(for: entityId)
         let prefixMatch = ProfileImageNaming.galleryFilePrefix(for: entityId)
 
@@ -275,7 +281,9 @@ struct ActorAttentionRow: View {
         .background(Color(PlatformSystemBackground))
         .task(id: actorName) {
             loadedImage = await ProfileAvatarLoader.image(
-                actorName: actorName,
+                // The profile's own id, with the name form as the fallback the
+                // renderer has always used for an actor with no profile row.
+                entityId: profile?.id ?? "actor:\(actorName)",
                 fileNames: profileImageFileNames,
                 libraryURL: libraryURL,
                 maxPixelSize: 100

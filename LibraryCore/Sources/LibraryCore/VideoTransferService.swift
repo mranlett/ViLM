@@ -385,11 +385,22 @@ public final class VideoTransferService {
             // that library — and overwriting it with the source's copy would
             // trade information for uniformity.
             for name in Set(asset.studios) where !name.isEmpty {
-                let id = "studio:\(name)"
-                let alreadyThere = (try? destinationStore.fetchEntityProfile(for: id)) ?? nil
-                if alreadyThere == nil,
-                   let profile = (try? sourceStore.fetchEntityProfile(for: id)) ?? nil {
-                    try? destinationStore.saveEntityProfile(profile)
+                // 🚨 Both ends resolved by NAME, not by a shared id. Two
+                // libraries mint different uids for the same studio, so an
+                // id-keyed check would find nothing in the destination and
+                // then copy the SOURCE's uid across as a key — the duplicate
+                // this project's federation rule exists to prevent.
+                let alreadyThere = try? destinationStore.fetchEntityProfile(named: name,
+                                                                            type: "studio")
+                let fromSource = try? sourceStore.fetchEntityProfile(named: name,
+                                                                     type: "studio")
+                if alreadyThere == nil, let profile = fromSource ?? nil {
+                    // ⚠️ Written under an id the DESTINATION mints. A sender's
+                    // key is evidence about which node is meant, never a value
+                    // to store.
+                    let localId = (try? destinationStore.newEntityProfile(
+                        named: name, type: "studio").id) ?? profile.id
+                    try? destinationStore.saveEntityProfile(profile.renamed(to: localId))
                 }
             }
             if !asset.actions.isEmpty {

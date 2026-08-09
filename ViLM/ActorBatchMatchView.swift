@@ -207,7 +207,13 @@ struct ActorBatchMatchView: View {
         var finalId = merged.id
         if let renameTo, !renameTo.isEmpty, renameTo != name(queued) {
             _ = try? store.renameTagGlobally(oldTag: merged.id, newTag: "actor:\(renameTo)")
-            finalId = "actor:\(renameTo)"
+            // ⭐ Re-read the id the rename actually left behind. Before the
+            // re-key a rename MOVES the row, so the edge must name the new
+            // key; after it the node keeps its uid and the name-form id would
+            // name nothing. Asking the store covers both, and is why
+            // `applyReviewedMatch` takes `recordingUnder:` at all.
+            finalId = (try? store.entityId(named: renameTo, type: "actor"))
+                ?? "actor:\(renameTo)"
         }
         _ = try? store.applyReviewedMatch(
             merged, source: installedActorProvider?.displayName, recordingUnder: finalId)

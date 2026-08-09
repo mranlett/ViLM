@@ -199,11 +199,17 @@ final class ActorBatchMatchModel: ObservableObject {
         var byId = Dictionary(uniqueKeysWithValues:
             profiles.filter { $0.type == "actor" }.map { ($0.id, $0) })
 
+        // ⭐ Cast names with no profile row get a stand-in — never saved
+        // unless a match is applied. Keyed and minted the way this library
+        // keys things, so the stand-in a match writes lands on a real row.
+        let existingByName = EntityProfileIndex(Array(byId.values))
         for asset in (try? store.fetchAllAssets()) ?? [] {
             for name in asset.actors where !name.isEmpty {
-                let id = "actor:\(name)"
-                // A stand-in, never saved unless a match is actually applied.
-                if byId[id] == nil { byId[id] = EntityProfile(id: id) }
+                guard existingByName[actor: name] == nil else { continue }
+                let standIn = (try? store.newEntityProfile(named: name, type: "actor"))
+                    ?? EntityProfile(id: "actor:\(name)", entityType: "actor",
+                                     displayName: name)
+                if byId[standIn.id] == nil { byId[standIn.id] = standIn }
             }
         }
         return byId.values.sorted { $0.id < $1.id }

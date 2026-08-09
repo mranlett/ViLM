@@ -436,8 +436,15 @@ struct LibraryStatsView: View {
                     actorNames.insert(p.name)
                 }
 
+                // ⭐ Looked up by NAME. `profilesById` is keyed by id, which
+                // stops matching a name-form key after the re-key — every
+                // actor would then get a blank stand-in and the completeness
+                // stats would report the whole library as unenriched.
+                let byName = EntityProfileIndex(profiles)
                 let actorEntities: [EntityProfile] = actorNames.map { name in
-                    profilesById["actor:\(name)"] ?? EntityProfile(id: "actor:\(name)")
+                    byName[actor: name]
+                        ?? EntityProfile(id: "actor:\(name)", entityType: "actor",
+                                         displayName: name)
                 }
 
                 // Actors lists

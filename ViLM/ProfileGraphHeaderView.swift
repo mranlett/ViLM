@@ -897,7 +897,18 @@ struct ProfileGraphHeaderView: View {
         return kinds
     }
     
+    /// The id to edit, photograph and rename through.
+    ///
+    /// ⭐ Prefers the LOADED profile's own id. The name-form fallback below is
+    /// for the first frame and for a selection with no profile row yet — after
+    /// the re-key it names nothing, and this id reaches `ProfileImageView`
+    /// (whose filenames follow the id) and the rename and edit paths.
     private var currentEntityId: String? {
+        if let loaded = entityProfile?.id { return loaded }
+        return nameFormEntityId
+    }
+
+    private var nameFormEntityId: String? {
         switch currentSelection {
         case .actor(let name): return "actor:\(name)"
         case .studio(let name), .studioFamily(let name): return "studio:\(name)"

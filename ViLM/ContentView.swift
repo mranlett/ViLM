@@ -1191,7 +1191,10 @@ struct ContentView: View {
         case .batchActors(let ids):
             BatchEntityProfileEditorView(
                 libraryURL: selectedLibraryURL,
-                entityIds: ids.map { "actor:\($0)" },
+                // ⭐ Resolved through the index — the batch editor writes
+                // through these ids, so a name-form one would have it saving
+                // to rows that do not exist after the re-key.
+                entityIds: ids.map { entityProfiles[actor: $0]?.id ?? "actor:\($0)" },
                 onSave: { _ in
                     gridRefreshID = UUID()
                     if let url = selectedLibraryURL { loadEntityProfiles(from: url) }
