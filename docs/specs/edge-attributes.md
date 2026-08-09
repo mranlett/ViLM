@@ -3,7 +3,7 @@
 
 ---
 spec: "Edge Attributes — Facts About Relationships"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Edge-Attributes-Facts-About-Relationships-3b5adccaf4288180bc5ce5c15a1d82cd

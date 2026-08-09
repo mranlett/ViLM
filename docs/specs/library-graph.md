@@ -105,7 +105,7 @@ This is what makes a tag split expressible at all: two nodes, the same display n
 ✅ **`deleted_entities`**** is not retired by this.** Cascading deletes answer *"what pointed at this node"*; the tombstone answers a different question — *"this was deliberately removed, do not re-create it on the next scan or import."* That intent has no other home, so the table **stays**, narrowed to recording intent rather than compensating for missing edges.
 ⚠️ **Migration is the hard half, and it is lossy in one direction.** Existing rows carry names, not ids. Promoting a name to a node requires deciding whether two spellings are one node — exactly the judgement the tag-case and studio-conflict audits already make, which means those audits become the migration's input rather than dead code.
 ## D3 — Tags have a kind, and the kind constrains the edge
-**Human Operator:** *"Some tags describe the action in a video and some tags describe the attributes of the performer. We shouldn't tag a video with an attribute tag (a video isn't a tall, an actor is)."*
+**Human Operator:** *"Some tags describe the action in a video and some tags describe the attributes of the performer. We shouldn't tag a video with an attribute tag (a video isn't a redhead, an actor is)."*
 A Tag node carries `kind`:
 | Kind | Describes | Legal edge |
 | --- | --- | --- |
@@ -116,7 +116,7 @@ A Tag node carries `kind`:
 ### ⭐ AMENDMENT — kinds are extensible, and a kind declares what it may attach to
 > ⚠️ **Added 2026-08-05 after approval, at the Human Operator's direction.** Needs confirmation into the baseline (Art. II).
 **Human Operator:** *"Sounds like we do need another category or two. Maybe we make the model support expansion — new categories as needed."*
-The measured vocabulary forced this: of 30 tags, `Anthology` describes the video's **form** and `Debut` describes the **production** — neither an action nor a person. A two-kind taxonomy has nowhere to put them, and the category obviously grows (4K, POV, shot-on-film).
+The measured vocabulary forced this: of 30 tags, `Compilation` describes the video's **form** and `Amateur` describes the **production** — neither an action nor a person. A two-kind taxonomy has nowhere to put them, and the category obviously grows (4K, POV, shot-on-film).
 ⚠️ **An open-ended list of kinds would destroy D3's enforcement**, which works only because each kind maps to a legal edge. So a kind is not a bare label — **it declares the node type it may attach to:**
 ```javascript
 TagKind {
@@ -124,12 +124,12 @@ TagKind {
   appliesTo: NodeType  // video | performer
 }
 ```
-New kinds are added as data, with no schema change and no new enforcement code: the write boundary asks the kind what it applies to and refuses anything else. **The rule "a video isn't a tall" survives extension**, which is the property that mattered.
+New kinds are added as data, with no schema change and no new enforcement code: the write boundary asks the kind what it applies to and refuses anything else. **The rule "a video isn't a redhead" survives extension**, which is the property that mattered.
 **Seed set:**
 | Kind | Applies to | Examples from the measured vocabulary |
 | --- | --- | --- |
 | `action` | video | the bulk — 23 of 30 tags |
-| `video-attribute` | video | form and production: `Anthology`, `Debut` |
+| `video-attribute` | video | form and production: `Compilation`, `Amateur` |
 | `performer-attribute` | performer | 4 tags, 31 uses — hair colour, ethnicity, category |
 💡 `attribute` is renamed **`performer-attribute`**, because with two attribute-ish kinds the bare word no longer says which node it describes.
 ### ⚠️ Consequence — the edge NARROWS the kind; it no longer DECIDES it

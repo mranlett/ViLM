@@ -3,7 +3,7 @@
 
 ---
 spec: "Temporal Edges — When a Relationship Was True"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P3
 notion: https://app.notion.com/p/Temporal-Edges-When-a-Relationship-Was-True-3b5adccaf42881f7b9f3f378cf7184a0

@@ -3,7 +3,7 @@
 
 ---
 spec: "Scoped Video Match — One Studio or Actor"
-status: Approved
+status: Implemented
 kind: Enhancement
 priority: P2
 notion: https://app.notion.com/p/Scoped-Video-Match-One-Studio-or-Actor-3b5adccaf42881959bbfc33c5511d151

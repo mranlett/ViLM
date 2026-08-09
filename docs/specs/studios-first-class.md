@@ -3,7 +3,7 @@
 
 ---
 spec: "Studios as First-Class Graph Citizens"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P1
 notion: https://app.notion.com/p/Studios-as-First-Class-Graph-Citizens-3b4adccaf42881bfb744c76091541b3b

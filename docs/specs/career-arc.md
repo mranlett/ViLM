@@ -3,7 +3,7 @@
 
 ---
 spec: "Career Arc — Age at Release as a Dimension"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P1
 notion: https://app.notion.com/p/Career-Arc-Age-at-Release-as-a-Dimension-3b5adccaf428814e8e69ea50c0fbcead

@@ -62,7 +62,7 @@ A value containing a literal `|` must round-trip correctly or be rejected explic
 ### ✅ D2 — Scope: AKAs **and** tags. Gallery URLs excluded.
 **Tags are IN.** The original objection was normalisation risk — a CSV import writing tags could introduce near-duplicates that `TagNormalizer` would otherwise catch. That objection is void: the tags UI offers a pick-list of existing tags, which has kept the vocabulary under ~30 in practice. No extra processing is required.
 **Gallery URLs are OUT.** Rationale (Human Operator): *they carry no identifying information.* Identity is precisely what this fix exists to restore. They are also bulk reference data — many long URLs per actor would produce unwieldy cells — and `.actorpkg` already provides full-fidelity actor transfer including the actual image bytes, which a CSV can never do. The CSV's job is the text metadata that gets hand-edited.
-> **⚠️ Consequence for the enrichment spec.** D7 of *Actor Metadata Enrichment* states that tag enrichment is structurally impossible through the CSV path, which is why the `Tall` and ethnicity tag rules were Phase-3-only. **Once this lands, that is no longer true** — the batch path can apply tags across all matched actors instead of one at a time in the app. D7 must be amended when this ships.
+> **⚠️ Consequence for the enrichment spec.** D7 of *Actor Metadata Enrichment* states that tag enrichment is structurally impossible through the CSV path, which is why the `Redhead` and ethnicity tag rules were Phase-3-only. **Once this lands, that is no longer true** — the batch path can apply tags across all matched actors instead of one at a time in the app. D7 must be amended when this ships.
 ### ✅ D3 — Merge: union with existing, de-duplicated
 Worked example from the Human Operator: existing `{John, Jon}` merged with incoming `{John, Jonathan}` yields `John | Jon | Jonathan`.
 - A **blank** cell leaves the existing list untouched — never clears.
@@ -129,7 +129,7 @@ Fixed by testing `Character.isNewline`, and paired with the zero-row error so th
 ### Residual
 The **reordered-header rejection** is unit-tested (nine cases) and wired, but has never been exercised on device by feeding the app a deliberately scrambled CSV. Low risk, recorded for completeness.
 ### Consequence for the enrichment spec
-D2 here put **tags into the CSV**, which supersedes D7 of *Actor Metadata Enrichment*: tag enrichment is no longer Phase-3-only, so the batch path can now apply `Tall` and ethnicity tags across all matched actors.
+D2 here put **tags into the CSV**, which supersedes D7 of *Actor Metadata Enrichment*: tag enrichment is no longer Phase-3-only, so the batch path can now apply `Redhead` and ethnicity tags across all matched actors.
 ---
 ## Evidence
 `ActorGridView.swift:607` (export header), `:678-720` (positional import), `:713-715` (collection fields preserved, not read). `EntityProfile.swift` (`akas`, `tags`, `galleryUrls`). In-app Help text already tells users that tags, gallery photos and aliases are preserved because "this format doesn't carry them" — the behaviour is documented, but the omission is still a fidelity gap. Defect-inventory context: C3 (the `try?`-fetch-then-save wipe, since fixed) and M4 (row-by-row saves, since made transactional).

@@ -3,7 +3,7 @@
 
 ---
 spec: "Full-Screen Zoom on the Match Screen"
-status: Approved
+status: Implemented
 kind: Enhancement
 priority: P2
 notion: https://app.notion.com/p/Full-Screen-Zoom-on-the-Match-Screen-3b4adccaf428813086f1f4548f223b9a

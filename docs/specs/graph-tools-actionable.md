@@ -3,7 +3,7 @@
 
 ---
 spec: "Making the Graph Tools Actionable"
-status: Approved
+status: Implemented
 kind: Bugfix
 priority: P1
 notion: https://app.notion.com/p/Making-the-Graph-Tools-Actionable-3b5adccaf42881239fa2f4ae617d0c2b

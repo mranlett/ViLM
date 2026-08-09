@@ -3,7 +3,7 @@
 
 ---
 spec: "Remove Series Names in Bulk"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P1
 notion: https://app.notion.com/p/Remove-Series-Names-in-Bulk-3b5adccaf42881cfb9d0fe50ff1ae9b9

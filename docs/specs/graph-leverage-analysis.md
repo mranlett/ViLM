@@ -3,7 +3,7 @@
 
 ---
 spec: "What the Graph Could Answer"
-status: Approved
+status: Implemented
 kind: Spike
 priority: P2
 notion: https://app.notion.com/p/What-the-Graph-Could-Answer-3b4adccaf42881a98db8eaedfd4d01c4

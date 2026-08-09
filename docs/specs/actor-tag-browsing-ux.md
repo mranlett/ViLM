@@ -11,6 +11,9 @@ notion: https://app.notion.com/p/Actor-Tag-Browsing-UX-Corrections-3b1adccaf4288
 
 # Actor & Tag Browsing — UX Corrections
 
+> ⚠️ **PARTIAL as of 2026-08-08.** Reconciled against GitHub. Shipped: [#13](https://github.com/mranlett/ViLM/issues/13) gallery thumbnail, [#18](https://github.com/mranlett/ViLM/issues/18) actor sort, [#21](https://github.com/mranlett/ViLM/issues/21) starred photo, [#23](https://github.com/mranlett/ViLM/issues/23) / [#25](https://github.com/mranlett/ViLM/issues/25) tag-page Actors tab.
+> 
+> **Still open — this is why the spec is not Implemented:** [#19](https://github.com/mranlett/ViLM/issues/19) actor filter panel + age filter, [#20](https://github.com/mranlett/ViLM/issues/20) missing-photo sidebar count, [#22](https://github.com/mranlett/ViLM/issues/22) tag card truncation.
 ## 📊 Implementation status — updated 2026-08-03
 Traceability: Notion spec → GitHub issue → code → device verification. A row is **Done** only when the Human Operator has confirmed it on a device; "Implemented" means the code exists and the automated tests pass but nobody has run it yet.
 | Item | Issue | State | Evidence |
@@ -265,7 +268,7 @@ Tags are flat `tag:` strings with no kind, so a tag filter today offers **action
 | --- | --- | --- |
 | an **action** tag | videos where this happens | Video → Tag edges |
 | an **attribute** tag | videos featuring a performer who *is* this | Video → Performer → Tag, **two hops** |
-⭐ **The second is a genuinely new capability, and it is what the operator has always meant.** "Show me videos with a tall" is not a property of any video — it is a property of someone in it. Today that question is either unanswerable or answered by a mis-tagged video, which is the defect the taxonomy removes.
+⭐ **The second is a genuinely new capability, and it is what the operator has always meant.** "Show me videos with a redhead" is not a property of any video — it is a property of someone in it. Today that question is either unanswerable or answered by a mis-tagged video, which is the defect the taxonomy removes.
 ❓ **Open — does one filter surface offer both, or two?** One list is simpler but silently changes the meaning of a selection depending on which kind was picked. Two lists are honest but add a control to a panel R2 already found overcrowded. **Recommended: one list, with kind shown per entry**, since the operator thinks in terms of what they want to find rather than which edge answers it. Needs a decision.
   **✅ decision - one list with kind shown per entry**
 ### R8.2 — ⭐ R6 is resolved by the model, not by a query fix

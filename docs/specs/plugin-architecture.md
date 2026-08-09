@@ -11,6 +11,11 @@ notion: https://app.notion.com/p/ViLM-Plugin-Architecture-3b0adccaf4288104bf63d5
 
 # ViLM Plugin Architecture
 
+> ⚠️ **PARTIAL as of 2026-08-08.** Reconciled against the drive library.
+> 
+> ⭐ [#30](https://github.com/mranlett/ViLM/issues/30) vital statistics is **done and populated** — of 1,274 actor profiles: gender 1,273, country 1,254, hair 1,240, birth date 1,230, career start 1,222, tattoos 594, piercings 432. The issue should be closed.
+> 
+> ⚠️ [#29](https://github.com/mranlett/ViLM/issues/29) is **half done and its title is now wrong.** Links are fetched and stored — 1,008 of 1,013 identified actors carry them — so they are no longer "discarded". What remains is narrower: `ActorCSV.header` carries 22 columns and **`Links`**** is not among them**, so the CSV channel still drops them on round-trip.
 > Umbrella specification for a plugin architecture in ViLM: a plugin registry, a Settings screen for installing and configuring plugins, and a shared enrichment review pipeline that every plugin feeds. Individual plugins are specified on their own pages. **Status: APPROVED 2026-08-02 — cleared for implementation.**
 ## Intention
 ViLM's catalogue is enriched by hand. Several external sources could fill it automatically, but each carries its own vocabulary, licence, credential and appropriateness, and baking any one of them into the app makes the app about that source.

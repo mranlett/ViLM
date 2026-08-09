@@ -134,3 +134,410 @@ Concretely, with the phone library cleaned up and the drive library still holdin
 - The re-pointing statements are unaffected: they update **by column**, not by row.
 - 🚨 **V3 must be re-derived.** It asserts per-table edge counts before and after, and `studio_parent`'s count is no longer bounded by the number of studios.
 - The partial unique index `studio_parent_current` is over `studio_id`, which the re-keying rewrites in place. Verify it still holds **after** re-pointing, since re-pointing two former parents of one studio to the same uid cannot create a second open row — but that reasoning should be asserted, not assumed.
+## ✅ OPERATOR DECISIONS — 2026-08-07
+Taken while the drive library was mid-way through a full video match, to unblock v28 before the work starts.
+### D6 — the split is ACCEPTED
+v28 is **not one automatic migration**. It becomes two things:
+| Part | How it runs |
+| --- | --- |
+| `uid`, `entity_type`, `display_name` and the lookup index | a **registered migration** — additive, reversible, harmless on any library |
+| Minting uids, re-pointing six edge tables and tombstones, renaming every photo, retiring the old id | an **operator-invoked tool**, per library, behind the pre-flight |
+🚨 The reason, restated because it is the whole point: `LibraryStore(at:)` migrates on **open**. A registered `v28` would re-key the drive library the instant it was attached — bypassing the backup, the free-space pre-flight, the studio-conflict gate and the four-phase photo copy. The operator would have no opportunity to stop it and no warning that it had happened.
+⚠️ **Consequence for numbering, now settled:** only the additive half carries a version number. "Schema v28" refers to the columns; the re-keying is a named operation, not a schema version. Precedent: *Migrate Episode Info* is a Settings → Maintenance action scoped to the selected library.
+### Photo failure — COPY, VERIFY, DELETE
+Confirms D3's existing four-phase order as the operator's explicit choice rather than an inference:
+1. **Copy** to the uid-derived name — both names exist
+2. **Verify** the counts match — abort here leaves the database untouched
+3. **Commit** the id change in one transaction
+4. **Delete** the old names — interruptible, idempotent, orphans harmless
+⭐ Chosen knowing the cost: both copies exist between phases 1 and 4, so the pre-flight free-space check is **required, not advisory**. A crash at any point leaves both files rather than neither — the only failure mode where nothing is lost, which is what makes it the right one for the single irreversible step in the project.
+⚠️ These are **downloaded** assets. `.vilmbackup` holds them, but the app cannot rebuild them without re-fetching from the source.
+### Order — PHONE FIRST  ⛔ SUPERSEDED 2026-08-08, see "Order reversed" at the foot of this page
+The smaller, already-cleaned library goes first. A mistake there costs far less than on the 2,104-video drive, which holds the most irreplaceable downloaded photos.
+⭐ Safe because **D4 already designs for the mixed state**: a re-keyed library syncing with an old-keyed one resolves by the name triple and never by uid, so one being ahead of the other is a supported configuration rather than a hazard.
+⚠️ **The pre-ship check D4 names still stands** and is now the gating task before any of this is written: verify the sync payload never carries a raw `actor:Name` id. A payload containing one today would be read as a uid tomorrow.
+---
+**Status moved Draft → Approved** on the strength of these three answers. The remaining prerequisites are operational, not design: a verified backup, and the drive library's in-progress video match finishing.
+⭐ **Both data prerequisites are now MET** — re-measured on the drive library the same day: **0 videos with two studios** (was 63) and **0 unclassified tags**. Nothing in the data blocks this any longer.
+---
+# 🚨 PRE-SHIP CHECK RESULT — 2026-08-08: **FAILS**
+D4's gating task, run before writing anything: *"verify the sync payload never carries a raw **`actor:Name`** id."*
+**It carries one in seven places, and the import resolves nodes BY that string.**
+| Payload field | Carries |
+| --- | --- |
+| `ActorLibraryExport.profiles[].id` | `actor:Name` |
+| `ActorLibraryExport.studios[].id` | `studio:Name` |
+| `ExportedPhoto.actorId` | `actor:Name` |
+| `GraphEdgePair.from` / `.to` (performerTags) | raw ids both ends |
+| `StudioParentEdge.from` / `.to` | raw ids both ends |
+| `EntityTombstone.entityId` / `.replacedBy` | raw ids — documented as `actor:Helen B` |
+| `NodeMatch.entityId` (entityMatches) | raw ids |
+## ⚠️ The spec's framing was slightly wrong, and the real hazard is worse
+This spec said a raw id in the payload "would be read as a uid tomorrow." But the payload **must** carry something name-derived — D4 requires federation to resolve by the name triple. Carrying `actor:Name` is not itself the defect.
+🚨 **The defect is that the import uses the incoming string as a database key.** `applyGraphMerge` does `fetchEntityProfile(for: incoming.id)` and then `saveEntityProfile(incoming)` — looking up *and storing* by the sender's key verbatim. Today that is invisible, because both libraries derive the same key from the same name.
+After v28 it breaks in **both** directions, and neither raises an error:
+| Direction | Failure |
+| --- | --- |
+| v28 library → old library | Sender's `id` is now a uid. Receiver stores a node keyed by a foreign uid — a **duplicate** of a performer it already has under its own name key. Federation silently doubles the library. |
+| Old library → v28 library | `fetchEntityProfile(for: "actor:Name")` misses in a uid-keyed library, so a node is created under an old-style key. Its edges reference uids and **never join**. |
+⚠️ **This invalidates the "phone first" plan as currently written.** That order was judged safe because "D4 already designs for the mixed state" — but D4's rule is not implemented at the boundary. The moment the phone library is re-keyed, the first sync with the drive library corrupts one of them.
+## ⭐ The fix has a precedent already in the repo
+The **tag** path in `applyGraphMerge` is already correct:
+```javascript
+existingTags.first(where: { $0.identityKey == incoming.identityKey })
+```
+It resolves by name identity, never by raw key. Entities need the same treatment — and `TagRecord.identityKey` is the model to copy.
+## Therefore: v28 gains a phase 0
+**Phase 0 — resolve federation by the name triple, on the CURRENT schema.**
+⭐ Behaviourally a no-op today, because the triple and the key are the same string — which is exactly what makes it safe to build and test now, before any re-keying exists to debug it against. It converts the riskiest unknown in v28 into shipped, tested code.
+- Export emits `(entity_type, tag_kind, display_name)` explicitly, not `id`
+- Import resolves that triple to a **local** node, minting one only when genuinely absent
+- No incoming string is ever written to a key column
+- Tombstones and photos resolve the same way
+⚠️ Phases 1–4 as designed above do not change. This is inserted before them, and **the re-keying must not begin on either library until it ships.**
+## Phase 0 — `NodeIdentity` BUILT 2026-08-08
+The travelling identity type, with the no-op discipline asserted rather than assumed. **1,347 LibraryCore tests, 0 failures** (11 new). D9 clean.
+| Piece | Decision |
+| --- | --- |
+| `NodeIdentity(type:tagKind:displayName:)` | the D4 triple, `Codable` so it travels |
+| `parse(_:)` / `legacyId` | splits on the FIRST colon — a studio named "Vol 2: The Return" must not be truncated into a second node |
+| `resolutionKey` | 🚨 EXACT for actor/studio, folded for tag — reproducing today's two different behaviours exactly |
+| `type` is a `String`, not an enum | a node from a NEWER library survives a round trip through an older build instead of being dropped |
+| `EntityProfile.nodeIdentity` | ⭐ the single place that changes when the re-keying lands |
+⚠️ **Why no folding.** It is tempting to fold case and spacing at the boundary, since spelling collisions are real. Doing so would make phase 0 *merge nodes the current build keeps apart* — a behaviour change smuggled in under a migration, and the hardest kind to notice afterwards. Asserted by `testPerformerAndStudioResolutionIsExactAndDoesNotFold`. If performer-name folding is wanted it is its own spec.
+⚠️ The separator is a control character, so a name cannot forge another node's key (`testAKeyCannotBeForgedByANameContainingTheSeparator`).
+### Next, in order
+1. `ActorLibraryExport` emits `NodeIdentity` alongside each id — additive, so old builds ignore it and new builds prefer it
+2. `applyGraphMerge` resolves incoming identities to LOCAL nodes; no incoming string reaches a key column
+3. Tombstones and `ExportedPhoto.actorId` resolve the same way
+4. **Then** phases 1–4 — **drive library first** (order reversed 2026-08-08, see the foot of this page)
+---
+# ⛔ ORDER REVERSED — DRIVE LIBRARY FIRST (operator, 2026-08-08)
+Supersedes the "PHONE FIRST" decision of 2026-08-07. **Nothing else in this spec changes** — the four-phase copy/verify/commit/delete, the pre-flight, the backup requirement and phase 0 all stand exactly as written.
+**Reason:** the drive library is where the work is going. It holds the matching campaign, the enrichment, and the current state worth preserving; re-keying the phone library first would put the migration on the copy that matters least and leave the active one waiting.
+## ⚠️ What the reversal costs, stated plainly
+Phone-first was chosen because *"a mistake there costs far less than on the 2,104-video drive, which holds the most irreplaceable downloaded photos."* That reasoning has not become wrong — it has been **outweighed**. Going drive-first means the single irreversible step in this project runs first against the library with the most to lose.
+⭐ Two things make that acceptable, and both were checked rather than assumed:
+1. The four-phase order means a crash at any point leaves **both** copies of every file, never neither.
+2. 🚨 Phase 0 must ship first regardless. Without it the first sync after re-keying corrupts one of the two libraries — and that is now more consequential, not less, because the re-keyed side is the valuable one.
+## ✅ Pre-flight measured on the drive library, 2026-08-08
+The spec asked for this and it had never been done: *"gallery photo counts are per-profile and unmeasured — measure before sizing phase 1's disk requirement."*
+| Quantity | Measured |
+| --- | --- |
+| Profile + gallery images | **8,560 files, 2.59 GB** |
+| Required by the pre-flight (`bytes * 1.1 + 100 MB`) | **~2.95 GB** |
+| Free on the volume | **223 GB** |
+| Verdict | ⭐ passes with ~75x margin — disk is not a constraint here |
+## ✅ Data prerequisites re-verified on the drive library
+Not carried forward from the 2026-08-07 reading — re-measured, because the library has changed substantially since.
+| Prerequisite | State |
+| --- | --- |
+| Videos with two studios — edge representation | **0** |
+| Videos with two studios — tag-string representation | **0** |
+| Unclassified tags | **0** |
+| v26 applied (the lookup index depends on `tag_kind`) | **yes** |
+| Id prefixes present | only `actor:` and `studio:` |
+⚠️ Still outstanding and **operational, not technical**: a verified `.vilmbackup` taken immediately before, and phase 0 shipped.
+## ⭐ A live case that validates the parse decision
+The drive library holds **one studio whose display name contains a colon** — 26 characters, two segments — and it carries a real `video_studio` edge.
+`NodeIdentity.parse` splits on the **first** colon only, so it survives. A last-colon or split-on-every-colon implementation would have truncated that name, minted a second node for it, and orphaned the edge — silently. `testANameContainingAColonIsNotTruncated` now asserts it, and the library proves the case is not hypothetical.
+🚨 **Consequence for phase 3.** The re-keying UPDATE in D1 uses `substr(id, 1, instr(id,':')-1)` and `substr(id, instr(id,':')+1)` — SQLite's `instr` returns the FIRST occurrence, so both are correct for this row. Worth stating because it is the kind of thing a later "tidy-up" rewrites into something that breaks on exactly one row out of 1,562.
+## Phase 0 — THE GRAPH BOUNDARY IS WIRED, 2026-08-08
+**1,372 LibraryCore tests, 0 failures** (25 new). macOS and iOS build. D9 clean, UI gate 0 errors.
+### The invariant, now enforced rather than described
+> **No string from a payload is ever written to a key column.**
+`applyGraphMerge` used to gate every incoming reference on `known.contains(incomingId)` and then write that same string. Every one of those now goes through `NodeResolver`, and the **local** id it returns is what gets written.
+| Reference | Now |
+| --- | --- |
+| Arriving studio profile | resolved; if absent, minted under `identity.legacyId` — never the sender's key |
+| `performerTags` performer end | resolved; the held-edge check compares the LOCAL pair, or an existing edge is missed and duplicated |
+| `studioParents` child and parent | resolved independently — an unresolvable parent would be a dangling network the audit reports forever |
+| Former ownership periods | resolved too — historical rows are excluded from current-set audits, so a bad one would be invisible |
+| `entityMatches` | 🚨 re-keyed into a new `NodeMatch` before writing; passing it through would put a foreign id in `entity_match.entity_id` |
+### Defensive decisions worth keeping
+- **Four outcomes, not an optional.** `.resolved` / `.absent` / `.unparseable` / `.ambiguous`. Absent may justify minting a node; unparseable never does — collapsing them is how a library acquires a row keyed `""` that nothing can reach or remove.
+- 🚨 **`.ambiguous`**** is reachable today.** Tag identity folds case, so `tag:SCUBA` and `tag:Scuba` are two rows sharing one key. A plain dictionary build would hand back whichever was read last; the resolver removes contested keys so **neither** resolves.
+- ⚠️ **Re-index after minting.** Without it, the same studio arriving twice in one payload is minted twice. Asserted by `testTheSameStudioArrivingTwiceIsMintedOnce`.
+- **An unparseable LOCAL id is dropped from the index, not fatal.** A row from a newer build must not take the whole sync down.
+- **`EntityProfile.id`**** became ****`private(set) var`** with `reidentified(as:)` in the same file. ⚠️ Reconstructing the struct field-by-field would have added a **ninth** place needing an update whenever a property is added — the omission that once discarded studios, tags and every graph edge on import.
+- **Every refusal is counted** in `SyncIntegrityReport`, split into ordinary (`absentNodes`) and defect (`unparseableIds`, `ambiguousNodes`) so a normal sync is not reported as broken.
+### ⚠️ Honest scope — what is NOT yet wired
+`applyActorMerge` — **profiles, photos and tombstones** — still resolves by the sender's key. It is the larger half: photo filenames derive from the entity id, so re-keying there is entangled with the phase 1–4 file work. **v28's re-keying must not run until it is done.**
+⚠️ Also note the new tests guard behaviour that was partly correct already (the old code did skip unknown match nodes). What is genuinely new is the resolution, the re-keying on write, the mint-once re-indexing, and the counting.
+## Phase 0 — COMPLETE. Actor half wired 2026-08-08
+**1,394 LibraryCore tests, 0 failures** (10 new). macOS and iOS build. D9 clean, UI gate 0 errors.
+`applyActorMerge` now resolves profiles, photos and tombstones. **The gate on the re-keying is lifted.**
+| Site | Now |
+| --- | --- |
+| Tombstone → local profile lookup | resolved; the tombstone itself stays NAME-keyed, per D4 |
+| Existing-profile lookup | keyed by the resolved local id |
+| Photo filenames (primary + gallery) | 🚨 derived from the LOCAL id — the sender's would orphan every image |
+| `EntityProfile(id:)` on write | 🚨 was `imported.id`, the sender's key; now the local one |
+| `photosByActor` lookup | ⚠️ deliberately still the sender's id — see below |
+### 🚨 The defect that would not have announced itself
+`deletedByTombstone` is **filled from tombstones and tested against profiles**, and after v28 those two carry different shapes: a tombstone is name-keyed (it must be — it names an entity that no longer exists, so a uid would point at nothing), while a profile arrives keyed by the sender's uid.
+Comparing them raw would simply stop matching. The deletion an export carries would then be undone by **that same export** — precisely the failure `deleted_entities` exists to prevent, and exactly the "fails silently" case D2 warned about. The set is now keyed by resolution key.
+### ⭐ The one place the sender's id is still correct
+`photosByActor[imported.id]`. That dictionary is grouped from `photo.actorId`, which is also sender-side, so both halves agree. **Resolving here would look up a local id in a sender-keyed dictionary, find nothing, and silently drop every photo.** Commented in place, because it looks like an omission.
+### ⚠️ Honest note on the tests
+Several are **regression guards, not proofs**. Today the local form and the arriving form are the same string, so the shape divergence they protect against cannot be produced end-to-end yet. They pin the behaviour before the shapes diverge — the only moment it can be pinned honestly. Marked as such in the file.
+One failure during development was **my fixture, not the code**: `suppressesImport` refuses only a profile that PREDATES the deletion, and both dates defaulted to `Date()`. A profile newer than the tombstone legitimately means "re-created since". Dates are now explicit and ordered.
+### Next
+1. Verified `.vilmbackup` on the drive library
+2. The additive migration — `uid`, `entity_type`, `display_name`, lookup index
+3. ⚠️ Re-derive **V3** (per-table edge counts) — `studio_parent` is no longer bounded by the studio count since v30
+4. ⚠️ Re-measure the pre-flight immediately before phase 1 — the enrichment batch writes into the same `profiles/` directory the four-phase copy operates on
+## v34 — the additive half, BUILT 2026-08-08
+**1,405 LibraryCore tests, 0 failures** (11 new). macOS and iOS build. D9 clean, UI gate 0 errors.
+`uid`, `entity_type`, `display_name` on `entity_profiles`, plus a lookup index. `uid` is added and left NULL — minting is the tool's job.
+### 🚨 Two departures from D1, both found by checking it against the real library
+**1. NO UNIQUE INDEX in the registered migration.**
+D1 asks for a unique index on `(entity_type, tag_kind, display_name)`. ⚠️ A unique index can **fail** — and this migration runs on **open**, so a failure leaves the app unable to open that library at all. That contradicts D6's own requirement that the registered half be *"harmless on any library"*.
+The drive library satisfies it today (checked: **0** duplicate type+name pairs), but the phone library cannot be inspected from here, and "probably fine" is not a property to stake app startup on. **The unique index moves to the tool**, behind a pre-flight that REPORTS duplicates rather than failing on them. The index created here is non-unique, so it can only speed lookups up — never reject a row.
+**2. NO ****`tag_kind`**** COLUMN, because there is nothing to put in it.**
+D1 assumes tags are rows in `entity_profiles`. **They are not.** They live in `tags`, keyed by `identity_key`, and `entity_profiles` holds only `actor:` (1,351) and `studio:` (313) rows. The kind axis has nothing to index here — and the spec itself notes the triple *"degenerates to the name"* for performers and studios.
+🚨 **Consequence, stated plainly: V2 — "the tag split becomes possible" — is NOT delivered by v28 and cannot be until tags become entity rows.** That is a separate piece of work. The spec has claimed this unlock since it was written; it was never achievable by this migration.
+### ⚠️ A defect caught while writing the tests
+The migration backfills rows that exist **when it runs**. Nothing populated the columns on **insert**, so every profile created afterwards would have had them permanently NULL — correct for old data, silently empty for new. The first thing to read them would have looked right in testing and been wrong in use.
+`EntityProfile.encode` now writes both on every save. Asserted by `testARowCreatedAfterTheMigrationIsAlsoPopulated`.
+### ✅ Backfill verified against a COPY of the drive library
+Unit tests exercise the write path; the backfill itself cannot be unit-tested because migrations run at open. Run against a copy of the real catalogue instead:
+| Check | Result |
+| --- | --- |
+| Rows populated | **1,664 of 1,664** typed and named |
+| `uid` minted | **0** — correct, that is the tool's step |
+| 🚨 `entity_type \\|\\| ':' \\|\\| display_name` reproduces `id` exactly | **every row** — no name truncated or altered |
+| The colon-named studio | 26-char name preserved, round-trips exactly |
+| Would a UNIQUE index have held? | yes on this library — but see departure 1 |
+### Next — the operator-invoked tool
+1. Pre-flight: free space, duplicate `(type, name)` report, backup confirmation
+2. Mint uids · re-point six edge tables + tombstones · four-phase photo move · retire the old id
+3. ⚠️ Re-derive **V3** — `studio_parent` is no longer bounded by the studio count since v30
+4. ⚠️ Re-measure the photo footprint immediately before phase 1
+---
+# 🚨 D1 CONTRADICTS D4 ON TOMBSTONES — and D1 is not executable
+Found 2026-08-08 while designing the pre-flight, measured on the drive library.
+**D1** lists `deleted_entities` among the tables to *"re-point BY JOIN on the old id"*.
+**D4** says a tombstone crossing libraries is *"matched by that same triple, not by uid."*
+Those cannot both hold. Measured:
+| Tombstones on the drive library | **1,202** |
+| --- | --- |
+| ...naming an entity that still exists | 100 |
+| 🚨 ...naming an entity that is GONE | **1,102** |
+D1's re-pointing joins `entity_profiles` on the old id. For a tombstone whose entity was deleted there **is no row to join to** — so 1,102 of 1,202 would be set to NULL or left stranded.
+⚠️ **That is not a debatable design choice. It is impossible to execute for 92% of the rows, and executing it destroys the deletion record for exactly the entities the table exists to keep deleted.** Every one would resurrect on the next federation sync — the failure D2 already describes as *"invisible at migration time"*.
+## ⭐ Resolution: tombstones stay NAME-keyed. Permanently.
+A tombstone names something that no longer exists, so it can never hold a uid — there is nothing to mint one from. The name triple is the only identity available to it, which is exactly what D4 says and what phase 0 already implemented.
+**D1's table list must drop ****`deleted_entities`****.** The tables that get re-pointed are the six edge tables and nothing else:
+`video_performer` · `video_studio` · `video_tag` · `performer_tag` · `studio_parent` (both columns) · `entity_match`
+⚠️ `pending_tag_association` is also in D1's list and currently holds **0** rows — harmless either way, but it keys videos to tag identity keys, not to entity ids, so it needs no re-pointing either.
+## ✅ Pre-flight, run by hand on the drive library 2026-08-08
+| Check | Result |
+| --- | --- |
+| v34 applied | ✅ yes |
+| 🚨 Duplicate (type, name) — the unique index moved to this gate | ✅ **0** |
+| Profiles with no derivable identity | ✅ **0** |
+| Dangling edges across all tables | ✅ **0** |
+| Photo footprint | 2.67 GB |
+| Free space | 223 GB (needs ~3.0 GB) |
+### V3 baseline — the counts to assert against after re-pointing
+⚠️ Re-derived per the v30 note: `studio_parent` is no longer bounded by the studio count, so it is asserted as a raw row count like the others rather than against the number of studios.
+| Table | Rows before |
+| --- | --- |
+| `video_performer` | 3,720 |
+| `video_tag` | 3,450 |
+| `entity_match` | 2,107 |
+| `video_studio` | 1,830 |
+| `performer_tag` | 516 |
+| `studio_parent` | 132 |
+| `pending_tag_association` | 0 |
+⚠️ A snapshot, not a constant — the library is in active use. The tool must take its own baseline inside the same transaction rather than comparing against these.
+## The re-key engine — BUILT 2026-08-08, deliberately NOT runnable yet
+**1,436 LibraryCore tests, 0 failures** (13 new). Four phases, each separately callable: mint → copy → verify → commit → delete.
+### Implementation findings
+🚨 **`PRAGMA defer_foreign_keys`**** is what makes this possible at all.** Six tables carry a foreign key to `entity_profiles(id)` with `ON DELETE CASCADE` and **no ****`ON UPDATE`**, so changing a primary key is rejected the instant it happens. Deferring moves every check to COMMIT, by which point parents and children have both moved. Children are re-pointed first, while `id` still holds the old value — that is what the join needs.
+🚨 **V3 is a GATE, not a report.** The per-table counts are re-checked INSIDE the transaction, and a mismatch throws and rolls the whole thing back. A count taken before the write began proves nothing about what the write did. Backed by a test that corrupts the baseline and asserts the node is still name-keyed afterwards.
+⚠️ **Photo mapping is by LONGEST matching safe id, from a directory scan.** `actor_Jane` is a prefix of `actor_Janet`, and a column-driven mapping would also orphan any file the database has forgotten.
+### 🚨 A data-loss bug found while writing the tests
+`EntityProfile.encode` derived `entity_type` and `display_name` from the id. After the re-key the id is a uid with **no colon**, so the derivation yields nil — and assigning nil would **blank the display name on the next save of every profile**. A name is not recoverable from a uid, so that is permanent loss, and it would have happened the first time enrichment touched a record.
+Fixed: the columns are written only while the id still encodes them, and omitted otherwise so GRDB leaves the stored values alone. Asserted by `testSavingAProfileAfterTheRekeyDoesNotBlankItsName`.
+## ⛔ THE REAL BLOCKER — the app still reads names out of ids
+The engine is correct. **The application around it is not ready**, and running the tool today would leave a working database that the UI cannot render.
+| Assumption "an id contains the name" | Sites |
+| --- | --- |
+| App code deriving a display name from an id | 38 |
+| LibraryCore doing the same | 23 |
+| 🚨 Code CONSTRUCTING an id from a name — `"actor:\(name)"` | **106** |
+| **Total** | **167** |
+After the re-key, every one of those 106 lookups misses and every one of those 61 labels shows a uid.
+⚠️ **This is the spec's own "retire the old id" step, and it is larger than the migration it follows.** It was staged last and costed as a tidy-up; it is actually the bulk of the work.
+### Therefore
+The four phases exist, are tested, and are **not wired to any button**. Wiring one now would hand the operator a switch that quietly breaks their app.
+**Next, and it is a distinct piece of work:**
+1. `EntityProfile` gains `displayName` and `entityType` as real stored properties
+2. The 106 construction sites route through a lookup by identity instead of string interpolation
+3. The 61 display sites read `displayName`
+4. **Only then** does the upgrade get a button
+## Status 2026-08-08 — steps 1 and 1b complete
+`EntityProfile` carries `displayName` and `entityType` as stored properties, and **all eight reconstruction sites pass them through explicitly**. Verified non-vacuously: reverting one site makes the test fail with the uid appearing where the name should be.
+**1,464 LibraryCore tests, 0 failures.** Both platforms build.
+| Piece | State |
+| --- | --- |
+| Phase 0 — federation boundary (graph + actor halves) | ✅ |
+| v34 — additive columns + lookup index | ✅ verified on the real library |
+| Pre-flight — logic and screen | ✅ |
+| Re-key engine — four phases | ✅ tested, deliberately no button |
+| Step 1 + 1b — the name as a field | ✅ |
+| Step 2 — id construction sites | ⏳ **needs a proper audit, see below** |
+| Step 3 — display sites read `name` | ⏳ |
+### ⚠️ The "106 sites" figure was too pessimistic
+🚨 **The re-key touches ****`entity_profiles`**** only. The ****`actor:Name`**** strings on VIDEOS are a different namespace and do not change.** So code building `"actor:\(name)"` to match a tag string is correct and stays; only code using it to reach an entity ROW must move.
+A first classification of the 106:
+| Use | Sites | Must change? |
+| --- | --- | --- |
+| Entity-profile lookup | 16 | yes |
+| Edge read/write | 6 | yes |
+| Tag strings on assets | 7 | **no** — stays name-based |
+| Unclassified by a crude grep | 77 | unknown |
+⚠️ Those numbers come from pattern matching, not from reading the sites. The shape is clear — the must-change set is far smaller than 106 — but the 77 need a real audit before anyone commits to a number.
+⭐ And the tool for step 2 already exists: `NodeResolver`, built for phase 0, resolves a name-form id to a local one. Step 2 is largely "route entity lookups through the resolver", not new machinery.
+## Session close 2026-08-08 — data side complete
+**Actor identity gap 0 · video gap 0 · ~2,898 identity edges · pre-flight gates clean.** Two studios remain with no source id and may belong at `unmatchable`.
+### 🚨 Five places wrote identity to a column and not the graph
+The recurring defect of the day. A screen sets `enrichmentSourceId`, saves, and never records the `entity_match` edge — so the record satisfies every column-reading check and stays on the worklist forever. The operator resolved ten from a queue and watched all ten return.
+Now routed through one entry point, `LibraryStore.applyReviewedMatch(_:source:recordingUnder:)`: saves *and* records, returns `.noSourceId` rather than succeeding silently, and takes the post-rename id so the edge names a row that exists.
+⚠️ A consistency-gate rule guards it but needed a **named allowlist entry**, which is how gates rot. Worth a cleaner discriminator when one appears.
+⭐ Lesson, learned three times: **confirming an identity and copying fields are different acts.** Three screens refused to let a match be confirmed without accepting at least one field — including a `.nothingToApply` state offering only Cancel, on exactly the actors whose profiles were already complete.
+### Remaining, in order
+1. **Audit the 77 unclassified ****`"actor:\(name)"`**** sites.** ⚠️ Sites matching the `actor:Name` **tag strings on videos stay as they are** — a different namespace that does not change. The 16 + 6 split was grep, not reading; this audit sizes everything after it.
+2. Route the must-change ones through `NodeResolver` — built and tested for phase 0, and every such change is a no-op on today's schema.
+3. Display sites read `EntityProfile.name`.
+4. Wire the button; then backup → pre-flight → four phases, drive library.
+⚠️ The re-key engine is built and tested and **deliberately has no button**. Do not wire one until 1–3 are done.
+---
+# ✅ STEP 1 DONE — the audit. **75 sites, not 106**
+Run 2026-08-08 by reading every site, not by pattern matching. Reproduce with:
+```javascript
+grep -rn '"actor:\\(' --include='*.swift' LibraryCore/Sources ViLM
+```
+## 🚨 The "tag strings on videos stay" exemption is almost empty
+The previous entry assumed a meaningful share of the 106 were `asset.tags` strings and would not need to change. **Two sites qualify. That is all of them:**
+| Site | Why it stays |
+| --- | --- |
+| `VideoEnrichmentReview.swift:482` | `addTag("actor:\(credit.name)")` — writes into `asset.tags` |
+| `FileNameParser.swift:232` | tag additions, compared only against other tag strings |
+⚠️ **Everything else bridges the two namespaces.** The common shape is `known.contains("actor:\(name)")` where `known` is a set of `entity_profiles.id` — a string built from a video's cast name and then used to reach an entity ROW. Those are entity lookups wearing tag-string clothing, and all of them break at the re-key.
+## ⭐ But the work is far smaller than 73 decisions
+| Group | Sites | Shape of the work |
+| --- | --- | --- |
+| Dictionary reads of `[String: EntityProfile]` | 35 | ⭐ **one line** — every such dictionary is built at `ContentView.swift:1547`, `Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })`. Re-key that build site and all 35 become mechanical |
+| Id construction (editors, filenames, renames) | 19 | per-site, but shallow |
+| LibraryCore bridge + edge writes | 19 | the only ones needing real thought; ~13 are load-bearing |
+| Stay as they are | 2 | — |
+⚠️ **28 of the 54 app-side sites are in ****`ActorGridView`**** alone**, all reading the same dictionary. The site count overstates the work by roughly a factor of three.
+⚠️ The choke-point dictionary must be re-keyed **type-qualified** — a bare display name collides across `actor`/`studio`/`tag`.
+## 🚨 `NodeResolver` could not have survived the re-key — FIXED
+The previous entry said *"the tool for step 2 already exists."* It did, but it could not have been used:
+`init(localIds:)` recovers identity by calling `NodeIdentity.parse` on each id. **A uid has no colon**, so after the re-key every row fails to parse, and the type's own "drop what cannot be parsed" rule then empties the entire index — silently. The resolver would answer `.absent` to everything and report `indexedCount == 0`, which reads as a library containing no nodes rather than a resolver that cannot see them. **That is the exact failure mode phase 0 exists to prevent, sitting inside phase 0's own entry point.**
+Fixed the same day. Both initialisers now funnel through one private `init(pairs:)` so the contested-key rule cannot drift:
+| Initialiser | Recovers identity from | Survives the re-key |
+| --- | --- | --- |
+| `init(localIds:)` | parsing the id | ❌ — kept, with a 🚨 comment naming its expiry |
+| `init(profiles:)` | `entity_type` / `display_name` via `type` and `name` | ✅ |
+All five production call sites moved (`GraphSync` ×3, `ActorLibraryPackage` ×2) — each was already fetching profiles and discarding everything but `.id`, so it was a simplification.
+⭐ **No-op today, asserted rather than argued** (`testBothInitialisersAgreeOnTodaysSchema`), because `type` and `name` prefer the stored columns and fall back to the id.
+### ⚠️ The one row where reading columns could disagree with parsing ids
+Found by checking the v34 backfill against the initialiser rather than assuming they agreed. The backfill runs `WHERE instr(id, ':') > 1`:
+- A **colonless** id leaves `entity_type` NULL → both initialisers drop it. Agreed.
+- 🚨 **`"actor:"`** backfills to type `actor` with an **empty** display name. `NodeIdentity.parse` rejects it for the empty half; a naive column reader would index it, and one nameless row would then contest the identity of every other nameless row.
+`init(profiles:)` now refuses an empty type or an empty name, matching `parse` exactly. Zero such rows exist on the drive library; pinned by `testAProfileWithAnEmptyNameIsRefusedByBothInitialisers` and `testANamelessProfileDoesNotContestARealIdentity`.
+**1,479 LibraryCore tests, 0 failures** (12 new). macOS and iOS both build.
+---
+# ✅ The two studios — resolved, and the framing corrected
+The previous entry said *"two studios remain with no source id and may belong at **`unmatchable`**."* Measured on the drive library: they do not.
+Both carry `enrichment_state = matched`, `enrichment_source = the source`, an **empty-string** source id, and **no ****`entity_match`**** edge at all**. They are the only two of 468 studios in that shape.
+```javascript
+SELECT id FROM entity_profiles p LEFT JOIN entity_match m ON m.entity_id = p.id
+WHERE p.enrichment_state='matched'
+  AND (p.enrichment_source_id IS NULL OR p.enrichment_source_id='');
+```
+## ⭐ Library-wide identity check — the five-site fix is holding
+| Type | Matched | No source id | No edge |
+| --- | --- | --- | --- |
+| actor | 2,482 | **0** | **0** |
+| studio | 468 | 2 | 2 |
+⭐ The inverse defect — a source id present with no edge, the exact five-site shape — is **0 across the entire library**.
+## ⚠️ NOT a sixth instance of that defect. Read this before touching `confirmStudio`
+`confirmStudio` sets `.matched` unconditionally and guards both the id write and the edge write behind `if let sourceId, !sourceId.isEmpty`. That looks like the same bug, **and it is deliberate** — pinned by `StudioSourceIdTests.testAStudioIsStillConfirmedWithoutAnId`, whose doc reads *"the id is an improvement, not a precondition."*
+Impact analysis on changing it: **CRITICAL** — 323 symbols, 21 direct callers, 4 execution flows broken at step 1. It would also rewrite six tests and change `VideoEnrichmentReview.studioResolution` from auto-apply to **ask**, because `StudioPolicyParityTests` defines `isVerified` as `enrichmentState == .matched`.
+## ⭐ Fixed at the callers instead
+Reading the eight call sites narrowed it: every **primary**-studio confirm passes `studioSourceId`. Only the four **parent** confirms pass an optional one — and that is where both damaged rows came from.
+New `LibraryStore.ensureStudioProfile(_:)` creates the row and claims nothing — no state, no source, no id, no edge — and returns whether it created one. The four parent sites (`StudioMatchReviewView`, `VideoBatchMatchModel`, `VideoRefreshModel`, `VideoEnrichmentModel`) now confirm only when they hold an id and call it otherwise.
+⭐ **Why the row must still exist:** `setStudioParent` needs something to point at, or the network becomes the dangling parent Studio Health reports. Asserted end-to-end rather than checked by hand — `testAnEnsuredParentCarriesTheHierarchyWithoutDangling`.
+⭐ **Why it must NOT be ****`.matched`****:** `StudioBatchPolicy.skipReason` skips anything matched, so claiming a match the source could not evidence closes the door on the one tool that could later supply the id. This is the same "door closed behind them" that stranded 51 of 62 studios. Asserted by `testAnEnsuredStudioIsNotSkippedByTheBatchPolicy`.
+**Zero existing tests changed; 4 added.** Visible consequence: a parent network named without an id now appears in the Match Studios worklist instead of silently reading as matched.
+🚨 **The two damaged rows are NOT repaired.** The code change only stops new ones. They still read `matched` / empty id / no edge, and `StudioBatchPolicy` will keep skipping them, so they cannot self-heal — clearing their state is a separate, deliberate act.
+---
+## Remaining, in order
+1. ~~Audit the 77 unclassified sites~~ ✅ **done — 75 total, 2 stay, 73 move**
+2. Re-key the `ContentView.swift:1547` dictionary build (type-qualified) — collapses 35 of the 73 — then route the 19 LibraryCore bridge sites through `NodeResolver.init(profiles:)`. Every such change is a no-op on today's schema.
+3. Display sites read `EntityProfile.name`.
+4. Wire the button; then backup → pre-flight → four phases, drive library first.
+⚠️ The re-key engine remains built, tested and **deliberately without a button**. Do not wire one until 1–3 are done.
+---
+# ✅ STEP 2 — the read path, and the minting decision (2026-08-09)
+**1,509 LibraryCore tests, 0 failures. macOS and iOS build. Independent audit: PASS** (two rounds — the first round's findings were real regressions in the diff and are fixed).
+## `EntityProfileIndex` — how the app finds a profile from a NAME
+Every screen held a cast name off a video and looked it up in a `[String: EntityProfile]` keyed by `EntityProfile.id`. That works only while the id *is* the name.
+| Call | Replaces |
+| --- | --- |
+| `index[actor: name]` | `dict["actor:\(name)"]` |
+| `index.actors` / `ofType(_:)` | `filter { $0.id.hasPrefix("actor:") }` |
+| `index.profile(id:)` | id lookups that genuinely hold an id |
+| `index.merged(ordered:)` | `MergeSemantics.mergedProfileView(ordered:)` |
+⭐ **Why a type rather than re-keying the dictionary.** A dictionary keyed by a differently-shaped `String` still compiles at every call site and returns nil — forty silent misses in the code that draws the library, caught by no test and no compiler. Changing the TYPE makes each one a build error. That property is the reason it exists; the ergonomics are a bonus.
+### Three decisions worth recording
+🚨 **It RESOLVES a contested identity where ****`NodeResolver`**** REFUSES one.** The asymmetry is deliberate: `NodeResolver` guards *writes*, and attaching an edge to the wrong node is corruption, so refusing beats guessing. This guards *reads*, where showing one of two same-named performers is cosmetic but showing nothing blanks the row — hiding the very duplicate the operator needs in order to merge it. The winner is deterministic (lowest id), because the input is a database read order and last-writer-wins would show a different profile from one launch to the next.
+🚨 **It must not use ****`Dictionary(uniqueKeysWithValues:)`**** on the identity key.** That construction **traps** on a repeated key. It is safe today only because ids are unique — identities are not, so the same code would turn a data condition into a launch crash.
+⚠️ **Prefer the concrete ****`init([EntityProfile])`****.** The `some Sequence<EntityProfile>` overload is markedly more expensive for the type-checker, and routing SwiftUI call sites through it was enough on its own to push `AssetsGridView` past the solver's budget.
+## 🚨 THE MINTING DECISION — the library decides, not the caller
+The open question from the previous entry, now settled.
+**`LibraryStore.newEntityProfile(named:type:)`**** is the single minting point for the whole app.** It mints an opaque uid **only when the library's keys are already uids**, and the legacy `type:Name` form otherwise.
+| Option | Verdict |
+| --- | --- |
+| Always mint uids once v34 has run | ❌ **Rejected.** ~140 sites still reach a profile by building `"actor:\(name)"`. A new actor would be created and then be invisible to the app that created it — the row exists, every screen says it does not. |
+| A build flag or caller argument | ❌ **Rejected.** Two libraries can be open at once in different states. The shape is a property of the library, so only the library can answer. |
+| **Follow the library's existing shape** | ✅ **Chosen.** A no-op until the re-key genuinely runs — the same discipline as the rest of phase 0 — and automatically correct afterwards, per library, in a mixed session. |
+### How "already re-keyed" is detected
+```javascript
+SELECT EXISTS(SELECT 1 FROM entity_profiles WHERE uid IS NOT NULL AND id = uid)
+```
+⭐ That is precisely the state `rekeyCommit` leaves behind — it mints into `uid`, then assigns `id = uid` in one transaction.
+⚠️ **Deliberately not "does any id lack a colon."** That is also true of one malformed legacy row, and would flip the whole library's minting behaviour on a single piece of damage.
+⚠️ **Deliberately not "is ****`uid`**** populated."** That is true in the window after minting and before the commit, during which the keys are still legacy — minting a uid there would put a mixed row inside a library mid-migration.
+An empty library answers false, which is right: a fresh library is created in the legacy shape and re-keyed later like any other.
+⚠️ **`entity_type`**** and ****`display_name`**** are passed explicitly in BOTH branches.** After the re-key there is nothing to derive them from, and a uid-keyed row without them is a profile whose name is unrecoverable.
+Routed through it so far: `confirmStudio`, `ensureStudioProfile`, `promoteStudioProfiles`.
+## 🚨 Three more cross-library id defects — same shape, all fixed
+Two libraries mint different uids for one person, so any id-keyed structure silently stops matching them.
+| Site | What would have happened |
+| --- | --- |
+| `MergeSemantics.mergedProfileView(ordered:)` | The merged view folds by id → the same person appears **twice**, each copy missing whatever the other held. |
+| `FileNameParseReviewView` pooling | Pooled by id with a "matched wins" rule → the rule stops firing across libraries, so a confirmed name no longer shadows an unconfirmed copy. |
+| `LibrarySession.profilePresence` | 🚨 Id-keyed but consulted with **name-form** ids. Every lookup misses, `url(forProfile:)` falls back to the primary, and an attachment's profile is written into the **wrong catalogue** with nothing reporting it. |
+Presence is now recorded under **both** the id and the identity key, and `libraries(holdingProfile:)` tries both — so it resolves whether handed a uid or a legacy name-form id.
+## Also landed
+- `LibraryStore.fetchEntityProfile(named:type:)` and `entityId(named:type:)` — keyed reads on the existing `entity_lookup` index. These retire the `fetchEntityProfile(for: "actor:\(name)")` class.
+- **`StudioAudit`**** takes the index** rather than two id sets. On a re-keyed library the old `contains("studio:\(name)")` tests would have reported *every* studio as profile-less and *none* as confirmed — the audit would have invented hundreds of defects.
+- Studio hierarchy writers resolve **both** endpoints to local ids before writing.
+- ⚠️ `AssetsGridView.body` split in two. It was a ~150-line modifier chain sitting at the type-checker's budget; one added local tipped it, and it then failed *"unable to type-check in reasonable time"* pointing at three unrelated innocent lines in turn. A type error earlier in a file masks these entirely, so fixing one real error can appear to cause a cascade that was latent all along. Structural only.
+## ⚠️ Behaviour deliberately PRESERVED rather than fixed
+`FilterBuilderView`'s parameter is named `actorProfiles`, but both callers pass the whole profile set — so its filter lists have always included studio and tag profiles. Narrowing to `.actors` is very probably correct, and was left alone: a behaviour change smuggled in under an identity migration is the hardest kind to notice afterwards. Its own change.
+## ⛔ Still blocking the button
+| Class | Remaining |
+| --- | --- |
+| `"actor:\(name)"` construction | ~34 |
+| `hasPrefix("actor:")` type-tests | ~62 |
+| `dropFirst(6)` name extraction (step 3) | ~45 |
+Plus: **renames invert.** After the re-key a rename touches `display_name` and the tag strings while the id stays put — the opposite of today's `renameTagGlobally`, and six sites assume the old behaviour. This likely retires `recordingUnder:` on `applyReviewedMatch`.
+🚨 **Do not wire the re-key button.** With those sites still reading names out of ids, running the tool would leave a correct database the UI cannot render.

@@ -11,6 +11,9 @@ notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf4
 
 # Filename Parsing & Bulk Rename Utility
 
+> ⚠️ **PARTIAL as of 2026-08-08.** Parsing and the audit shipped — `FileNameParser`, `MediaTitleParser`, `SeriesNameAudit`, `FileNameAuditView`.
+> 
+> **Still open:** [#17](https://github.com/mranlett/ViLM/issues/17) — per-content-class naming conventions and the library migration. That is the bulk-rename half of this spec and it is unbuilt.
 > ✅ **Approved by the Human Operator, 2026-08-06.** Implementation may proceed (Constitution Art. II). Rewritten 2026-08-05 as a spec DERIVED from *The Library Graph*; the rewrite changes how the parser decides, not what it decides about, and much of Phase 1 was already built under the previous approval.
 > 
 > **Open questions resolved 2026-08-06** — see the resolution notes inline, each pointing at where the answer actually lives.
