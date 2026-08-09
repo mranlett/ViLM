@@ -35,12 +35,67 @@ public enum GraphNodeKind: String, Equatable, Sendable, CaseIterable {
     public var singular: String { rawValue }
     public var plural: String { "\(rawValue)s" }
 
-    /// The kind a profile id belongs to, or nil for anything unrecognised.
+    /// The kind a `type:Name` STRING belongs to, or nil for anything
+    /// unrecognised.
+    ///
+    /// ⚠️ For tag strings off a video — `asset.tags` — which keep the
+    /// `type:Name` shape permanently. Do NOT call this on an
+    /// `EntityProfile.id`: after the re-key an id is a uid and this answers
+    /// nil for every profile in the library. Use `ProfileRef.kind`.
     ///
     /// ⚠️ nil is deliberately NOT treated as deletable. An id shape this build
     /// does not know is a reason to leave it alone, not a reason to remove it.
     public static func of(_ id: String) -> GraphNodeKind? {
         allCases.first { id.hasPrefix($0.prefix) }
+    }
+}
+
+/// A profile reduced to the three things an audit needs to reason about it.
+///
+/// 🚨 An id alone is no longer enough, and both audits assumed it was. Each
+/// derived a node's KIND with `id.hasPrefix("actor:")` and its NAME by chopping
+/// that prefix off — true only while the id encodes the name. After the re-key
+/// every id is a uid, so `GraphNodeKind.of` returned nil for all of them, every
+/// profile was skipped, and both audits reported a perfectly healthy library
+/// however much was wrong with it. A health check that cannot fail is worse
+/// than no health check, because it is believed.
+///
+/// ⚠️ The name matters as much as the kind. `OrphanAudit` decides whether a
+/// video refers to a node, and a video refers to it BY STRING — so the audit
+/// has to be able to reconstruct that string. Fixing the kind alone would have
+/// resolved every node and then matched none of them against the tag strings,
+/// turning an inert audit into one proposing to delete the entire cast of the
+/// library. `TagCleanupView` wires that straight to `deleteEntityProfile`.
+public struct ProfileRef: Equatable, Sendable {
+    public let id: String
+    public let entityType: String?
+    public let displayName: String?
+
+    public init(id: String, entityType: String? = nil, displayName: String? = nil) {
+        self.id = id
+        self.entityType = entityType
+        self.displayName = displayName
+    }
+
+    /// ⚠️ Columns first; the id shape is only a fallback, for a library that
+    /// has not been re-keyed and for rows whose columns were never backfilled.
+    public var kind: GraphNodeKind? {
+        if let entityType, let kind = GraphNodeKind(rawValue: entityType) { return kind }
+        return GraphNodeKind.of(id)
+    }
+
+    /// The name a person reads.
+    public var name: String? {
+        if let displayName, !displayName.isEmpty { return displayName }
+        guard let kind, id.hasPrefix(kind.prefix) else { return nil }
+        return String(id.dropFirst(kind.prefix.count))
+    }
+
+    /// The `type:Name` string a video's tag array would carry for this node —
+    /// what the old code got for free by the id BEING that string.
+    public var tagString: String? {
+        guard let kind, let name else { return nil }
+        return "\(kind.prefix)\(name)"
     }
 }
 
@@ -50,13 +105,18 @@ public struct OrphanFinding: Equatable, Sendable, Identifiable {
     public let kind: GraphNodeKind
 
     /// The name as a person reads it.
-    public var displayName: String {
-        String(id.dropFirst(kind.prefix.count))
-    }
+    ///
+    /// ⚠️ STORED, not derived. Chopping the prefix off a uid produced a
+    /// mangled fragment of it — and this is the text on a deletion
+    /// confirmation, so an operator was being asked to approve the removal of
+    /// something they could not identify.
+    public let displayName: String
 
-    public init(id: String, kind: GraphNodeKind) {
+    public init(id: String, kind: GraphNodeKind, displayName: String? = nil) {
         self.id = id
         self.kind = kind
+        self.displayName = displayName
+            ?? (id.hasPrefix(kind.prefix) ? String(id.dropFirst(kind.prefix.count)) : id)
     }
 }
 
@@ -64,8 +124,9 @@ public enum OrphanAudit {
 
     /// Everything the audit needs, so the rule is pure and testable.
     public struct Input: Sendable {
-        /// Every profile in the library.
-        public let profiles: [String]
+        /// Every profile in the library, each carrying its kind and its name
+        /// rather than leaving them to be guessed from the id.
+        public let profiles: [ProfileRef]
         /// Every `actor:`/`studio:` string carried on a video.
         public let referencedByString: Set<String>
         /// Performer ids reachable through a `video_performer` edge.
@@ -75,7 +136,7 @@ public enum OrphanAudit {
         /// Studio ids that are the PARENT of at least one other studio.
         public let studiosWithChildren: Set<String>
 
-        public init(profiles: [String],
+        public init(profiles: [ProfileRef],
                     referencedByString: Set<String>,
                     performersWithEdges: Set<String> = [],
                     studiosWithEdges: Set<String> = [],
@@ -95,9 +156,20 @@ public enum OrphanAudit {
     public static func findings(_ input: Input) -> [GraphNodeKind: [OrphanFinding]] {
         var out: [GraphNodeKind: [OrphanFinding]] = [:]
 
-        for id in input.profiles {
-            guard let kind = GraphNodeKind.of(id) else { continue }
-            if input.referencedByString.contains(id) { continue }
+        // 🚨 Case-folded. The reference test used to be an exact string match,
+        // which was safe only because both sides were literally the same
+        // string — the id. Reconstructing it from `display_name` reintroduces
+        // the possibility of a case difference between the profile and the tag
+        // on the video, and on THIS path a miss means "orphan", which means
+        // offered for deletion. Erring toward "something refers to it" is the
+        // only acceptable direction for the error.
+        let referenced = Set(input.referencedByString.map { $0.lowercased() })
+
+        for ref in input.profiles {
+            guard let kind = ref.kind else { continue }
+            if let tag = ref.tagString, referenced.contains(tag.lowercased()) { continue }
+
+            let id = ref.id
 
             switch kind {
             case .actor:
@@ -116,7 +188,8 @@ public enum OrphanAudit {
                 if input.studiosWithChildren.contains(id) { continue }
             }
 
-            out[kind, default: []].append(OrphanFinding(id: id, kind: kind))
+            out[kind, default: []].append(
+                OrphanFinding(id: id, kind: kind, displayName: ref.name ?? id))
         }
 
         for kind in out.keys {

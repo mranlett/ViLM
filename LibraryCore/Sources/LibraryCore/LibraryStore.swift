@@ -338,7 +338,11 @@ public class LibraryStore {
     /// strings alone will propose deleting the library's entire cast the moment
     /// the string-retirement migration runs.
     public func auditOrphans() throws -> [GraphNodeKind: [OrphanFinding]] {
-        let profiles = try fetchAllEntityProfiles().map(\.id)
+        // ⚠️ The columns travel with the id. Mapping to `\.id` alone is what
+        // blinded this audit at the re-key — see `ProfileRef`.
+        let profiles = try fetchAllEntityProfiles().map {
+            ProfileRef(id: $0.id, entityType: $0.entityType, displayName: $0.displayName)
+        }
         var referenced = Set<String>()
         for asset in try fetchAllAssets() {
             for tag in asset.tags where GraphNodeKind.of(tag) != nil {

@@ -29,9 +29,10 @@ public struct IdentityGap: Equatable, Sendable, Identifiable {
 
     public var id: String { nodeId }
 
-    public var displayName: String {
-        String(nodeId.dropFirst(kind.prefix.count))
-    }
+    /// ⚠️ STORED. Derived from the id, this returned a chopped-up uid on every
+    /// re-keyed library — and it is both what the worklist shows and what the
+    /// list sorts by.
+    public let displayName: String
 
     /// ⭐ Whether `Refresh Matched Videos` would reach this one.
     ///
@@ -42,9 +43,13 @@ public struct IdentityGap: Equatable, Sendable, Identifiable {
     public var isRecoverableByRefresh: Bool { matchedVideoCount > 0 }
 
     public init(nodeId: String, kind: GraphNodeKind,
-                videoCount: Int, matchedVideoCount: Int) {
+                videoCount: Int, matchedVideoCount: Int,
+                displayName: String? = nil) {
         self.nodeId = nodeId
         self.kind = kind
+        self.displayName = displayName
+            ?? (nodeId.hasPrefix(kind.prefix) ? String(nodeId.dropFirst(kind.prefix.count))
+                                              : nodeId)
         self.videoCount = videoCount
         self.matchedVideoCount = matchedVideoCount
     }
@@ -87,14 +92,15 @@ public struct IdentityGapReport: Equatable, Sendable {
 public enum IdentityGapAudit {
 
     public struct Input: Sendable {
-        /// Nodes claiming `matched` with no identity edge.
-        public let missing: [String]
+        /// Nodes claiming `matched` with no identity edge, each carrying its
+        /// kind and name rather than leaving them to be guessed from the id.
+        public let missing: [ProfileRef]
         /// Videos crediting each node, by node id.
         public let videosByNode: [String: Int]
         /// ...of which are matched.
         public let matchedVideosByNode: [String: Int]
 
-        public init(missing: [String], videosByNode: [String: Int],
+        public init(missing: [ProfileRef], videosByNode: [String: Int],
                     matchedVideosByNode: [String: Int]) {
             self.missing = missing
             self.videosByNode = videosByNode
@@ -107,11 +113,13 @@ public enum IdentityGapAudit {
     /// single pass would fix before the ones costing a lookup each — and among
     /// those needing a person, the ones appearing in most videos matter most.
     public static func report(_ input: Input) -> IdentityGapReport {
-        let gaps = input.missing.compactMap { id -> IdentityGap? in
-            guard let kind = GraphNodeKind.of(id) else { return nil }
+        let gaps = input.missing.compactMap { ref -> IdentityGap? in
+            guard let kind = ref.kind else { return nil }
+            let id = ref.id
             return IdentityGap(nodeId: id, kind: kind,
                                videoCount: input.videosByNode[id] ?? 0,
-                               matchedVideoCount: input.matchedVideosByNode[id] ?? 0)
+                               matchedVideoCount: input.matchedVideosByNode[id] ?? 0,
+                               displayName: ref.name ?? id)
         }
         .sorted {
             if $0.isRecoverableByRefresh != $1.isRecoverableByRefresh {

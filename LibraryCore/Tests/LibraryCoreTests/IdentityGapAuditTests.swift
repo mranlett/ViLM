@@ -13,10 +13,14 @@ import XCTest
 /// which of them one unattended pass would fix.
 final class IdentityGapAuditTests: XCTestCase {
 
+    /// ⚠️ LEGACY `type:Name` ids with no columns, so every test using this is
+    /// a characterisation of a library that has not been re-keyed. The
+    /// re-keyed shape is exercised at the bottom of the file.
     private func input(_ missing: [String],
                        videos: [String: Int] = [:],
                        matched: [String: Int] = [:]) -> IdentityGapAudit.Input {
-        .init(missing: missing, videosByNode: videos, matchedVideosByNode: matched)
+        .init(missing: missing.map { ProfileRef(id: $0) },
+              videosByNode: videos, matchedVideosByNode: matched)
     }
 
     // MARK: - The route back
@@ -106,5 +110,45 @@ final class IdentityGapAuditTests: XCTestCase {
                                                  videos: ["actor:A": 1],
                                                  matched: ["actor:A": 1]))
         XCTAssertTrue(both.headline.contains("need you"), both.headline)
+    }
+
+    // MARK: - 🚨 The re-keyed library
+
+    /// G1 — the defect. Every node claiming a match it cannot prove was
+    /// dropped, and the report's headline read "Every matched record carries
+    /// an identity" on a library where 1,236 of them did not.
+    func testARekeyedLibrarysGapsAreStillReported() {
+        let uid = UUID().uuidString
+        let report = IdentityGapAudit.report(.init(
+            missing: [ProfileRef(id: uid, entityType: "actor", displayName: "Alice")],
+            videosByNode: [uid: 4], matchedVideosByNode: [uid: 2]))
+
+        XCTAssertFalse(report.isEmpty, "the gap must not vanish with the id shape")
+        XCTAssertEqual(report.gaps.first?.displayName, "Alice")
+        XCTAssertEqual(report.gaps.first?.videoCount, 4)
+        XCTAssertTrue(report.gaps.first!.isRecoverableByRefresh)
+    }
+
+    /// G2 — ⚠️ the worklist SORTS by this name, so a chopped-up uid would not
+    /// merely look wrong, it would scatter the list.
+    func testTheWorklistSortsByTheRealName() {
+        func ref(_ name: String) -> ProfileRef {
+            ProfileRef(id: UUID().uuidString, entityType: "actor", displayName: name)
+        }
+        let report = IdentityGapAudit.report(.init(
+            missing: [ref("Zoe"), ref("alice"), ref("Bob")],
+            videosByNode: [:], matchedVideosByNode: [:]))
+
+        XCTAssertEqual(report.gaps.map(\.displayName), ["alice", "Bob", "Zoe"])
+    }
+
+    /// G3 — a uid-keyed row with no columns still has no knowable kind and is
+    /// still skipped, exactly as an unrecognised id always was.
+    func testAUidWithNoColumnsIsStillSkipped() {
+        let report = IdentityGapAudit.report(.init(
+            missing: [ProfileRef(id: UUID().uuidString)],
+            videosByNode: [:], matchedVideosByNode: [:]))
+
+        XCTAssertTrue(report.isEmpty)
     }
 }

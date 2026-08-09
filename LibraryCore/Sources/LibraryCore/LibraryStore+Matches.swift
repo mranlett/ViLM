@@ -359,7 +359,8 @@ extension LibraryStore {
         // name-form string matches nothing there, so this half would silently
         // contribute zero and every performer's video count would collapse to
         // whatever the edges alone carry.
-        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
+        let allProfiles = try fetchAllEntityProfiles()
+        let resolver = NodeResolver(profiles: allProfiles)
         for asset in try fetchAllAssets() {
             let isMatched = asset.enrichmentState == .matched
             for name in Set(asset.actors) {
@@ -376,8 +377,19 @@ extension LibraryStore {
             }
         }
 
+        // ⚠️ The kind and the name travel with the id. `entities` is a list of
+        // bare ids, and after the re-key an id tells you neither — the audit
+        // dropped every one of them and reported the library clean.
+        var columnsById: [String: EntityProfile] = [:]
+        for profile in allProfiles { columnsById[profile.id] = profile }
+        let missing = entities.map { id in
+            ProfileRef(id: id,
+                       entityType: columnsById[id]?.entityType,
+                       displayName: columnsById[id]?.displayName)
+        }
+
         return IdentityGapAudit.report(.init(
-            missing: entities,
+            missing: missing,
             videosByNode: videos.mapValues(\.count),
             matchedVideosByNode: matchedVideos.mapValues(\.count)))
     }
