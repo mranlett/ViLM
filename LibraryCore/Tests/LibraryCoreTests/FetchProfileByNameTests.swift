@@ -53,12 +53,12 @@ final class FetchProfileByNameTests: XCTestCase {
     func testTheTypeAxisSeparatesTwoNodesOfOneName() throws {
         let actorUid = UUID().uuidString, studioUid = UUID().uuidString
         try store.saveEntityProfile(EntityProfile(id: actorUid, entityType: "actor",
-                                                  displayName: "Pink"))
+                                                  displayName: "Pink"))  // hygiene:ok invented — one word held by three types is the point
         try store.saveEntityProfile(EntityProfile(id: studioUid, entityType: "studio",
-                                                  displayName: "Pink"))
+                                                  displayName: "Pink"))  // hygiene:ok invented — one word held by three types is the point
 
-        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "actor")?.id, actorUid)
-        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "studio")?.id, studioUid)
+        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "actor")?.id, actorUid)  // hygiene:ok invented — one word held by two types is the point
+        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "studio")?.id, studioUid)  // hygiene:ok invented — one word held by two types is the point
     }
 
     // A studio whose NAME contains a colon still resolves — the case that

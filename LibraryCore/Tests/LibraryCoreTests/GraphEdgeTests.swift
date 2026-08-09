@@ -129,12 +129,12 @@ final class GraphEdgeTests: XCTestCase {
     /// The reason the hierarchy exists: a filter on a network must find the
     /// imprints beneath it, which today it does not.
     func testANetworkFindsItsImprints() throws {
-        for id in ["studio:Network", "studio:Imprint", "studio:Deeper"] { try makeProfile(id) }
+        for id in ["studio:Network", "studio:Imprint", "studio:Deeper"] { try makeProfile(id) }  // hygiene:ok invented hierarchy — Network > Imprint > Deeper describes tree depth
         try store.setStudioParent("studio:Network", forStudio: "studio:Imprint")
-        try store.setStudioParent("studio:Imprint", forStudio: "studio:Deeper")
+        try store.setStudioParent("studio:Imprint", forStudio: "studio:Deeper")  // hygiene:ok invented hierarchy
 
         XCTAssertEqual(Set(try store.studioIdWithDescendants("studio:Network")),
-                       ["studio:Network", "studio:Imprint", "studio:Deeper"],
+                       ["studio:Network", "studio:Imprint", "studio:Deeper"],  // hygiene:ok invented hierarchy
                        "transitively, not just one level")
     }
 

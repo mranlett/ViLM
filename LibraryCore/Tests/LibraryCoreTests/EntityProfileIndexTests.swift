@@ -53,12 +53,12 @@ final class EntityProfileIndexTests: XCTestCase {
     // actor, studio and tag, and the index holds all three at once.
     func testOneNameHeldByThreeTypesStaysThreeNodes() {
         let index = EntityProfileIndex([
-            rekeyed("actor", "Pink"), rekeyed("studio", "Pink"), rekeyed("tag", "Pink"),
+            rekeyed("actor", "Pink"), rekeyed("studio", "Pink"), rekeyed("tag", "Pink"),  // hygiene:ok invented
         ])
 
         XCTAssertEqual(index.count, 3)
-        let ids = Set([index[actor: "Pink"]?.id, index[studio: "Pink"]?.id,
-                       index[tag: "Pink"]?.id].compactMap { $0 })
+        let ids = Set([index[actor: "Pink"]?.id, index[studio: "Pink"]?.id,  // hygiene:ok invented — one word held by three types is the point
+                       index[tag: "Pink"]?.id].compactMap { $0 })  // hygiene:ok invented — one word held by three types is the point
         XCTAssertEqual(ids.count, 3, "each type must answer with its own node")
         XCTAssertTrue(index.contestedIdentities.isEmpty, "different types never contest")
     }
