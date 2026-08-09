@@ -76,7 +76,7 @@ final class EntityTombstoneTests: XCTestCase {
         let snaps = [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)]
         let plans = ActorSync.plan(for: snaps)
 
-        let plan = try XCTUnwrap(plans.first { $0.actorId == actorId })
+        let plan = try XCTUnwrap(plans.first { $0.actorId == ActorSync.syncKey(EntityProfile(id: actorId)) })
         XCTAssertEqual(plan.deletionFrom, [libB], "the plan proposes removing it from B")
         XCTAssertTrue(plan.diagnosis().contains("DELETED"))
 
@@ -98,7 +98,7 @@ final class EntityTombstoneTests: XCTestCase {
         try storeA.saveEntityProfile(EntityProfile(id: actorId, bio: "real"))
 
         let snaps = [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)]
-        let plan = try XCTUnwrap(ActorSync.plan(for: snaps).first { $0.actorId == actorId })
+        let plan = try XCTUnwrap(ActorSync.plan(for: snaps).first { $0.actorId == ActorSync.syncKey(EntityProfile(id: actorId)) })
         XCTAssertEqual(plan.missingFrom, [libB])
         XCTAssertTrue(plan.deletionFrom.isEmpty)
     }

@@ -12,9 +12,11 @@
 // the READ path: `EntityProfileIndex.merged` folds by identity because an
 // id-keyed fold showed one person twice. The WRITE path was never changed.
 //
-// ⚠️ These tests describe CURRENT behaviour, so they pass. They exist to make
-// the behaviour undeniable and to fail loudly the moment sync is corrected —
-// at which point their assertions invert and the ⚠️ ones become the spec.
+// ⭐ These were written FIRST, pinning the broken behaviour so it could not be
+// argued with, then inverted once the fix landed. The root cause turned out to
+// be one property: `EntityProfile.nodeIdentity` still parsed the id, with a
+// comment saying the columns must take over "after v28's re-keying". The
+// re-key shipped; the property never changed.
 
 import XCTest
 @testable import LibraryCore
@@ -42,27 +44,18 @@ final class ActorSyncAcrossRekeyedLibrariesTests: XCTestCase {
 
     // MARK: - 🚨 One person becomes two
 
-    /// A1 — the defect. Two re-keyed libraries each hold Jane under their own
-    /// uid. Identity says one person; the planner sees two, and each is
-    /// reported as MISSING from the library that in fact has her.
-    func testTwoRekeyedLibrariesReportOnePersonAsTwoActors() {
+    /// A1 — the defect, now fixed. Two re-keyed libraries each hold Jane under
+    /// their own uid, and the planner treats them as one person.
+    func testTwoRekeyedLibrariesFoldToOnePerson() {
         let plans = ActorSync.plan(for: [
             snapshot("A", [jane(uid: "uid-in-A", bio: "from A")]),
             snapshot("B", [jane(uid: "uid-in-B")]),
         ])
 
-        // ⚠️ CURRENT behaviour. Correct would be 1.
-        XCTAssertEqual(plans.count, 2,
-                       "one performer, two plans — the id is being treated as identity")
-
-        // And each plan proposes copying her into the library that already has
-        // her, which is what would create the duplicate rows.
-        for plan in plans {
-            XCTAssertEqual(plan.missingFrom.count, 1,
-                           "each side looks absent from the other")
-            XCTAssertEqual(plan.displayName, "Jane Example",
-                           "both plans name the SAME person — the tell")
-        }
+        XCTAssertEqual(plans.count, 1, "one performer, one plan")
+        XCTAssertEqual(plans.first?.displayName, "Jane Example")
+        XCTAssertTrue(plans.first?.missingFrom.isEmpty ?? false,
+                      "neither library is missing her — both have her under their own uid")
     }
 
     /// A2 — the control, and the reason this was not caught. Before the re-key
@@ -78,47 +71,64 @@ final class ActorSyncAcrossRekeyedLibrariesTests: XCTestCase {
         XCTAssertTrue(plans[0].missingFrom.isEmpty, "neither side is missing her")
     }
 
-    /// A3 — ⚠️ and the two libraries' data never converges. The whole purpose
-    /// of sync is that a bio held by one side reaches the other; here each
-    /// plan sees only its own holder, so there is nothing to reconcile.
-    func testDataDoesNotConvergeAcrossRekeyedLibraries() {
+    /// A3 — a bio held by one side is now seen as a gap on the other, which is
+    /// the entire point of sync.
+    func testABlankOnOneSideIsAFillAfterTheRekey() {
         let plans = ActorSync.plan(for: [
             snapshot("A", [jane(uid: "uid-in-A", bio: "written in A")]),
             snapshot("B", [jane(uid: "uid-in-B")]),
         ])
 
-        let withBio = plans.filter { $0.actorId == "uid-in-A" }
-        XCTAssertEqual(withBio.count, 1)
-        // Nobody disagrees, because the two records never met.
-        XCTAssertTrue(plans.allSatisfy { $0.conflicts.isEmpty },
-                      "no conflict is detected between two records of one person")
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans.first?.blankFills.values.reduce(0, +), 1,
+                       "B is missing the bio A holds")
     }
 
-    // MARK: - 🚨 Deletions stop propagating
+    /// A4 — 🚨 and a TRUE disagreement is surfaced rather than silently
+    /// resolved. This is the invariant the file header states, and it was not
+    /// merely unmet after the re-key — it was unreachable, because the two
+    /// records never met to disagree.
+    func testATrueConflictIsDetectedAcrossRekeyedLibraries() {
+        var a = jane(uid: "uid-in-A"); a.bio = "A's version"
+        var b = jane(uid: "uid-in-B"); b.bio = "B's version"
 
-    /// A4 — a tombstone is keyed by entity id too. Deleting Jane in A records
-    /// A's uid, which matches nothing in B, so the deletion does not reach her
-    /// there — and the header of `ActorSync` states that propagating deletions
-    /// is exactly what tombstones exist to do.
-    func testATombstoneDoesNotReachTheOtherRekeyedLibrary() {
-        let stone = EntityTombstone(entityId: "uid-in-A", deletedAt: Date())
+        let plans = ActorSync.plan(for: [snapshot("A", [a]), snapshot("B", [b])])
+
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans.first?.conflicts.map(\.field), [.bio],
+                       "both sides hold a different real value — the operator must decide")
+    }
+
+    // MARK: - Deletions
+
+    /// A5 — a tombstone reaches the other library's copy.
+    ///
+    /// ⚠️ Recorded in NAME form, which is what `deleteEntityProfile` writes: a
+    /// tombstone names an entity that no longer exists, so a uid would point at
+    /// nothing. That form now lines up with a profile arriving under a uid,
+    /// because both sides resolve to the same identity.
+    func testATombstoneReachesTheOtherRekeyedLibrary() {
+        // ⚠️ Dated AFTER the profile. `shouldPropagate` compares the
+        // tombstone against `createdAt`, which a fresh profile stamps with the
+        // current time — a tombstone built first in the same millisecond looks
+        // like a deletion that predates the record it refers to.
+        let stone = EntityTombstone(entityId: "actor:Jane Example",
+                                    deletedAt: Date().addingTimeInterval(60))
         let plans = ActorSync.plan(for: [
             snapshot("A", [], tombstones: [stone]),
             snapshot("B", [jane(uid: "uid-in-B")]),
         ])
 
-        let janeInB = plans.first { $0.actorId == "uid-in-B" }
-        XCTAssertNotNil(janeInB)
-        // ⚠️ CURRENT behaviour: B's copy is untouched by A's deletion.
-        XCTAssertEqual(janeInB?.deletionFrom.count, 0,
-                       "the deletion did not reach her under B's uid")
+        XCTAssertEqual(plans.count, 1)
+        XCTAssertEqual(plans.first?.deletionFrom.count, 1,
+                       "B's copy is removed by A's deletion")
     }
 
-    // MARK: - What a correct implementation would key on
+    // MARK: - The key the whole fix rests on
 
-    /// A5 — the key that does work across libraries, for whoever fixes this.
-    /// `NodeIdentity.resolutionKey` is what `EntityProfileIndex.merged` folds
-    /// on, and it already agrees across the two uids.
+    /// A6 — identity agrees across libraries where the id cannot, and the read
+    /// path was already folding on it. That asymmetry is what made the write
+    /// path's breakage findable.
     func testIdentityIsTheKeyThatAgreesAcrossLibraries() {
         let a = jane(uid: "uid-in-A")
         let b = jane(uid: "uid-in-B")

@@ -107,9 +107,30 @@ public extension NodeIdentity {
 public extension EntityProfile {
     /// This profile's travelling identity.
     ///
-    /// ⚠️ Derived from `id` today because the id still encodes the name. After
-    /// v28's re-keying it must come from the `entity_type` / `display_name`
-    /// columns instead — this is the single place that changes, which is why
-    /// callers go through it rather than parsing ids themselves.
-    var nodeIdentity: NodeIdentity? { NodeIdentity.parse(id) }
+    /// 🚨 This is the change v28 promised and did not make. It read
+    /// `NodeIdentity.parse(id)` alone, with a note saying the columns must take
+    /// over "after v28's re-keying" — the re-key then shipped and this stayed
+    /// as it was, so every uid-keyed profile answered nil.
+    ///
+    /// Three callers depend on it and all three failed silently:
+    ///
+    ///   • `applyActorMerge` guards `guard let identity = imported.nodeIdentity`
+    ///     and counts the failure as an unparseable id — so a re-keyed sender's
+    ///     profiles were skipped wholesale, and the sync reported success
+    ///     having imported nothing
+    ///   • the tombstone/incoming match beside it compared two nils
+    ///   • `ActorSync.syncKey` fell back to the id, which is what made one
+    ///     performer look like two people
+    ///
+    /// ⚠️ Reads the STORED columns, never `name` or `type`. Both of those are
+    /// defined in terms of this property, so going through them would recurse
+    /// until the stack ran out.
+    var nodeIdentity: NodeIdentity? {
+        if let entityType, !entityType.isEmpty,
+           let displayName, !displayName.isEmpty {
+            return NodeIdentity(type: entityType, displayName: displayName)
+        }
+        // A library that has not been re-keyed still encodes it in the id.
+        return NodeIdentity.parse(id)
+    }
 }

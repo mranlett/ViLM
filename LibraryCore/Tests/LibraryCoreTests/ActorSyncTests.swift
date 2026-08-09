@@ -8,6 +8,16 @@ import XCTest
 /// the real merge engine against two temp libraries.
 final class ActorSyncTests: XCTestCase {
 
+    /// ⚠️ `ActorSyncPlan.actorId` is an IDENTITY key, not a profile id.
+    /// It changed when sync stopped keying on the id: two re-keyed libraries
+    /// call one person by different uids, so the id cannot be what the plan is
+    /// about. Derived here rather than written out, because the key contains
+    /// U+001F separators that are invisible in a diff.
+    private func key(_ legacyId: String) -> String {
+        ActorSync.syncKey(EntityProfile(id: legacyId))
+    }
+
+
     private let main = URL(fileURLWithPath: "/tmp/main-lib")
     private let portable = URL(fileURLWithPath: "/tmp/portable-lib")
 
@@ -38,7 +48,7 @@ final class ActorSyncTests: XCTestCase {
             snapshot(main, profiles: [EntityProfile(id: "actor:jane", bio: "b")]),
             snapshot(portable, profiles: []),
         ])
-        XCTAssertEqual(plans.map(\.actorId), ["actor:jane"])
+        XCTAssertEqual(plans.map(\.actorId), [key("actor:jane")])
         XCTAssertEqual(plans[0].missingFrom, [portable])
         XCTAssertTrue(plans[0].conflicts.isEmpty)
     }
@@ -206,7 +216,7 @@ final class ActorSyncTests: XCTestCase {
         // The plan sees the photo gap even though the metadata is identical…
         let snapshots = [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)]
         let plans = ActorSync.plan(for: snapshots)
-        XCTAssertEqual(plans.map(\.actorId), ["actor:jane"])
+        XCTAssertEqual(plans.map(\.actorId), [key("actor:jane")])
         XCTAssertTrue(plans[0].conflicts.isEmpty, "identical metadata ⇒ conflict-free")
         XCTAssertEqual(plans[0].photoAdds[libA], 1)
         XCTAssertEqual(plans[0].photoAdds[libB], 1)
@@ -273,8 +283,8 @@ final class ActorSyncTests: XCTestCase {
         // Plan from real snapshots, resolve hair with Keep Both, apply to both.
         let snapshots = [try ActorSync.snapshot(of: libA), try ActorSync.snapshot(of: libB)]
         let plans = ActorSync.plan(for: snapshots)
-        XCTAssertEqual(Set(plans.map(\.actorId)), ["actor:jane", "actor:bailey"])
-        XCTAssertEqual(plans.first { $0.actorId == "actor:jane" }?.conflicts.map(\.field), [.hairColor])
+        XCTAssertEqual(Set(plans.map(\.actorId)), [key("actor:jane"), key("actor:bailey")])
+        XCTAssertEqual(plans.first { $0.actorId == key("actor:jane") }?.conflicts.map(\.field), [.hairColor])
 
         // Photo bytes are re-read for just these actors; see the note in
         // testPhotosCopyEvenWhenTokenListsAlreadyMatch.

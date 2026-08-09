@@ -274,23 +274,73 @@ public enum ActorSync {
     ///
     /// Used at apply time, one batch at a time, so peak memory follows the
     /// batch size rather than the size of the library.
+    /// 🚨 `actorIds` are the keys `plan` reports, which are IDENTITIES — and
+    /// `exportGraph` filters on this library's own primary keys. Each library
+    /// therefore resolves the shared key to whatever IT calls that person.
+    ///
+    /// Passing the keys straight through returned an empty export after the
+    /// re-key: no profiles, no photos, and a sync that reported success having
+    /// moved nothing.
+    ///
+    /// ⚠️ Raw local ids are still accepted. Callers that hold one legitimately
+    /// (and every test written before the re-key) keep working, and the two
+    /// spaces cannot collide — a resolution key contains separators no id has.
     public static func photoBearingSnapshot(of libraryURL: URL,
                                             actorIds: Set<String>) throws -> LibrarySnapshot {
-        LibrarySnapshot(url: libraryURL,
-                        export: try LibraryStore(at: libraryURL)
-                            .exportGraph(onlyActorIds: actorIds, includingPhotoData: true))
+        let store = try LibraryStore(at: libraryURL)
+        let localIds = Set(try store.fetchAllEntityProfiles()
+            .filter { actorIds.contains(syncKey($0)) || actorIds.contains($0.id) }
+            .map(\.id))
+        return LibrarySnapshot(url: libraryURL,
+                               export: try store.exportGraph(onlyActorIds: localIds,
+                                                             includingPhotoData: true))
     }
 
     // MARK: Planning (pure)
 
     /// Plans the sync for every actor that differs across `snapshots`
     /// (precedence order). Actors already identical everywhere are omitted.
+    /// 🚨 The key two libraries agree on for one person — NOT the id.
+    ///
+    /// Epic D4: a uid is LOCAL. Before the re-key both libraries derived the
+    /// same `actor:Name` id from the same name, so the id doubled as identity
+    /// and everything here worked by accident. After it, each library mints its
+    /// own uid and an id-keyed grouping sees one performer as two strangers.
+    ///
+    /// ⚠️ Falls back to the id for a row with no usable identity. Such a row
+    /// cannot be matched across libraries at all, and grouping several of them
+    /// together under one empty key would merge unrelated people.
+    static func syncKey(_ profile: EntityProfile) -> String {
+        profile.nodeIdentity?.resolutionKey ?? profile.id
+    }
+
+    /// Profiles per library, keyed by identity, with a deterministic winner
+    /// when one library holds two rows claiming the same person.
+    ///
+    /// ⚠️ Deliberately NOT `Dictionary(uniqueKeysWithValues:)`, which traps on
+    /// a repeated key. Ids are unique; identities are not — the duplicate
+    /// profiles this project has already had to repair once would have turned
+    /// opening the sync screen into a crash.
+    private static func profilesByIdentity(_ snapshots: [LibrarySnapshot]) -> [[String: EntityProfile]] {
+        snapshots.map { snap in
+            var byKey: [String: EntityProfile] = [:]
+            for profile in snap.export.profiles {
+                let key = syncKey(profile)
+                // Lowest id wins, so the choice does not depend on export order.
+                if let held = byKey[key], held.id <= profile.id { continue }
+                byKey[key] = profile
+            }
+            return byKey
+        }
+    }
+
     public static func plan(for snapshots: [LibrarySnapshot]) -> [ActorSyncPlan] {
         guard snapshots.count > 1 else { return [] }
 
-        let profilesByLibrary: [[String: EntityProfile]] = snapshots.map { snap in
-            Dictionary(uniqueKeysWithValues: snap.export.profiles.map { ($0.id, $0) })
-        }
+        let profilesByLibrary = profilesByIdentity(snapshots)
+        // ⚠️ Keyed by the LOCAL id, because `photo.actorId` is local to the
+        // library that exported it. The lookup below therefore goes through
+        // the holder's own profile id, never through the identity key.
         let hashesByLibrary: [[String: Set<String>]] = snapshots.map { snap in
             var byActor: [String: Set<String>] = [:]
             for photo in snap.export.photos {
@@ -308,11 +358,17 @@ public enum ActorSync {
 
         // Newest deletion per entity across every library. A deletion recorded
         // anywhere is a fact about the entity, not about that one library.
+        //
+        // 🚨 Indexed by identity as well. A tombstone names an entity that no
+        // longer exists, so it is recorded in name form — but it has to line up
+        // with profiles that arrive under a uid, and a raw comparison stopped
+        // doing that at the re-key.
         var newestTombstone: [String: EntityTombstone] = [:]
         for snap in snapshots {
             for stone in snap.export.tombstones {
-                if let held = newestTombstone[stone.entityId], held.deletedAt >= stone.deletedAt { continue }
-                newestTombstone[stone.entityId] = stone
+                let key = NodeIdentity.parse(stone.entityId)?.resolutionKey ?? stone.entityId
+                if let held = newestTombstone[key], held.deletedAt >= stone.deletedAt { continue }
+                newestTombstone[key] = stone
             }
         }
 
@@ -391,11 +447,15 @@ public enum ActorSync {
 
             // Photo adds per holder (hashes present elsewhere, absent locally).
             var photoAddsByIndex: [Int: Int] = [:]
+            // ⚠️ `holder.profile.id`, not `actorId`. Photos are stored under
+            // the id local to the library that holds them; looking them up by
+            // the shared identity key finds nothing and reports every library
+            // as needing zero photos.
             let allHashes = holders.reduce(into: Set<String>()) {
-                $0.formUnion(hashesByLibrary[$1.index][actorId] ?? [])
+                $0.formUnion(hashesByLibrary[$1.index][$1.profile.id] ?? [])
             }
             for holder in holders {
-                let local = hashesByLibrary[holder.index][actorId] ?? []
+                let local = hashesByLibrary[holder.index][holder.profile.id] ?? []
                 let adds = allHashes.subtracting(local).count
                 if adds > 0 { photoAddsByIndex[holder.index] = adds }
             }
@@ -428,18 +488,51 @@ public enum ActorSync {
         resolutions: [String: [ActorSyncField: ActorSyncResolution]],
         snapshots: [LibrarySnapshot]
     ) -> ActorLibraryExport {
-        let profilesByLibrary: [[String: EntityProfile]] = snapshots.map { snap in
-            Dictionary(uniqueKeysWithValues: snap.export.profiles.map { ($0.id, $0) })
+        let profilesByLibrary = profilesByIdentity(snapshots)
+
+        // The local ids this identity is known by, per library — needed to
+        // gather the photos, which are stored under those ids rather than under
+        // the shared key.
+        var localIdsByKey: [String: Set<String>] = [:]
+        for byKey in profilesByLibrary {
+            for (key, profile) in byKey { localIdsByKey[key, default: []].insert(profile.id) }
         }
 
+        // ⚠️ Same tolerance as `photoBearingSnapshot`: accept identity keys
+        // (what `plan` reports) or raw local ids, and work in keys throughout.
+        // Silently ignoring an id-shaped argument would make sync a no-op for
+        // that actor and report nothing wrong.
+        var keyForCallerId: [String: String] = [:]
+        for (key, localIds) in localIdsByKey {
+            keyForCallerId[key] = key
+            for localId in localIds { keyForCallerId[localId] = key }
+        }
+        let selectedKeys = Set(actorIds.compactMap { keyForCallerId[$0] })
+
+        // `resolutions` is keyed the same way the caller keyed `actorIds`, so
+        // it is normalised through the same map. Looking it up by identity
+        // while the caller supplied ids silently drops every decision the
+        // operator made and reverts each conflict to `.skip`.
+        let resolutions: [String: [ActorSyncField: ActorSyncResolution]] =
+            resolutions.reduce(into: [:]) { out, entry in
+                guard let key = keyForCallerId[entry.key] else { return }
+                out[key] = (out[key] ?? [:]).merging(entry.value) { held, _ in held }
+            }
+
         var profiles: [EntityProfile] = []
-        for actorId in actorIds.sorted() {
+        for actorId in selectedKeys.sorted() {
             let holders: [(index: Int, profile: EntityProfile)] = profilesByLibrary.enumerated()
                 .compactMap { index, byId in byId[actorId].map { (index, $0) } }
             guard !holders.isEmpty else { continue }
 
             var converged = EntityProfile(
-                id: actorId,
+                // ⚠️ The FIRST holder's real id, not the identity key. This is
+                // the one place the id still has to be a plausible id: the
+                // receiving library resolves it through `NodeResolver` and
+                // never writes it to a key column, but `applyActorMerge` does
+                // group the incoming photos by it, so the payload below is
+                // rewritten to agree with exactly this value.
+                id: holders[0].profile.id,
                 // Carried from whichever library holds this actor: convergence
                 // merges fields, it does not rename anyone.
                 entityType: holders.first?.profile.entityType,
@@ -512,13 +605,41 @@ public enum ActorSync {
 
         // Union photo payload: first occurrence (precedence order) wins the
         // token/primary flag for each distinct content hash.
+        //
+        // 🚨 Re-addressed to the converged profile's id, and deduped per
+        // IDENTITY rather than per sender id. Both halves used to work only
+        // because every library called one person by the same id:
+        //
+        //   • the filter was `actorIds.contains(photo.actorId)`, which after
+        //     the re-key matches nothing, so every photo was dropped
+        //   • the dedupe key was `senderId|hash`, so the same picture held by
+        //     two libraries counted as two distinct photos
+        //
+        // `applyActorMerge` groups incoming photos by the profile's id, so the
+        // payload has to name the same id the converged profile carries.
+        let convergedIdByKey = Dictionary(uniqueKeysWithValues: profiles.map { profile in
+            (syncKey(profile), profile.id)
+        })
+        var keyByLocalId: [String: String] = [:]
+        for (key, localIds) in localIdsByKey where selectedKeys.contains(key) {
+            for localId in localIds { keyByLocalId[localId] = key }
+        }
+
         var seenHashes = Set<String>()
         var photos: [ExportedPhoto] = []
         for snapshot in snapshots {
-            for photo in snapshot.export.photos
-            where actorIds.contains(photo.actorId) && !seenHashes.contains("\(photo.actorId)|\(photo.contentHash)") {
-                seenHashes.insert("\(photo.actorId)|\(photo.contentHash)")
-                photos.append(photo)
+            for photo in snapshot.export.photos {
+                guard let key = keyByLocalId[photo.actorId],
+                      let convergedId = convergedIdByKey[key] else { continue }
+                let dedupeKey = "\(key)|\(photo.contentHash)"
+                guard !seenHashes.contains(dedupeKey) else { continue }
+                seenHashes.insert(dedupeKey)
+                photos.append(ExportedPhoto(actorId: convergedId,
+                                            isPrimary: photo.isPrimary,
+                                            sourceToken: photo.sourceToken,
+                                            contentHash: photo.contentHash,
+                                            fileExtension: photo.fileExtension,
+                                            data: photo.data))
             }
         }
 
