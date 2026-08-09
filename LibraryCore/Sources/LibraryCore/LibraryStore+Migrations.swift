@@ -670,6 +670,60 @@ extension LibraryStore {
                 """)
         }
 
+        // v35 — Head to Head: what the comparison game has learned.
+        //
+        // 🚨 A TABLE, not columns on `entity_profiles` and `assets`. The spec's
+        // D3 asks for "its own field"; the reason is separation from `rating`,
+        // and a table separates them more thoroughly than a column does.
+        //
+        // ⭐ D1 runs one mechanic over two subjects. Columns would mean the
+        // same three fields, the same defaults and the same rules expressed
+        // twice, in two tables, kept in step by hand.
+        //
+        // ⚠️ And it sidesteps the failure this project has now had twice.
+        // Schema v17 added five columns and they were silently dropped in FOUR
+        // places that rebuild an `EntityProfile` field by field; v18 hit them
+        // again. Today there are SEVEN such places — the package importer,
+        // `applyActorMerge`, `MergeSemantics`, the profile editor, the CSV
+        // round-trip, the enrichment review and the sync field list — and each
+        // would compile perfectly while dropping a defaulted new argument. A
+        // row nothing else reconstructs cannot be dropped by code that forgets
+        // to carry it.
+        //
+        // ⚠️ NO foreign key, deliberately. A contender is an actor OR a video,
+        // and SQLite cannot reference two tables from one column. Orphans are
+        // therefore possible and are filtered on read rather than prevented —
+        // the alternative is two near-identical tables, which is the thing
+        // above.
+        //
+        // ⚠️ Absence means UNSCORED, and that is load-bearing. D9 starts a new
+        // contender at the middle of the range, so a stored middling score and
+        // "never played" would be indistinguishable if the row always existed.
+        // The leaderboard needs to tell them apart to honour D8.
+        migrator.registerMigration("v35") { db in
+            try db.create(table: "preference_score") { t in
+                // "actor" or "video". Text rather than an integer so a database
+                // opened by hand says what it means.
+                t.column("subject", .text).notNull()
+                // `entity_profiles.id` or `assets.id`.
+                //
+                // ⚠️ LOCAL after v28 — a uid minted by this library. Between
+                // libraries a node is its name triple (D4), so these rows do
+                // not travel as-is. See the note on syncing in `LibraryStore`.
+                t.column("contender_id", .text).notNull()
+                t.column("score", .double).notNull()
+                t.column("comparisons", .integer).notNull().defaults(to: 0)
+                // D6's "neither" — out of the game without being rated.
+                t.column("retired", .boolean).notNull().defaults(to: false)
+                t.column("updated_at", .datetime)
+                t.primaryKey(["subject", "contender_id"])
+            }
+            // The leaderboard reads "settled contenders of one subject, best
+            // first", which is this index exactly.
+            try db.create(index: "idx_preference_subject_score",
+                          on: "preference_score", columns: ["subject", "score"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }
