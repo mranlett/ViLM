@@ -119,6 +119,35 @@ extension LibraryStore {
                            skippedNoProfile: associations - wanted.count)
     }
 
+    /// One asset by id.
+    ///
+    /// ⚠️ Exists because several readers took `asset:` optionally and fell back
+    /// to `fetchAllAssets().first { … }` — 2,078 rows materialised to answer a
+    /// question about one of them, which on iOS is a jetsam risk rather than
+    /// merely slow.
+    func asset(withId videoId: UUID) throws -> Asset? {
+        try dbQueue.read { db in
+            try Asset.filter(sql: "id = ?", arguments: [videoId.uuidString]).fetchOne(db)
+        }
+    }
+
+    /// Every `video_performer` edge, grouped by video.
+    ///
+    /// ⭐ One query for a question that was being asked per video. At 3,715
+    /// edges over 2,078 videos the grouped read is a single pass; the per-video
+    /// form was two thousand round trips.
+    func performerEdgesByVideo() throws -> [String: Set<String>] {
+        try dbQueue.read { db in
+            var out: [String: Set<String>] = [:]
+            let rows = try Row.fetchAll(db, sql:
+                "SELECT video_id, performer_id FROM video_performer")
+            for row in rows {
+                out[row["video_id"] as String, default: []].insert(row["performer_id"] as String)
+            }
+            return out
+        }
+    }
+
     /// Whether the edges reproduce what the strings say, for every video.
     ///
     /// ⚠️ The gate on retiring the strings. Counting edges alone would pass a
@@ -132,12 +161,17 @@ extension LibraryStore {
         // disagreeing, on the one check that gates retiring the strings.
         let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
 
+        // ⚠️ ONE read of the edge table, grouped in memory. Asking per video
+        // was 2,078 separate SELECTs on a real library — a long hang for a
+        // question the table answers in a single pass.
+        let edgesByVideo = try performerEdgesByVideo()
+
         var disagreeing: [UUID] = []
         for asset in assets {
             // Only credits that COULD become edges are compared: a name with no
             // profile is a known, reported gap, not a disagreement.
             let expected = Set(asset.actors.compactMap { resolver.localId(for: "actor:\($0)") })
-            let actual = Set(try performerIds(forVideo: asset.id))
+            let actual = edgesByVideo[asset.id.uuidString] ?? []
             if expected != actual { disagreeing.append(asset.id) }
         }
         return disagreeing
@@ -682,7 +716,7 @@ extension LibraryStore {
     public func resolvedPerformerIds(forVideo videoId: UUID, in asset: Asset? = nil)
     throws -> Set<String> {
         let fromEdges = Set(try performerIds(forVideo: videoId))
-        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let source = try asset ?? self.asset(withId: videoId)
         // 🚨 Both halves must be in the SAME namespace or the union stops being
         // a union. `fromEdges` holds local ids; after the re-key a name-form
         // string is a different key for the same person, so the set would hold
@@ -706,7 +740,7 @@ extension LibraryStore {
     public func resolvedStudioId(forVideo videoId: UUID, in asset: Asset? = nil)
     throws -> String? {
         if let edge = try studioId(forVideo: videoId) { return edge }
-        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let source = try asset ?? self.asset(withId: videoId)
         let studios = Set((source?.studios ?? []).filter { !$0.isEmpty })
         guard studios.count == 1, let name = studios.first else { return nil }
         // ⚠️ Resolved, because the edge branch above returns a LOCAL id and a
@@ -724,7 +758,7 @@ extension LibraryStore {
     public func resolvedTagIds(forVideo videoId: UUID, in asset: Asset? = nil)
     throws -> Set<String> {
         let fromEdges = Set(try tagIds(forVideo: videoId))
-        let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
+        let source = try asset ?? self.asset(withId: videoId)
         let fromStrings = Set((source?.actions ?? []).map(TagNormalizer.identityKey))
         return fromEdges.union(fromStrings)
     }
@@ -915,13 +949,17 @@ public extension LibraryStore {
         // re-key, report EVERY edge in the library as stale — and this screen
         // offers to delete what it reports.
         let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
+        // ⚠️ Both edge tables read ONCE. Per-video lookups here meant roughly
+        // 4,000 SELECTs to answer one screen.
+        let performerEdges = try performerEdgesByVideo()
+        let studioEdges = try studioIdsByVideo()
         var found: [StaleEdge] = []
 
         for asset in assets {
             let namedPerformers = Set(asset.actors.compactMap {
                 resolver.localId(for: "actor:\($0)")
             })
-            for edge in try performerIds(forVideo: asset.id)
+            for edge in performerEdges[asset.id.uuidString] ?? []
             where !namedPerformers.contains(edge) {
                 found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
                                        nodeId: edge, kind: .actor,
@@ -931,7 +969,7 @@ public extension LibraryStore {
             let namedStudios = Set(asset.studios.filter { !$0.isEmpty }.compactMap {
                 resolver.localId(for: "studio:\($0)")
             })
-            if let edge = try studioId(forVideo: asset.id), !namedStudios.contains(edge) {
+            if let edge = studioEdges[asset.id], !namedStudios.contains(edge) {
                 found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
                                        nodeId: edge, kind: .studio,
                                        videoNamesOthers: !namedStudios.isEmpty))

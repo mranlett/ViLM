@@ -284,7 +284,14 @@ final class ActorEnrichmentModel: ObservableObject {
     /// so the machine records `noMatch` and leaves the entity in the queue. This
     /// is the operator saying "I looked; stop asking."
     func markUnmatchable() -> EntityProfile {
-        var profile = currentProfile ?? EntityProfile(id: entityId)
+        // 🚨 The stand-in carries its type and name. `EntityProfile(id:)`
+        // derives them from the id, and a uid carries neither — so after the
+        // re-key this would persist a profile with NO NAME, which is not
+        // recoverable from the row itself.
+        var profile = currentProfile ?? EntityProfile(
+            id: entityId,
+            entityType: NodeIdentity.parse(entityId)?.type ?? "actor",
+            displayName: NodeIdentity.parse(entityId)?.displayName)
         profile.enrichmentState = .unmatchable
         profile.enrichmentSource = provider.displayName
         profile.enrichmentCheckedAt = Date()

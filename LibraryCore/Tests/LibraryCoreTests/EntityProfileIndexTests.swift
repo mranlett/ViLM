@@ -73,8 +73,8 @@ final class EntityProfileIndexTests: XCTestCase {
             rekeyed("actor", "One"), rekeyed("actor", "Two"), rekeyed("studio", "Three"),
         ])
 
-        XCTAssertEqual(index.actors.count, 2)
-        XCTAssertEqual(index.studios.count, 1)
+        XCTAssertEqual(Set(index.actors.map(\.name)), ["One", "Two"])
+        XCTAssertEqual(index.studios.map(\.name), ["Three"])
         XCTAssertTrue(index.tags.isEmpty)
         XCTAssertTrue(index.actors.allSatisfy { !$0.id.hasPrefix("actor:") },
                       "the fixture is re-keyed, so a prefix filter would have found none")
@@ -102,8 +102,12 @@ final class EntityProfileIndexTests: XCTestCase {
         let a = rekeyed("actor", "Twin", uid: "uid-a")
         let b = rekeyed("actor", "Twin", uid: "uid-b")
 
-        XCTAssertEqual(EntityProfileIndex([a, b])[actor: "Twin"]?.id,
-                       EntityProfileIndex([b, a])[actor: "Twin"]?.id)
+        // ⚠️ Asserts a REAL winner first. Comparing two optionals alone would
+        // be satisfied by nil == nil — i.e. by an index that resolves nothing.
+        let forward = EntityProfileIndex([a, b])[actor: "Twin"]?.id
+        let reversed = EntityProfileIndex([b, a])[actor: "Twin"]?.id
+        XCTAssertEqual(forward, "uid-a", "the lowest id is the stable winner")
+        XCTAssertEqual(reversed, "uid-a")
     }
 
     // N7 — 🚨 a duplicate must not CRASH. The dictionary this replaces was
@@ -167,9 +171,15 @@ final class EntityProfileIndexTests: XCTestCase {
     }
 
     // N11 — precedence is preserved: the earlier layer wins a real conflict.
+    //
+    // 🚨 DIFFERENT uids per layer, deliberately. With one shared id an
+    // id-keyed fold groups them too, so the test would pass against exactly
+    // the defect N10 exists to catch.
     func testTheEarlierLayerWinsAConflict() {
-        let primary = EntityProfile(id: "actor:Shared", bio: "primary")
-        let attached = EntityProfile(id: "actor:Shared", bio: "attached")
+        let primary = EntityProfile(id: "uid-A", entityType: "actor",
+                                    displayName: "Shared", bio: "primary")
+        let attached = EntityProfile(id: "uid-B", entityType: "actor",
+                                     displayName: "Shared", bio: "attached")
 
         let merged = EntityProfileIndex.merged(ordered: [[primary], [attached]])
 

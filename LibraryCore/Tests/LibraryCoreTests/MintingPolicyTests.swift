@@ -101,10 +101,16 @@ final class MintingPolicyTests: XCTestCase {
         try markRekeyed()
 
         let minted = try store.newEntityProfile(named: "Silver River", type: "studio")
+        // ⚠️ SAVED and re-read. Asserting on the freshly built struct alone
+        // would only test that an initialiser assigns its arguments — it would
+        // pass even if the columns never reached SQLite, which is the failure
+        // that actually loses the name.
+        try store.saveEntityProfile(minted)
 
-        XCTAssertEqual(minted.displayName, "Silver River")
-        XCTAssertEqual(minted.entityType, "studio")
-        XCTAssertEqual(minted.name, "Silver River")
+        let stored = try XCTUnwrap(try store.fetchEntityProfile(for: minted.id))
+        XCTAssertEqual(stored.displayName, "Silver River")
+        XCTAssertEqual(stored.entityType, "studio")
+        XCTAssertEqual(stored.name, "Silver River")
     }
 
     // And the minted row is findable by the lookup the app now uses.

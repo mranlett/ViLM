@@ -905,14 +905,9 @@ public class LibraryStore {
                 }
                 if modified {
                     videosChanged += 1
-                    // Deduplicate tags while preserving order
-                    var uniqueTags = [String]()
-                    for t in asset.tags {
-                        if !uniqueTags.contains(t) {
-                            uniqueTags.append(t)
-                        }
-                    }
-                    asset.tags = uniqueTags
+                    // A rename can map two spellings onto one, so the row can
+                    // come out holding the same tag twice.
+                    asset.tags = asset.tags.deduplicatedPreservingOrder()
                     try asset.update(db)
                 }
             }
@@ -1063,12 +1058,12 @@ public class LibraryStore {
                 // two profiles discarded the identity one of them had just been
                 // confirmed with — the exact defect this loop was written to
                 // fix, recurring on a table added afterwards.
-                for (table, column) in [("video_performer", "performer_id"),
-                                        ("performer_tag", "performer_id"),
-                                        ("video_studio", "studio_id"),
-                                        ("studio_parent", "studio_id"),
-                                        ("studio_parent", "parent_studio_id"),
-                                        ("entity_match", "entity_id")] {
+                // ⭐ ONE canonical list, shared with the re-key. This was a
+                // literal here, and `entity_match` was once missing from it —
+                // so merging two profiles discarded the identity one of them
+                // had just been confirmed with. A list that has to be kept in
+                // step by hand will eventually not be.
+                for (table, column) in GraphTable.entityReferences {
                     // ⚠️ Resolved ids, never the name strings. After the
                     // re-key the endpoints are uids and a name-form string
                     // matches no edge at all — the UPDATE would touch nothing

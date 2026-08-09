@@ -1,10 +1,10 @@
 // IdentityUpgradeView.swift
 // The gate in front of the one irreversible operation in this project.
 //
-// ⭐ Read-only today. It runs every check and reports, and does not offer to
-// re-key anything yet — the tool that does lands behind this screen, and having
-// the gate first means the operator can see whether a library is ready long
-// before anything can act on the answer.
+// ⭐ The gate came first, deliberately, and was read-only until every screen
+// in the app had stopped reading names out of ids. It now offers the upgrade
+// too — but only behind its own verdict, an explicit confirmation naming the
+// library, and a second pre-flight run inside the operation itself.
 //
 // 🚨 Why a screen at all, rather than a migration. `LibraryStore` migrates on
 // OPEN, so a gate expressed as a migration would either fail the app's startup
@@ -23,6 +23,12 @@ struct IdentityUpgradeView: View {
     @State private var check: MigrationPreflight?
     @State private var isWorking = true
     @State private var errorMessage: String?
+
+    /// 🚨 The confirmation in front of the one irreversible step.
+    @State private var isConfirming = false
+    @State private var isUpgrading = false
+    @State private var result: RekeyResult?
+    @State private var upgradeError: String?
 
     var body: some View {
         NavigationStack {
@@ -54,14 +60,85 @@ struct IdentityUpgradeView: View {
             ContentUnavailableView("Couldn't read the library",
                                    systemImage: "exclamationmark.triangle",
                                    description: Text(errorMessage))
+        } else if isUpgrading {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Upgrading identity…")
+                Text("Do not quit the app or detach the drive.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let result {
+            doneView(result)
         } else if let check {
             List {
                 verdictSection(check)
+                if let upgradeError { failureSection(upgradeError) }
                 if !check.duplicates.isEmpty { duplicatesSection(check) }
                 if !check.unkeyableProfiles.isEmpty { unkeyableSection(check) }
                 spaceSection(check)
                 tombstoneSection(check)
                 baselineSection(check)
+                if check.canProceed { upgradeSection(check) }
+            }
+        }
+    }
+
+    // MARK: - 🚨 The button
+
+    @ViewBuilder
+    private func upgradeSection(_ check: MigrationPreflight) -> some View {
+        Section {
+            Button(role: .destructive) { isConfirming = true } label: {
+                Label("Upgrade Identity…", systemImage: "key.fill")
+            }
+            .disabled(isWorking || isUpgrading)
+        } header: {
+            Text("The upgrade")
+        } footer: {
+            // ⚠️ States the cost plainly. This is the only step in the project
+            // that cannot be undone, and the operator is the last safeguard.
+            Text("Re-keys \(check.edgeCounts.values.reduce(0, +)) edges and every profile in this library, and moves \(gb(check.photoBytes)) of photos. This CANNOT be undone — take a verified backup first. The checks above run again the moment you confirm, so anything that changed since you opened this screen will still stop it.")
+        }
+        .confirmationDialog("Upgrade this library's identity?",
+                            isPresented: $isConfirming, titleVisibility: .visible) {
+            Button("Upgrade \(libraryURL.lastPathComponent)", role: .destructive) {
+                Task { await upgrade() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // 🚨 Names the library. Two can be open at once and identity is
+            // per database — confirming the wrong one is not recoverable.
+            Text("This rewrites the primary key of every actor, studio and tag in “\(libraryURL.lastPathComponent)”, and renames their photo files. It cannot be undone.")
+        }
+    }
+
+    @ViewBuilder
+    private func failureSection(_ message: String) -> some View {
+        Section {
+            Label(message, systemImage: "xmark.octagon")
+                .foregroundStyle(.red)
+        } header: {
+            Text("The upgrade did not run")
+        } footer: {
+            // ⭐ The four-phase order means a failure leaves BOTH copies of
+            // every file rather than neither, so this is always true.
+            Text("Nothing was changed. Fix what is listed and try again.")
+        }
+    }
+
+    @ViewBuilder
+    private func doneView(_ result: RekeyResult) -> some View {
+        ContentUnavailableView {
+            Label("Identity upgraded", systemImage: "checkmark.seal.fill")
+        } description: {
+            Text("\(result.nodesRekeyed) nodes re-keyed, \(result.photosCopied) photos moved, \(result.edgesRepointed.values.reduce(0, +)) edges re-pointed.")
+        } actions: {
+            Button("Done") {
+                // Every screen reads profiles; they all need reloading.
+                NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"),
+                                                object: nil)
+                dismiss()
             }
         }
     }
@@ -190,21 +267,53 @@ struct IdentityUpgradeView: View {
         }
     }
 
-    private func label(for table: String) -> String {
-        switch table {
-        case "video_performer":         return "Cast credits"
-        case "video_studio":            return "Studios"
-        case "video_tag":               return "Tags on videos"
-        case "performer_tag":           return "Traits on performers"
-        case "studio_parent":           return "Studio hierarchy"
-        case "entity_match":            return "External identities"
-        case "pending_tag_association": return "Tag links waiting"
-        default:                        return table
-        }
+    /// ⭐ Asked of the domain, not decided here. A screen that switches on raw
+    /// SQL table names is a screen coupled to the schema — and one that goes
+    /// stale silently the next time a table is added.
+    private func label(for table: String) -> String { GraphTable.label(for: table) }
+
+    /// ⭐ `ByteCountFormatter` rather than dividing by a literal — it follows
+    /// the platform's own convention for what a gigabyte is, and the operator
+    /// is comparing this number against what Finder shows them.
+    private func gb(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
-    private func gb(_ bytes: Int64) -> String {
-        String(format: "%.2f GB", Double(bytes) / 1_000_000_000)
+    private func upgrade() async {
+        isUpgrading = true
+        upgradeError = nil
+        let url = libraryURL
+        do {
+            let outcome = try await Task.detached(priority: .userInitiated) {
+                try LibraryStore(at: url).performIdentityRekey()
+            }.value
+            result = outcome
+        } catch let error as RekeyError {
+            upgradeError = Self.describe(error)
+            await run()
+        } catch {
+            upgradeError = error.localizedDescription
+            await run()
+        }
+        isUpgrading = false
+    }
+
+    /// ⚠️ Each case says what it means for the LIBRARY, not what threw. The
+    /// operator needs to know whether anything happened.
+    private static func describe(_ error: RekeyError) -> String {
+        switch error {
+        case let .preflightFailed(blockers):
+            return "The checks refused it: \(blockers.joined(separator: "; "))"
+        case let .photosMissing(expected, found):
+            return "Only \(found) of \(expected) photos copied, so the database was left untouched."
+        case let .edgeCountChanged(table, before, after):
+            return "\(table) changed from \(before) to \(after) rows mid-run, so it was rolled back."
+        case let .unresolvedReference(table, count):
+            return "\(count) rows in \(table) pointed at nothing, so it was rolled back."
+        }
     }
 
     private func run() async {

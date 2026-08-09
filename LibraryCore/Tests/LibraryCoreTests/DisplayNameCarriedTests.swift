@@ -28,16 +28,21 @@ final class DisplayNameCarriedTests: XCTestCase {
 
     // MARK: - entityNamesById
 
+    // ⚠️ TWO studios, not one. With a single row a query that returned only
+    // its first match — or stopped at LIMIT 1 — would pass.
     func testNamesAreReadForOneTypeOnly() throws {
-        let studioUid = UUID().uuidString
-        try store.saveEntityProfile(EntityProfile(id: studioUid, entityType: "studio",
+        let a = UUID().uuidString, b = UUID().uuidString
+        try store.saveEntityProfile(EntityProfile(id: a, entityType: "studio",
                                                   displayName: "Silver River"))
+        try store.saveEntityProfile(EntityProfile(id: b, entityType: "studio",
+                                                  displayName: "Silver Creek"))
         try store.saveEntityProfile(EntityProfile(id: UUID().uuidString, entityType: "actor",
                                                   displayName: "Marta Venlowe"))
 
         let names = try store.entityNamesById(ofType: "studio")
 
-        XCTAssertEqual(names, [studioUid: "Silver River"])
+        XCTAssertEqual(names, [a: "Silver River", b: "Silver Creek"],
+                       "every studio, and no actors")
     }
 
     /// ⚠️ A row with no name answers with its id rather than vanishing — an
@@ -90,7 +95,11 @@ final class DisplayNameCarriedTests: XCTestCase {
     // 🚨 The sync screen lists each plan under this string and asks the
     // operator to approve them one at a time. Derived from the id, every row
     // would read as a UUID.
-    func testASyncPlanCarriesTheActorsName() {
+    // ⚠️ Asserts the property is STORED rather than derived, which is the
+    // whole change — a computed `displayName` sliced from the id would return
+    // the uid here. This is deliberately a narrow structural test; that the
+    // real builder populates it is covered by `ActorSyncTests`.
+    func testASyncPlanReportsTheNameItWasGivenNotItsId() {
         let uid = UUID().uuidString
         let plan = ActorSyncPlan(actorId: uid, displayName: "Marta Venlowe",
                                  missingFrom: [], deletionFrom: [],
@@ -98,6 +107,8 @@ final class DisplayNameCarriedTests: XCTestCase {
                                  listAdds: [:], conflicts: [])
 
         XCTAssertEqual(plan.displayName, "Marta Venlowe")
+        XCTAssertNotEqual(plan.displayName, uid,
+                          "a derived name would answer with the uid")
         XCTAssertEqual(plan.id, uid, "the id is still the identity")
     }
 

@@ -45,21 +45,34 @@ final class FetchProfileByNameTests: XCTestCase {
     }
 
     // ⚠️ Type-qualified: one name held by two kinds is two nodes.
+    //
+    // 🚨 UID fixtures deliberately. With legacy ids the columns hold the same
+    // strings the id does, so an implementation that simply rebuilt
+    // "\(type):\(name)" and looked it up by KEY would pass — proving nothing
+    // about the column query this method exists to be.
     func testTheTypeAxisSeparatesTwoNodesOfOneName() throws {
-        try store.saveEntityProfile(EntityProfile(id: "actor:Pink"))
-        try store.saveEntityProfile(EntityProfile(id: "studio:Pink"))
+        let actorUid = UUID().uuidString, studioUid = UUID().uuidString
+        try store.saveEntityProfile(EntityProfile(id: actorUid, entityType: "actor",
+                                                  displayName: "Pink"))
+        try store.saveEntityProfile(EntityProfile(id: studioUid, entityType: "studio",
+                                                  displayName: "Pink"))
 
-        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "actor")?.id, "actor:Pink")
-        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "studio")?.id, "studio:Pink")
+        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "actor")?.id, actorUid)
+        XCTAssertEqual(try store.fetchEntityProfile(named: "Pink", type: "studio")?.id, studioUid)
     }
 
     // A studio whose NAME contains a colon still resolves — the case that
     // breaks any implementation that splits an id on the last colon.
+    // 🚨 UID-keyed, so the name genuinely comes from the column. A legacy
+    // fixture here would be matched by plain key concatenation and would say
+    // nothing about a colon in a NAME.
     func testAColonInTheNameIsNotAProblem() throws {
-        try store.saveEntityProfile(EntityProfile(id: "studio:Vol 2: The Return"))
+        let uid = UUID().uuidString
+        try store.saveEntityProfile(EntityProfile(id: uid, entityType: "studio",
+                                                  displayName: "Vol 2: The Return"))
 
-        XCTAssertEqual(try store.fetchEntityProfile(named: "Vol 2: The Return", type: "studio")?.id,
-                       "studio:Vol 2: The Return")
+        XCTAssertEqual(try store.fetchEntityProfile(named: "Vol 2: The Return",
+                                                    type: "studio")?.id, uid)
     }
 
     // MARK: - resolveActorAKA

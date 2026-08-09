@@ -242,7 +242,14 @@ struct BatchEntityProfileEditorView: View {
                     // overwrites the actor's existing bio/photos/AKAs with a
                     // blank record. A throwing fetch aborts the whole batch
                     // (via the outer catch) instead of wiping anything.
-                    var profile = try store.fetchEntityProfile(for: id) ?? EntityProfile(id: id)
+                    // 🚨 A fresh profile carries its type and name. Derived
+                    // from a uid they are both nil, and the row would be saved
+                    // nameless — unrecoverable, since the name is the only
+                    // record of what the node is called once ids are opaque.
+                    var profile = try store.fetchEntityProfile(for: id)
+                        ?? EntityProfile(id: id,
+                                         entityType: NodeIdentity.parse(id)?.type ?? "actor",
+                                         displayName: NodeIdentity.parse(id)?.displayName)
 
                     if !finalGender.isEmpty { profile.gender = finalGender }
                     if !finalHair.isEmpty { profile.hairColor = finalHair }

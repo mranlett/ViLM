@@ -63,6 +63,11 @@ public struct RekeyResult: Equatable, Sendable {
 public enum RekeyError: Error, Equatable {
     /// Phase 2 found fewer new files than phase 1 should have written.
     case photosMissing(expected: Int, found: Int)
+
+    /// 🚨 The gate said no at the last moment. Carries every blocker, not the
+    /// first — an operator fixing them one run at a time is four passes at the
+    /// same wall.
+    case preflightFailed([String])
     /// 🚨 An edge table's row count changed across the re-point. V3.
     case edgeCountChanged(table: String, before: Int, after: Int)
     /// A node still references an id that is not a known uid.
@@ -78,23 +83,12 @@ public extension LibraryStore {
     /// re-pointing it would blank the deletion record, and every deleted entity
     /// would return on the next federation sync. Tombstones stay name-keyed,
     /// which is what D4 requires and what the federation boundary implements.
-    static let rekeyedTables: [(table: String, column: String)] = [
-        ("video_performer", "performer_id"),
-        ("video_studio", "studio_id"),
-        ("performer_tag", "performer_id"),
-        ("studio_parent", "studio_id"),
-        ("studio_parent", "parent_studio_id"),
-        ("entity_match", "entity_id"),
-    ]
+    static var rekeyedTables: [(table: String, column: String)] { GraphTable.entityReferences }
 
     /// Tables counted for V3. `video_tag` and `pending_tag_association` key on
     /// tag identity rather than on an entity id, so they are counted but never
     /// re-pointed — a change in either would mean something unrelated moved.
-    static let countedTables = [
-        "video_performer", "video_studio", "video_tag",
-        "performer_tag", "studio_parent", "entity_match",
-        "pending_tag_association",
-    ]
+    static var countedTables: [String] { GraphTable.counted }
 
     /// Works out what will happen. Changes nothing.
     func rekeyPlan(makeUid: () -> String = { UUID().uuidString }) throws -> RekeyPlan {
@@ -115,14 +109,22 @@ public extension LibraryStore {
         // database has forgotten, which a column-driven mapping would orphan.
         let directory = profilesDirectory
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        // ⚠️ The two match strings are built ONCE per profile, not once per
+        // (file, profile) pair. Interpolating them inside the search ran
+        // 9,000 files x 1,800 profiles — sixteen million comparisons, each
+        // allocating two throwaway Strings — which is minutes of churn on a
+        // real library and a watchdog kill on a slow volume.
         let safeIds = uids.keys
-            .map { (safe: ProfileImageNaming.safeId(for: $0), oldId: $0) }
+            .map { oldId -> (safe: String, exact: String, prefix: String, oldId: String) in
+                let safe = ProfileImageNaming.safeId(for: oldId)
+                return (safe: safe, exact: "\(safe).jpg", prefix: "\(safe)_", oldId: oldId)
+            }
             .sorted { $0.safe.count > $1.safe.count }
 
         var renames: [String: String] = [:]
         for file in existing {
             guard let owner = safeIds.first(where: { candidate in
-                file == "\(candidate.safe).jpg" || file.hasPrefix("\(candidate.safe)_")
+                file == candidate.exact || file.hasPrefix(candidate.prefix)
             }), let uid = uids[owner.oldId] else { continue }
             let newSafe = ProfileImageNaming.safeId(for: uid)
             renames[file] = newSafe + file.dropFirst(owner.safe.count)
@@ -146,12 +148,11 @@ public extension LibraryStore {
     func rekeyCopyPhotos(_ plan: RekeyPlan) throws -> Int {
         let directory = profilesDirectory
         var copied = 0
+        let present = Self.fileNames(in: directory)
         for (old, new) in plan.fileRenames {
-            let source = directory.appendingPathComponent(old)
-            let destination = directory.appendingPathComponent(new)
-            guard FileManager.default.fileExists(atPath: source.path) else { continue }
-            if FileManager.default.fileExists(atPath: destination.path) { continue }
-            try FileManager.default.copyItem(at: source, to: destination)
+            guard present.contains(old), !present.contains(new) else { continue }
+            try FileManager.default.copyItem(at: directory.appendingPathComponent(old),
+                                             to: directory.appendingPathComponent(new))
             copied += 1
         }
         return copied
@@ -164,18 +165,13 @@ public extension LibraryStore {
     /// comes first.
     func rekeyVerifyPhotos(_ plan: RekeyPlan) throws {
         let directory = profilesDirectory
+        let present = Self.fileNames(in: directory)
         // Only files whose SOURCE still exists are required: phase 4 of an
         // earlier run may already have removed originals.
         let expected = plan.fileRenames.filter {
-            FileManager.default.fileExists(
-                atPath: directory.appendingPathComponent($0.key).path)
-                || FileManager.default.fileExists(
-                    atPath: directory.appendingPathComponent($0.value).path)
+            present.contains($0.key) || present.contains($0.value)
         }
-        let found = expected.filter {
-            FileManager.default.fileExists(
-                atPath: directory.appendingPathComponent($0.value).path)
-        }
+        let found = expected.filter { present.contains($0.value) }
         guard found.count == expected.count else {
             throw RekeyError.photosMissing(expected: expected.count, found: found.count)
         }
@@ -244,6 +240,16 @@ public extension LibraryStore {
         }
     }
 
+    /// One directory listing, as a set.
+    ///
+    /// ⚠️ Every photo phase used to ask `fileExists` per file — up to three
+    /// stat calls each, ~18,000 on a library this size. These libraries live on
+    /// USB and network volumes where each one has real latency, and the phases
+    /// run back to back during the one operation that must not stall.
+    static func fileNames(in directory: URL) -> Set<String> {
+        Set((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+    }
+
     /// Writes the minted ids into the `uid` column. Additive and reversible —
     /// nothing reads `uid` until phase 3 moves `id` onto it.
     func rekeyMintUids(_ plan: RekeyPlan) throws {
@@ -277,5 +283,65 @@ public extension LibraryStore {
             deleted += 1
         }
         return deleted
+    }
+}
+
+// MARK: - The one public entry point
+
+public extension LibraryStore {
+
+    /// Re-keys this library: names stop being primary keys.
+    ///
+    /// 🚨 THE ONLY IRREVERSIBLE OPERATION IN THIS PROJECT. Take a verified
+    /// backup immediately before calling it.
+    ///
+    /// ⭐ One method rather than four exposed phases, deliberately. The order
+    /// IS the safety — copy, verify, commit, delete — and a caller holding four
+    /// separate steps is a caller who can run them out of order, or stop after
+    /// the commit and leave the photos behind. The phases stay internal so the
+    /// sequence cannot be assembled anywhere else.
+    ///
+    /// ⚠️ Re-runs the pre-flight and REFUSES on any blocker, even though the
+    /// screen already checked. Between the operator reading a verdict and
+    /// pressing the button, an enrichment batch can add photos, a match can
+    /// create a duplicate name, and the free space can move. The gate has to be
+    /// the last thing that happens before the first copy, not the first thing
+    /// the operator saw.
+    ///
+    /// ⚠️ Already-re-keyed libraries return a zero result rather than throwing.
+    /// Pressing the button twice is not an error; it is an operator making sure.
+    @discardableResult
+    func performIdentityRekey(
+        makeUid: () -> String = { UUID().uuidString }
+    ) throws -> RekeyResult {
+        guard try !isRekeyed() else {
+            return RekeyResult(nodesRekeyed: 0, photosCopied: 0,
+                               photosDeleted: 0, edgesRepointed: [:])
+        }
+
+        let gate = try migrationPreflight()
+        guard gate.canProceed else { throw RekeyError.preflightFailed(gate.blockers) }
+
+        let plan = try rekeyPlan(makeUid: makeUid)
+
+        // Additive and reversible: nothing reads `uid` until the commit moves
+        // `id` onto it, so a failure between here and phase 3 changes nothing
+        // the app can see.
+        try rekeyMintUids(plan)
+
+        // 1 — both names now exist on disk.
+        let copied = try rekeyCopyPhotos(plan)
+        // 2 — abort here and the database has not been touched at all.
+        try rekeyVerifyPhotos(plan)
+        // 3 — one transaction, with the per-table counts re-checked inside it.
+        var result = try rekeyCommit(plan)
+        // 4 — interruptible and idempotent; orphans left behind are harmless.
+        let deleted = try rekeyDeleteOldPhotos(plan)
+
+        result = RekeyResult(nodesRekeyed: result.nodesRekeyed,
+                             photosCopied: copied,
+                             photosDeleted: deleted,
+                             edgesRepointed: result.edgesRepointed)
+        return result
     }
 }

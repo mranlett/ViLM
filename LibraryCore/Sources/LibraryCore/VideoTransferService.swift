@@ -361,6 +361,12 @@ public final class VideoTransferService {
             // this set would be non-empty, select nothing, and report zero
             // actors transferred on every move — a silent loss of exactly the
             // profile data this block exists to carry across.
+            // ⚠️ Built per move, and that is a real cost on a batch: each one
+            // reads the source library's whole profile table. Acceptable only
+            // because a move is already dominated by copying and hashing the
+            // video file itself — a resolver over ~1,800 rows is noise beside
+            // a multi-gigabyte streaming SHA-256. If moves are ever batched
+            // without a file copy, hoist this to the caller.
             let sourceResolver = NodeResolver(
                 profiles: (try? sourceStore.fetchAllEntityProfiles()) ?? [])
             let actorIds = Set(asset.actors.compactMap {

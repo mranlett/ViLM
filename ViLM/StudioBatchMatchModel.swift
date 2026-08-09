@@ -204,9 +204,16 @@ final class StudioBatchMatchModel: ObservableObject {
             return .failed(friendly(error))
         }
 
+        // ⭐ The parent's NAME comes from its row. Slicing the edge's endpoint
+        // answers a uid after the re-key, and this string is compared against
+        // the name the source offered — so every studio would look like a
+        // parent conflict.
         let existingParent = (try? store.studioParentPairs())?
             .first { $0.from == profile.id }
-            .map { String($0.to.dropFirst(7)) }
+            .flatMap { pair -> String? in
+                let parent = (try? store.fetchEntityProfile(for: pair.to)) ?? nil
+                return parent?.name
+            }
 
         let disposition = StudioBatchPolicy.parentDisposition(existing: existingParent,
                                                               proposal: proposal)

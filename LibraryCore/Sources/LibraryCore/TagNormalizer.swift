@@ -126,3 +126,15 @@ public struct TagNormalizer {
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 }
+
+extension Array where Element: Hashable {
+    /// The same elements, first occurrence wins, order preserved.
+    ///
+    /// ⚠️ Set-backed. The obvious `contains` inside a loop is quadratic, and
+    /// the one place this replaced ran it over every tag of every video in the
+    /// library during a global rename.
+    func deduplicatedPreservingOrder() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
