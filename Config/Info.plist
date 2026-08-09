@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Declares the one document type this app vends: .vilmbackup.
+
+  🚨 It was never declared, so `UTType(filenameExtension: "vilmbackup")`
+  returned nil and BackupDocument silently fell back to `public.data`. The
+  exporter was then told the document was plain data while the filename ended
+  in .vilmbackup. macOS tolerated the mismatch; iOS is stricter about it.
+
+  ⚠️ Lives OUTSIDE ViLM/, which is a file-system-synchronized group — every
+  file in there is picked up as a bundle resource automatically, so a plist
+  there is both copied as a resource AND used as the Info.plist, and the build
+  fails with "Multiple commands produce Info.plist".
+
+  ⚠️ GENERATE_INFOPLIST_FILE stays YES. Xcode merges the generated keys — the
+  scene manifest, launch screen, orientations, usage descriptions — into this
+  file at build time, so they must NOT be duplicated here. Adding them by hand
+  would create two sources of truth for the same keys and one of them would go
+  stale. This file holds only what the generator cannot express: an array of
+  dictionaries.
+
+  ⚠️ The identifier below is repeated in BackupDocument.backupType. They must
+  match exactly; a disagreement means the app exports a type the system has
+  never heard of.
+-->
+<plist version="1.0">
+<dict>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.mattranlett.ViLM.backup</string>
+			<key>UTTypeDescription</key>
+			<string>ViLM Library Backup</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vilmbackup</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

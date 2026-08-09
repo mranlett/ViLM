@@ -10,21 +10,36 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LibraryCore
 
-/// A .vilmbackup archive, referenced by a temp file URL so the (potentially
-/// large) archive is streamed to the save destination rather than loaded into
-/// memory.
-struct BackupDocument: FileDocument {
-    static let backupType = UTType(filenameExtension: "vilmbackup") ?? .data
-    static var readableContentTypes: [UTType] { [backupType] }
-
-    var sourceURL: URL?
-    init(sourceURL: URL) { self.sourceURL = sourceURL }
-    init(configuration: ReadConfiguration) throws { self.sourceURL = nil }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        guard let sourceURL else { throw CocoaError(.fileNoSuchFile) }
-        return try FileWrapper(url: sourceURL)
-    }
+/// The `.vilmbackup` document type.
+///
+/// 🚨 Declared, not looked up. This read
+/// `UTType(filenameExtension: "vilmbackup") ?? .data`, and because nothing in
+/// the app declared the type the lookup returned nil and the `?? .data` quietly
+/// took over — every export was announced as plain `public.data` under a
+/// `.vilmbackup` filename. A fallback that changes what the app claims to be
+/// exporting is not a safe default.
+///
+/// ⚠️ The identifier must match `UTExportedTypeDeclarations` in
+/// `Config/Info.plist` exactly.
+///
+/// ⭐ This was a `FileDocument` whose `fileWrapper` returned
+/// `FileWrapper(url:)`. That is a LAZY reference, and `fileExporter` hands it
+/// to the document picker, which runs out of process — so the picker tried to
+/// open a path inside this app's container and was refused:
+///
+///     The file "vilmbackup-<uuid>.vilmbackup" couldn't be opened because
+///     you don't have permission to view it.
+///
+/// The tell was the save sheet offering that raw UUID name instead of
+/// `defaultFilename`: the wrapper's `preferredFilename` was winning, which only
+/// happens when the document IS a file reference. Export now goes through
+/// `.fileMover`, which is the API for handing the system a file that already
+/// exists on disk — it coordinates the move across the sandbox rather than
+/// asking another process to read our container, and it never loads a
+/// multi-gigabyte archive into memory to do it.
+enum BackupArchive {
+    static let type = UTType(exportedAs: "com.mattranlett.ViLM.backup",
+                             conformingTo: .data)
 }
 
 struct LibraryBackupView: View {
@@ -93,36 +108,37 @@ struct LibraryBackupView: View {
             .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(errorMessage ?? "") }
-            .fileExporter(
-                // ⭐ Derived, so `isPresented` and `document` cannot contradict
-                // each other. When SwiftUI dismisses, both go nil in the same
-                // pass; there is no render in which the sheet is up without a
-                // document to hand it.
+            .fileMover(
+                // ⭐ Derived, so presentation and the file cannot contradict
+                // each other. They used to be an `isShowingSaveSheet` flag
+                // beside an optional URL, and the completion handler nilled the
+                // URL while the flag was still true — SwiftUI then re-evaluated
+                // the body with `isPresented == true` and nothing to export,
+                // logged "Attempting to export a nil document", and dismissed
+                // the picker itself.
                 isPresented: Binding(get: { archiveURL != nil },
                                      set: { if !$0 { archiveURL = nil } }),
-                document: archiveURL.map(BackupDocument.init(sourceURL:)),
-                contentType: BackupDocument.backupType,
-                defaultFilename: defaultBackupName
+                file: archiveURL
             ) { result in
                 if case .failure(let error) = result {
                     // ⚠️ The domain and code as well as the description. The
                     // description alone said "you do not have permission to
-                    // read it", which named neither the file nor the failure
-                    // and sent this diagnosis down two wrong paths.
+                    // view it", which named neither the failing side nor the
+                    // reason, and sent this diagnosis down three wrong paths.
                     let ns = error as NSError
                     errorMessage = "Save failed: \(error.localizedDescription) "
                         + "[\(ns.domain) \(ns.code)]"
                 } else { didSave = true }
-                // Saved or failed, the temp archive has served its purpose —
-                // these are multi-hundred-MB files that otherwise linger
-                // until an OS purge (DEFECT_INVENTORY M3).
+                // ⚠️ A successful move has already taken the file; this clears
+                // up after a cancel or a failure. The enclosing temp directory
+                // goes too — these are multi-hundred-MB archives that otherwise
+                // linger until an OS purge (DEFECT_INVENTORY M3).
                 //
-                // ⚠️ The FILE is removed; the state is cleared by the binding
-                // above. Nilling `archiveURL` here is what put the view into
-                // "presented with no document" in the first place.
-                if let archiveURL { try? FileManager.default.removeItem(at: archiveURL) }
+                // The FILE is removed here; the STATE is cleared by the binding
+                // above, never from inside this handler.
+                deleteTempArchiveFile()
             }
-            .fileImporter(isPresented: $isShowingArchivePicker, allowedContentTypes: [BackupDocument.backupType]) {
+            .fileImporter(isPresented: $isShowingArchivePicker, allowedContentTypes: [BackupArchive.type]) {
                 handlePickedArchive($0)
             }
             .fileImporter(isPresented: $isShowingFolderPicker, allowedContentTypes: [.folder]) {
@@ -189,7 +205,13 @@ struct LibraryBackupView: View {
             let result = try await ScopedOperation.run(holding: [url]) {
                 try await Task.detached(priority: .userInitiated) { try LibraryBackupService().exportBackup(of: url) }.value
             }
-            await MainActor.run { isBuilding = false; archiveURL = result.archiveURL }
+            // 🚨 Renamed BEFORE the picker sees it. `.fileMover` offers the
+            // file's own name, and the service names its temp archive
+            // `vilmbackup-<uuid>.vilmbackup` — which is what the save sheet
+            // was putting in front of the operator.
+            let named = (try? Self.renamed(result.archiveURL, to: defaultBackupName))
+                ?? result.archiveURL
+            await MainActor.run { isBuilding = false; archiveURL = named }
         } catch {
             await MainActor.run { isBuilding = false; errorMessage = "Couldn't create the backup: \(error.localizedDescription)" }
         }
@@ -329,10 +351,28 @@ struct LibraryBackupView: View {
     /// Removes the exported temp .vilmbackup once it's saved, failed, or
     /// abandoned (sheet dismissed / save sheet cancelled — cancellation
     /// doesn't invoke the fileExporter callback, so finish() covers it).
+    /// Moves the built archive under the name a person should see, inside its
+    /// own temp directory so two runs cannot collide on the same filename.
+    private static func renamed(_ url: URL, to filename: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vilmbackup-out-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(filename)
+        try FileManager.default.moveItem(at: url, to: dest)
+        return dest
+    }
+
+    /// Removes the temp archive and the directory holding it, WITHOUT touching
+    /// `archiveURL` — that is the presentation state, and clearing it from
+    /// inside the completion handler is what caused the nil-document defect.
+    private func deleteTempArchiveFile() {
+        guard let archiveURL else { return }
+        try? FileManager.default.removeItem(at: archiveURL)
+        try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent())
+    }
+
     private func deleteTempArchive() {
-        if let archiveURL {
-            try? FileManager.default.removeItem(at: archiveURL)
-        }
+        deleteTempArchiveFile()
         archiveURL = nil
     }
 
