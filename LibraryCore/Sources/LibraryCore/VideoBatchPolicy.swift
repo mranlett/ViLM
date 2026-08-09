@@ -145,9 +145,35 @@ public enum VideoBatchPolicy {
     /// does — one real record carried seventy — and applying those across a
     /// library without review would bury a hand-built vocabulary under someone
     /// else's taxonomy, one video at a time.
+    /// ⭐ CONFLICTS ARE OVERWRITTEN TOO, on a fingerprint match only.
+    ///
+    /// Operator's rule, and it is the OPPOSITE of the actor policy: *"if the
+    /// online data is different, simply accept it and overwrite what I have
+    /// locally."* The asymmetry is deliberate and it is about provenance —
+    ///
+    ///   • An actor profile is CURATED. The photo, the spelling, the links are
+    ///     choices someone made, and a source must not overrule them.
+    ///   • A video's local metadata was READ OFF ITS FILENAME. Title, season,
+    ///     release date, studio and cast are guesses by a parser, and the
+    ///     source's record of the same scene is simply better.
+    ///
+    /// 🚨 Only on a fingerprint route, which `isAutoApplicable` already
+    /// enforces. A fingerprint identifies the file exactly; a title or cast
+    /// search returns what is plausible. Overwriting good local data on the
+    /// strength of a guess is the one version of this that would be indefensible.
+    ///
+    /// ⚠️ Nothing the operator authored is reachable from here. The proposal
+    /// carries series, season, episode, release date, studio, link and cast —
+    /// and no notes, rating, play count or reviewed flag, which is why
+    /// overwriting is safe rather than merely permitted. `notes` in particular
+    /// is local-only by the operator's standing instruction.
+    ///
+    /// ⚠️ Tags remain excluded entirely — they are not in the change list at
+    /// all. A source tags far more finely than a person does, and applying that
+    /// across a library would bury a hand-built vocabulary one video at a time.
     public static func autoApplicableFields(route: VideoMatchRoute,
                                             changes: [VideoFieldChange]) -> Set<String> {
         guard route.isAutoApplicable else { return [] }
-        return Set(changes.filter { $0.kind == .fill }.map(\.field))
+        return Set(changes.map(\.field))
     }
 }

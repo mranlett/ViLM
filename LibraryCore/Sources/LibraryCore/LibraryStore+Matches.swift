@@ -134,13 +134,14 @@ extension LibraryStore {
     public func propagateIdentities(_ credits: [ProposedCredit], source: String,
                                     videoMethod: MatchMethod) throws -> Int {
         guard videoMethod.propagatesIdentity else { return 0 }
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         var written = 0
 
         for credit in credits {
             guard let sourceId = credit.sourceId, !sourceId.isEmpty else { continue }
-            let entityId = "actor:\(credit.name)"
-            guard known.contains(entityId) else { continue }
+            // ⭐ Resolved, so the edge this writes names the LOCAL node.
+            guard let entityId = resolver.localId(for: "actor:\(credit.name)")
+            else { continue }
             // Already identified in this source: leave it entirely alone.
             guard try matches(forEntity: entityId)
                     .first(where: { $0.source == source }) == nil else { continue }
@@ -179,12 +180,13 @@ extension LibraryStore {
     @discardableResult
     public func propagateIdentitiesFromSettledMatch(
         _ credits: [ProposedCredit], source: String) throws -> Int {
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         var written = 0
         for credit in credits {
             guard let sourceId = credit.sourceId, !sourceId.isEmpty else { continue }
-            let entityId = "actor:\(credit.name)"
-            guard known.contains(entityId) else { continue }
+            // ⭐ Resolved, so the edge this writes names the LOCAL node.
+            guard let entityId = resolver.localId(for: "actor:\(credit.name)")
+            else { continue }
             guard try matches(forEntity: entityId)
                     .first(where: { $0.source == source }) == nil else { continue }
             // ⚠️ Identity only — the state is left alone. Marking these
@@ -284,9 +286,35 @@ extension LibraryStore {
     /// reading `.linked` has never been fetched.
     public func entityIdsAwaitingEnrichment() throws -> Set<String> {
         try dbQueue.read { db in
-            Set(try String.fetchAll(db, sql: """
+            // 1. Identity known, details never fetched — learned by propagation
+            //    from a video match, so the node has an id and nothing else.
+            var wanted = Set(try String.fetchAll(db, sql: """
                 SELECT entity_id FROM entity_match WHERE method = ?
                 """, arguments: [MatchMethod.linked.rawValue]))
+
+            // 2. 🚨 The MIRROR CASE, and it was missing.
+            //
+            //    Details fetched, identity never recorded: a node claiming
+            //    `matched` with NO edge at all. On the drive library that is
+            //    151 actors, every one of them carrying a photo, a gallery and
+            //    a birth date — enriched on 2026-08-04/05, before this app
+            //    began recording WHICH record it had matched.
+            //
+            //    ⚠️ They were invisible to this query because it looked for a
+            //    `.linked` EDGE, and these have no edge to find. So
+            //    `ActorBatchPolicy.skipReason` answered "already matched" and
+            //    Match All Actors skipped all 151 — leaving the operator to
+            //    look each one up by hand.
+            //
+            //    ⭐ Same shape as the defect this method was written to fix,
+            //    one layer along. Both mean "run the lookup again"; only the
+            //    half that is missing differs.
+            wanted.formUnion(try String.fetchAll(db, sql: """
+                SELECT p.id FROM entity_profiles p
+                 WHERE p.enrichment_state = 'matched'
+                   AND NOT EXISTS (SELECT 1 FROM entity_match m WHERE m.entity_id = p.id)
+                """))
+            return wanted
         }
     }
 
@@ -325,17 +353,24 @@ extension LibraryStore {
         }
 
         // Strings, which are still where most of the library lives.
+        //
+        // 🚨 Resolved before being tested against `wanted`, which holds node
+        // ids. The edge loop above already speaks in ids; after the re-key a
+        // name-form string matches nothing there, so this half would silently
+        // contribute zero and every performer's video count would collapse to
+        // whatever the edges alone carry.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         for asset in try fetchAllAssets() {
             let isMatched = asset.enrichmentState == .matched
             for name in Set(asset.actors) {
-                let id = "actor:\(name)"
-                guard wanted.contains(id) else { continue }
+                guard let id = resolver.localId(for: "actor:\(name)"),
+                      wanted.contains(id) else { continue }
                 videos[id, default: []].insert(asset.id)
                 if isMatched { matchedVideos[id, default: []].insert(asset.id) }
             }
             for name in Set(asset.studios) {
-                let id = "studio:\(name)"
-                guard wanted.contains(id) else { continue }
+                guard let id = resolver.localId(for: "studio:\(name)"),
+                      wanted.contains(id) else { continue }
                 videos[id, default: []].insert(asset.id)
                 if isMatched { matchedVideos[id, default: []].insert(asset.id) }
             }
@@ -411,5 +446,56 @@ extension LibraryStore {
 
             return (entities, videos)
         }
+    }
+}
+
+// MARK: - The one way to apply a reviewed match
+
+/// What applying a hand-reviewed match did.
+public enum ReviewedMatchOutcome: Equatable, Sendable {
+    /// Saved, and the identity edge recorded.
+    case recorded
+    /// ⚠️ Saved, but the source gave back no identifier — so there is nothing
+    /// to record an edge WITH, and this node stays on the missing-identity
+    /// worklist. Distinguished from success because it looks identical
+    /// otherwise, and an operator re-matching it forever is the result.
+    case noSourceId
+}
+
+public extension LibraryStore {
+
+    /// Saves a match a PERSON reviewed, and records the identity edge.
+    ///
+    /// 🚨 THE ONE ENTRY POINT, and it exists because three separate screens
+    /// each wrote `enrichmentSourceId` into the column by hand and each forgot
+    /// the edge — the profile page, the Missing Identities worklist, and the
+    /// batch queue. Every one produced a record that looks matched, satisfies
+    /// every reader that consults the columns, and stays on the worklist
+    /// forever because the graph holds nothing.
+    ///
+    /// ⚠️ `confirmEntityMatch` already tried to be that entry point and was
+    /// bypassed three times, because it re-fetches the profile rather than
+    /// accepting the merged one these screens have already built. This takes
+    /// what they have.
+    ///
+    /// - Parameter finalId: where the record ended up, when a rename moved it.
+    ///   The edge must name the row that exists AFTER the rename — attaching it
+    ///   to the pre-rename id points it at something that no longer exists.
+    @discardableResult
+    func applyReviewedMatch(_ profile: EntityProfile,
+                            source: String?,
+                            recordingUnder finalId: String? = nil,
+                            method: MatchMethod = .operator) throws -> ReviewedMatchOutcome {
+        try saveEntityProfile(profile)
+
+        let nodeId = finalId ?? profile.id
+        guard let sourceId = profile.enrichmentSourceId, !sourceId.isEmpty,
+              let source = source ?? profile.enrichmentSource, !source.isEmpty else {
+            return .noSourceId
+        }
+        try recordMatch(NodeMatch(nodeId: nodeId, source: source,
+                                  sourceId: sourceId, method: method),
+                        isVideo: false)
+        return .recorded
     }
 }

@@ -436,6 +436,10 @@ public enum ActorSync {
 
             var converged = EntityProfile(
                 id: actorId,
+                // Carried from whichever library holds this actor: convergence
+                // merges fields, it does not rename anyone.
+                entityType: holders.first?.profile.entityType,
+                displayName: holders.first?.profile.displayName,
                 tags: orderedUnion(holders.map { $0.profile.tags }),
                 galleryUrls: orderedUnion(holders.map { $0.profile.galleryUrls }),
                 akas: orderedUnion(holders.map { $0.profile.akas }),

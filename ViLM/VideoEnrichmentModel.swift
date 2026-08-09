@@ -298,7 +298,25 @@ final class VideoEnrichmentModel: ObservableObject {
             guard !Task.isCancelled, let self, let provider = self.provider else { return }
             let names = (try? await provider.suggestions(for: kind, matching: term)) ?? []
             guard !Task.isCancelled else { return }
-            self.suggestions[kind] = names
+            // 🚨 De-duplicated, first occurrence winning.
+            //
+            // The source genuinely returns the same NAME twice — two different
+            // performers called "Angelo" is exactly the same-name problem this
+            // whole app exists to cope with. But these are FILTERS APPLIED BY
+            // NAME, so two identical entries apply the identical filter: the
+            // second is not a second option, it is a wasted slot out of the
+            // eight that are shown.
+            //
+            // ⚠️ It also produced a SwiftUI runtime warning, because the list
+            // is keyed by the name itself — "the ID Angelo occurs multiple
+            // times, this will give undefined results". Reported from the Xcode
+            // console 2026-08-08.
+            //
+            // ⚠️ EXACT duplicates only. Two spellings that differ by case may
+            // be two different search terms to the source, and folding them
+            // here would silently drop one that behaves differently.
+            var seen = Set<String>()
+            self.suggestions[kind] = names.filter { seen.insert($0).inserted }
         }
     }
 
@@ -638,8 +656,16 @@ final class VideoEnrichmentModel: ObservableObject {
             // choice — and it is the only thing that lets browsing a network
             // find scenes filed under its imprints.
             if let pair = studioParentPair {
-                try? store?.confirmStudio(pair.parent, source: providerName,
-                                          sourceId: proposal.studioParentSourceId.value)
+                // ⚠️ Only a parent the source could IDENTIFY is confirmed —
+                // see `ensureStudioProfile`. The row is created either way so
+                // the hierarchy edge below has something to point at.
+                if let parentSourceId = proposal.studioParentSourceId.value,
+                   !parentSourceId.isEmpty {
+                    try? store?.confirmStudio(pair.parent, source: providerName,
+                                              sourceId: parentSourceId)
+                } else {
+                    _ = try? store?.ensureStudioProfile(pair.parent)
+                }
                 // Cycles are refused by the store; a source that disagrees with
                 // itself about which way a hierarchy runs must not be able to
                 // wedge the graph.

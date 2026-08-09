@@ -481,7 +481,7 @@ struct EntityProfileEditorView: View {
                 }
 
                 Section {
-                    Toggle(isOn: Binding(
+                    RuledOutOfLookupToggle(isRuledOut: Binding(
                         get: { enrichmentState == .unmatchable },
                         set: { on in
                             if on {
@@ -495,13 +495,7 @@ struct EntityProfileEditorView: View {
                                 stateBeforeUnmatchable = nil
                             }
                         }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Not findable in online sources")
-                            Text("Stops this actor appearing in “needs attention”.")
-                                .font(.caption).foregroundColor(.secondary)
-                        }
-                    }
+                    ), caption: "Stops this actor appearing in “needs attention”.")
                 } header: {
                     Text("Lookup").font(.headline)
                 } footer: {
@@ -639,6 +633,13 @@ struct EntityProfileEditorView: View {
                         // in one expression.
                         var profile = EntityProfile(
                             id: savedEntityId,
+                            // ⚠️ From the (possibly renamed) key while it still
+                            // encodes a name, else whatever the record already
+                            // carried. A save must never blank the name.
+                            entityType: NodeIdentity.parse(savedEntityId)?.type
+                                ?? initialProfile?.entityType,
+                            displayName: NodeIdentity.parse(savedEntityId)?.displayName
+                                ?? initialProfile?.displayName,
                             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
                             photoUrl: finalPhotoUrl.isEmpty ? nil : finalPhotoUrl,
                             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,
@@ -811,6 +812,9 @@ struct EntityProfileEditorView: View {
         // type-checker will resolve in a single expression.
         var profile = EntityProfile(
             id: entityId,
+            entityType: NodeIdentity.parse(entityId)?.type ?? initialProfile?.entityType,
+            displayName: NodeIdentity.parse(entityId)?.displayName
+                ?? initialProfile?.displayName,
             bio: bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : bio,
             photoUrl: photoUrl.isEmpty ? nil : photoUrl,
             homePage: homePage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : homePage,

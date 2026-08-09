@@ -128,9 +128,22 @@ struct ActorEnrichmentSheet: View {
                                                 ? "Show as list" : "Show larger pictures")
                         }
                     }
-                    if case .reviewing = model.phase {
+                    // 🚨 `.nothingToApply` MUST offer the button too.
+                    //
+                    // That phase means the source has no field this profile is
+                    // missing — which is exactly the state of an actor who was
+                    // enriched before ids were recorded. The one thing the
+                    // operator needs is to record WHICH record this is, and the
+                    // screen offered only Cancel. Reported from the device
+                    // 2026-08-08: "I can only hit cancel."
+                    //
+                    // ⭐ Confirming an identity is not the same act as copying
+                    // fields. `ActorEnrichment.apply` already records the source
+                    // id without any field being ticked; only the button was
+                    // missing.
+                    if model.canConfirm {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Apply") {
+                            Button(model.phase == .nothingToApply ? "Confirm" : "Apply") {
                                 if let profile = model.apply() {
                                     onApply(profile, model.acceptedCanonicalName)
                                 }
@@ -251,7 +264,10 @@ struct ActorEnrichmentSheet: View {
             ContentUnavailableView(
                 "Nothing to Add",
                 systemImage: "checkmark.circle",
-                description: Text("\(model.provider.displayName) has nothing this profile is missing.")
+                // ⚠️ Says what the button does, because "nothing to add" reads
+                // as "nothing to do" — and there is something to do: the
+                // identity still has to be recorded.
+                description: Text("\(model.provider.displayName) has nothing this profile is missing.\n\nConfirm still records WHICH record this is, which is what takes this actor off the missing-identity list.")
             )
 
         case .failed(let message):

@@ -25,7 +25,19 @@ public enum ActorCSV {
     /// 1 Bio           4 Gender      7 CountryOfOrigin   10 Tags
     /// 2 PhotoURL      5 HairColor   8 Rating
     /// ```
-    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId,Tattoos,Piercings"
+    public static let header = "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId,Tattoos,Piercings,Links"
+
+    /// Separator between a link's label and its URL, inside one list entry.
+    ///
+    /// ⭐ `>` rather than `=` or `:`. A URL contains both of those routinely — a
+    /// query string is full of `=` and every scheme carries a `:` — whereas an
+    /// unencoded `>` is not valid in a URL and a spreadsheet will not mangle it.
+    ///
+    /// ⚠️ Gallery URLs are deliberately NOT given a column. They are internal
+    /// photo tokens rather than anything a person would edit, and round-tripping
+    /// them through a hand-editable file invites broken photo references for no
+    /// gain. `links` is user-facing; `galleryUrls` is bookkeeping.
+    public static let linkLabelSeparator: Character = ">"
 
     /// Rows with fewer cells than this are skipped. Historic guard: a row must at
     /// least carry Name/Bio/PhotoURL/HomePage to be worth merging.
@@ -50,6 +62,42 @@ public enum ActorCSV {
             .map { $0.replacingOccurrences(of: "\\", with: "\\\\")
                      .replacingOccurrences(of: "|", with: "\\|") }
             .joined(separator: String(listSeparator))
+    }
+
+    /// Renders links into one cell as `Label>url` entries, pipe-joined.
+    ///
+    /// A link with no label writes as the bare URL, which is both the common
+    /// case and the form someone hand-editing would naturally paste in.
+    public static func joinLinks(_ links: [EntityLink]) -> String {
+        joinList(links.map { link in
+            link.label.isEmpty
+                ? link.url
+                : "\(link.label)\(linkLabelSeparator)\(link.url)"
+        })
+    }
+
+    /// Reads a links cell back.
+    ///
+    /// ⚠️ Splits on the FIRST separator, then sanity-checks the result: if what
+    /// follows it is not a usable URL, the entry is treated as a bare URL
+    /// instead. That way a label containing `>`, or a stray character typed in
+    /// a spreadsheet, degrades to "link with no label" rather than silently
+    /// truncating the address.
+    ///
+    /// 🚨 Validation is NOT done here. The caller merges through
+    /// `EntityLink.merged`, which already drops anything that is not http(s) —
+    /// the guard that stops a `javascript:` URL typed into a CSV reaching
+    /// something the app renders as tappable.
+    public static func splitLinks(_ cell: String) -> [EntityLink] {
+        splitList(cell).compactMap { entry -> EntityLink? in
+            guard let separator = entry.firstIndex(of: linkLabelSeparator) else {
+                return EntityLink(url: entry)
+            }
+            let label = String(entry[entry.startIndex..<separator])
+            let url = String(entry[entry.index(after: separator)...])
+            let candidate = EntityLink(url: url, label: label)
+            return candidate.isValid ? candidate : EntityLink(url: entry)
+        }
     }
 
     /// Splits a multi-value cell on unescaped separators, unescaping as it goes.
@@ -152,6 +200,10 @@ public enum ActorCSV {
             escape(profile?.enrichmentSourceId ?? ""),
             escape(profile?.tattoos ?? ""),
             escape(profile?.piercings ?? ""),
+            // External references (index 22). Appended last, like every column
+            // before it, because the importer reads by index and inserting
+            // anywhere else would misfile every value after it.
+            escape(joinLinks(profile?.links ?? [])),
         ]
         return cells.joined(separator: ",") + "\n"
     }
@@ -254,6 +306,7 @@ public enum ActorCSV {
         /// stamping enrichment needs the first 20.
         public static let tattoos = 20
         public static let piercings = 21
+        public static let links = 22
         /// ⚠️ `public` so tests can assert against the CURRENT width rather
         /// than a literal. A plugin test hard-coded 19 and went red the moment
         /// this format gained a column — the property worth asserting is that a
@@ -411,6 +464,10 @@ public enum ActorCSV {
         let sourceId = cell(19) ?? existing?.enrichmentSourceId
         let tattoos = cell(20) ?? existing?.tattoos
         let piercings = cell(21) ?? existing?.piercings
+        // ⚠️ A file written before this column existed has no cell 22 at all,
+        // and `cell(_:)` bounds-checks, so this reads as empty — which the
+        // merge below treats as "said nothing" rather than "remove them all".
+        let incomingLinks = splitLinks(cell(22) ?? "")
         let mergedTags: [String] = cell(10)
             .map { union(existing?.tags ?? [], splitList($0), excludingName: name) }
             ?? existing?.tags ?? []
@@ -443,6 +500,8 @@ public enum ActorCSV {
 
         return EntityProfile(
             id: entityId(forName: name),
+            // ⭐ The file's own Name column, which is what the operator edited.
+            displayName: name,
             bio: bio,
             photoUrl: photoUrl,
             homePage: homePage,
@@ -475,13 +534,20 @@ public enum ActorCSV {
             enrichmentSource: source,
             enrichmentSourceId: sourceId,
             enrichmentCheckedAt: checkedAt,
-            // 🚨 Carried over, like galleryUrls. Omitting `links` from this call
-            // let it default to [], so importing a CSV over an existing profile
+            // 🚨 UNION, never replace. Omitting `links` from this call once let
+            // it default to [], so importing a CSV over an existing profile
             // DESTROYED every external reference the library held — and the
             // batch enrichment path round-trips through this format on every
-            // run. The links are not represented in the CSV at all, so the only
-            // correct behaviour is to leave what is already there alone.
-            links: existing?.links ?? []
+            // run.
+            //
+            // Now the column exists, the same rule still holds for a different
+            // reason: an absent or blank cell must read as "said nothing" and
+            // leave what is stored alone, exactly like every other column here.
+            // Only `EntityLink.merged` decides what lands, and it drops
+            // anything that is not http(s).
+            links: incomingLinks.isEmpty
+                ? (existing?.links ?? [])
+                : EntityLink.merged(existing?.links ?? [], adding: incomingLinks)
         )
     }
 }

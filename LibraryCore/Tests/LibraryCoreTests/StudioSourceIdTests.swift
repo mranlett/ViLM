@@ -122,4 +122,61 @@ final class StudioSourceIdTests: XCTestCase {
         }
         XCTAssertNil(sourceId)
     }
+
+    // MARK: - 🚨 A row is not a match
+
+    /// The state two studios in the drive library were found in: `.matched`
+    /// from a source, an EMPTY source id, and no match edge — recorded by a
+    /// parent-studio path whose caller had no id to pass.
+    ///
+    /// ⭐ `ensureStudioProfile` is what those callers use now. It exists so the
+    /// hierarchy edge has a row to point at WITHOUT the row claiming an
+    /// identity nothing established — and, critically, without tripping
+    /// `StudioBatchPolicy.skipReason`, which skips anything `.matched` and
+    /// would otherwise strand the studio permanently.
+    func testEnsuringAStudioRecordsTheRowAndClaimsNothing() throws {
+        XCTAssertTrue(try store.ensureStudioProfile("Example Network"))
+
+        let profile = try XCTUnwrap(try profile("Example Network"))
+        XCTAssertNil(profile.enrichmentState, "a row is not a match")
+        XCTAssertNil(profile.enrichmentSourceId)
+        XCTAssertNil(profile.enrichmentSource)
+        XCTAssertTrue(try store.matches(forEntity: "studio:Example Network").isEmpty)
+    }
+
+    /// ⚠️ And therefore the batch matcher can still reach it — the door that
+    /// closed on the original 51 stays open.
+    func testAnEnsuredStudioIsNotSkippedByTheBatchPolicy() throws {
+        try store.ensureStudioProfile("Example Network")
+
+        let profile = try XCTUnwrap(try profile("Example Network"))
+        XCTAssertNil(StudioBatchPolicy.skipReason(for: profile))
+    }
+
+    /// ⚠️ Never disturbs a studio that already has an answer. Re-running a
+    /// match over a tidy library must not blank a confirmed network.
+    func testEnsuringDoesNotDisturbAnAlreadyConfirmedStudio() throws {
+        try store.confirmStudio("Example Network", source: "A Source", sourceId: "abc-123")
+
+        XCTAssertFalse(try store.ensureStudioProfile("Example Network"))
+
+        XCTAssertEqual(try profile("Example Network")?.enrichmentSourceId, "abc-123")
+        XCTAssertEqual(try profile("Example Network")?.enrichmentState, .matched)
+    }
+
+    /// ⭐ The whole point of creating the row at all, asserted end-to-end
+    /// rather than checked by hand in the app: the hierarchy still lands, and
+    /// the network does NOT become the dangling parent that Studio Health
+    /// reports. This is what the four parent call sites now do when the source
+    /// named a network but gave no id for it.
+    func testAnEnsuredParentCarriesTheHierarchyWithoutDangling() throws {
+        try store.confirmStudio("Example Studio", source: "A Source", sourceId: "imprint-1")
+        try store.ensureStudioProfile("Example Network")
+
+        try store.setStudioParent("studio:Example Network", forStudio: "studio:Example Studio")
+
+        XCTAssertEqual(try store.studioParentPairs().map(\.to), ["studio:Example Network"])
+        XCTAssertNil(try store.auditStudios().first { $0.kind == .danglingParent },
+                     "the ensured row is exactly what keeps the network from dangling")
+    }
 }

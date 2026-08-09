@@ -187,8 +187,19 @@ final class VideoRefreshModel: ObservableObject {
         }
         if let child = proposal.studio.value, let parent = proposal.studioParent.value,
            !StudioResolution.isSameStudio(child, parent) {
-            try? store.confirmStudio(parent, source: provider.displayName,
-                                     sourceId: proposal.studioParentSourceId.value)
+            // ⚠️ Only a parent the source could IDENTIFY is confirmed. Without
+            // an id there is nothing to confirm it against, and claiming a
+            // match anyway both asserts what nothing established and makes the
+            // studio invisible to the batch matcher that would have supplied
+            // the id. The row is still created, because the hierarchy edge
+            // below has to point at something.
+            if let parentSourceId = proposal.studioParentSourceId.value,
+               !parentSourceId.isEmpty {
+                try? store.confirmStudio(parent, source: provider.displayName,
+                                         sourceId: parentSourceId)
+            } else {
+                _ = try? store.ensureStudioProfile(parent)
+            }
             // Cycles are refused by the store, and an existing parent is never
             // overruled — `setStudioParent` re-asserting the same one is a
             // no-op rather than a new period.

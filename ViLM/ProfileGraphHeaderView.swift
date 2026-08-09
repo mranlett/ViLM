@@ -582,6 +582,21 @@ struct ProfileGraphHeaderView: View {
                         // record's identity, so writing afterwards would target
                         // a row that has just moved.
                         saveProfile(merged)
+                        // 🚨 The match EDGE, not only the columns.
+                        //
+                        // This site set `enrichmentSourceId` by hand and never
+                        // recorded the edge — so an actor matched here stayed
+                        // on the Missing Identities worklist no matter how many
+                        // times it was re-matched. And Missing Identities sends
+                        // the operator to exactly this screen: "open one and use
+                        // Match Again on its profile."
+                        //
+                        // ⚠️ `confirmEntityMatch` exists precisely so the two
+                        // cannot drift, and its own comment says why — "every
+                        // call site that set enrichmentSourceId by hand is a
+                        // site that could forget the edge." This was that site.
+                        // Reported from the device 2026-08-08.
+                        recordIdentityEdge(for: merged, provider: provider)
                         if let renameTo, !renameTo.isEmpty, renameTo != name {
                             newGlobalName = renameTo
                             performGlobalRename()
@@ -924,6 +939,32 @@ struct ProfileGraphHeaderView: View {
     /// copy other libraries' fields into the owner — an accidental merge.
     private func ownerRawProfile(for id: String) -> EntityProfile? {
         (try? LibrarySession.shared.store(forProfile: id).fetchEntityProfile(for: id)) ?? nil
+    }
+
+    /// Records WHICH external record this profile is, as a graph edge.
+    ///
+    /// 🚨 Without this the profile carries `enrichmentState = .matched` and a
+    /// source id in a column, and the graph holds no edge — which is precisely
+    /// the state Missing Identities reports and cannot be cleared by any amount
+    /// of re-matching.
+    ///
+    /// ⚠️ Silent when the source supplied no id. A match with nothing to look
+    /// up by is exactly what this project spent a day discovering it had 1,287
+    /// of; recording an edge with an empty id would hide them again rather than
+    /// leaving them findable.
+    private func recordIdentityEdge(for profile: EntityProfile,
+                                    provider: (any ActorMetadataProvider)?) {
+        do {
+            let store = try LibrarySession.shared.store(forProfile: profile.id)
+            // ⭐ The one entry point. `.operator` — a person looked at a list
+            // and chose, which is a different kind of trust from a name search
+            // and the only method besides a fingerprint that propagates
+            // identity.
+            _ = try store.applyReviewedMatch(profile, source: provider?.displayName)
+        } catch {
+            AppErrorReporter.report(
+                "Matched, but couldn't record which record it matched: \(error.localizedDescription)")
+        }
     }
 
     private func saveProfile(_ profile: EntityProfile) {

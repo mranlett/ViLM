@@ -53,7 +53,7 @@ final class EntityProfilePreservationTests: XCTestCase {
     /// and look at the copy sites listed below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 25, """
+        XCTAssertEqual(count, 27, """
             EntityProfile gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds a profile.
@@ -67,6 +67,12 @@ final class EntityProfilePreservationTests: XCTestCase {
               • EnrichmentReview.merged             — accepting a lookup
               • MergeSemantics.merged               — overlay of two libraries
               • EntityProfileEditorView             — editedProfile, save, applyEnrichment
+
+            🚨 v28: `entityType` and `displayName` are derived from the id when
+            a site does not pass them, so every site above is correct TODAY.
+            That stops being true the moment the re-key runs — a uid carries no
+            name, and a name cannot be recovered from one. Each site must pass
+            them through BEFORE the identity upgrade is offered.
             """)
     }
 

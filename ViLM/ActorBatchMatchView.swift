@@ -199,12 +199,33 @@ struct ActorBatchMatchView: View {
         guard let store = try? LibraryStore(at: queued.libraryURL) else { return }
         // Save BEFORE any rename: a rename rewrites this record's identity, so
         // writing afterwards would target a row that has just moved.
+        // ⭐ `applyReviewedMatch` below saves again under the final id and
+        // records the edge — the one entry point, so this screen cannot be the
+        // fourth to forget it.
         try? store.saveEntityProfile(merged)
 
+        var finalId = merged.id
         if let renameTo, !renameTo.isEmpty, renameTo != name(queued) {
             _ = try? store.renameTagGlobally(oldTag: merged.id, newTag: "actor:\(renameTo)")
+            finalId = "actor:\(renameTo)"
         }
+        _ = try? store.applyReviewedMatch(
+            merged, source: installedActorProvider?.displayName, recordingUnder: finalId)
 
+        // 🚨 THE IDENTITY EDGE. Saving the profile writes `enrichmentSourceId`
+        // into a COLUMN; the graph holds nothing, so Missing Identities keeps
+        // reporting an actor the operator just resolved — and clicking it shows
+        // a record that looks fixed. Reported from the device 2026-08-08 after
+        // resolving ten from this queue and seeing all ten come straight back.
+        //
+        // ⚠️ THIRD site with this defect: the profile page, the Missing
+        // Identities worklist, and now here. `confirmEntityMatch` exists to be
+        // the one entry point precisely so this cannot keep happening, and
+        // three call sites have now each set the column by hand instead.
+        //
+        // ⚠️ Recorded AFTER the rename, against the id the record ended up
+        // under. Writing it first would attach the edge to a row that is about
+        // to move.
         model.removeFromQueue(queued.profile.id)
         reviewing = nil
         NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)

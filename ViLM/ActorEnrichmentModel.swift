@@ -201,8 +201,39 @@ final class ActorEnrichmentModel: ObservableObject {
     }
 
     /// True when anything at all is ticked — a field or a photo.
+    /// Whether Apply is available.
+    ///
+    /// 🚨 CONFIRMING WHO SOMEONE IS, AND COPYING THEIR DETAILS, ARE TWO
+    /// DIFFERENT ACTS. This used to require at least one accepted field — so an
+    /// operator who recognised the person but wanted to keep their own photo
+    /// had the button disabled and could not record the match at all. The
+    /// actor then stayed on the Missing Identities worklist forever, and
+    /// re-matching produced the same dead end. Reported from the device
+    /// 2026-08-08.
+    ///
+    /// ⭐ `ActorEnrichment.apply` already knew better: it records
+    /// `enrichmentSourceId` "without needing to be ticked... it is not a value
+    /// the operator reviews, it is the link back to the record they just
+    /// confirmed." Only this gate disagreed.
+    ///
+    /// ⚠️ A chosen candidate IS the decision. Accepting zero fields is a
+    /// legitimate outcome — "yes, this is them, and I like my own data better."
     var canApply: Bool {
-        !accepted.isEmpty || !acceptedPhotos.isEmpty || acceptedCanonicalName != nil
+        proposal != nil
+    }
+
+    /// Whether the confirm button should be OFFERED at all.
+    ///
+    /// 🚨 Includes `.nothingToApply`. That phase means the source has no field
+    /// this profile lacks — the exact state of an actor enriched before ids
+    /// were recorded — and the screen previously offered only Cancel, so the
+    /// identity could never be recorded and the actor never left the
+    /// missing-identity list.
+    var canConfirm: Bool {
+        switch phase {
+        case .reviewing, .nothingToApply: return proposal != nil
+        default: return false
+        }
     }
 
     /// The accepted fields and photos, merged onto the current profile.

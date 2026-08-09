@@ -356,7 +356,16 @@ public final class VideoTransferService {
             // scoped to just this video's actors. Best-effort: the video and
             // its metadata have already moved, so a hiccup enriching actors
             // isn't worth aborting the move over (a later merge would catch it).
-            let actorIds = Set(asset.actors.map { "actor:\($0)" })
+            // 🚨 Resolved against the SOURCE library, whose ids these are used
+            // to filter. After the re-key a name-form string matches no uid, so
+            // this set would be non-empty, select nothing, and report zero
+            // actors transferred on every move — a silent loss of exactly the
+            // profile data this block exists to carry across.
+            let sourceResolver = NodeResolver(
+                profiles: (try? sourceStore.fetchAllEntityProfiles()) ?? [])
+            let actorIds = Set(asset.actors.compactMap {
+                sourceResolver.localId(for: "actor:\($0)")
+            })
             if !actorIds.isEmpty,
                let actorExport = try? sourceStore.exportActorLibrary(onlyActorIds: actorIds),
                let mergeResult = try? destinationStore.applyActorMerge(actorExport) {

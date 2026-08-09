@@ -204,11 +204,12 @@ extension LibraryStore {
     public func recordCredits(_ credits: [ProposedCredit], forVideo videoId: UUID,
                               source: EdgeProvenance = .download) throws -> Int {
         guard !credits.isEmpty else { return 0 }
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         var written = 0
         for credit in credits {
-            let performerId = "actor:\(credit.name)"
-            guard known.contains(performerId) else { continue }
+            // ⭐ Resolved: a credit edge must point at the local node.
+            guard let performerId = resolver.localId(for: "actor:\(credit.name)")
+            else { continue }
             try recordPerformerCredit(
                 PerformerCredit(performerId: performerId,
                                 creditedAs: credit.creditedAs,

@@ -567,3 +567,48 @@ extension View {
         }
     }
 }
+
+// MARK: - Ruled out of lookup
+
+/// The "not findable in online sources" control, defined ONCE.
+///
+/// 🚨 It was a `Toggle` written out at each call site, and it rendered
+/// differently depending on nothing the author chose. On macOS a `Toggle`
+/// inside a `Form` draws as a **switch**, and the same `Toggle` inside a bare
+/// `ScrollView` draws as a **checkbox** — so the video inspector showed a
+/// checkbox and the actor editor showed a switch for the identical decision.
+/// Reported from the device, 2026-08-08.
+///
+/// ⭐ Switch on both platforms, not checkbox. iOS renders `Toggle` as a switch
+/// regardless, so choosing the switch makes the control consistent ACROSS
+/// PLATFORMS as well as across screens — and this app is used on a phone and a
+/// Mac by the same person, moving between them.
+///
+/// ⚠️ The caption is per-caller on purpose. What being ruled out *stops* really
+/// does differ — a video leaves the lookup queue, an actor leaves "needs
+/// attention" — and flattening that into one sentence would make it vaguer
+/// rather than more consistent. The TITLE and the AFFORDANCE are what must not
+/// vary.
+struct RuledOutOfLookupToggle: View {
+    @Binding var isRuledOut: Bool
+    /// What this stops happening, in the caller's own terms.
+    let caption: String
+
+    static let title = "Not findable in online sources"
+
+    var body: some View {
+        Toggle(isOn: $isRuledOut) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.title)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        #if os(macOS)
+        // The whole point of the type. Without this the style is decided by
+        // whichever container the call site happens to sit in.
+        .toggleStyle(.switch)
+        #endif
+    }
+}

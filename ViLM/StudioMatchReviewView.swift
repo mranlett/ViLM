@@ -349,8 +349,17 @@ struct StudioMatchReviewView: View {
         // dangling parent — one of the defects Studio Health reports.
         if accepted.contains(StudioBatchPolicy.Field.parent),
            let parent = proposal.parentName.value, !parent.isEmpty {
-            try? store.confirmStudio(parent, source: provider?.displayName,
-                                     sourceId: proposal.parentSourceId.value)
+            // ⚠️ Only a parent the source could IDENTIFY is confirmed — see
+            // `ensureStudioProfile`. The operator chose the CHILD from a list;
+            // nothing here establishes which studio the named network is, so
+            // the row is created and the match is left unclaimed.
+            if let parentSourceId = proposal.parentSourceId.value,
+               !parentSourceId.isEmpty {
+                try? store.confirmStudio(parent, source: provider?.displayName,
+                                         sourceId: parentSourceId)
+            } else {
+                _ = try? store.ensureStudioProfile(parent)
+            }
             try? store.setStudioParent("studio:\(parent)", forStudio: updated.id)
         }
 

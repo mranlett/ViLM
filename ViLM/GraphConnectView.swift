@@ -52,7 +52,20 @@ struct GraphConnectView: View {
     @State private var plan: Outcome?
     @State private var result: Outcome?
     @State private var edgeCounts: [(GraphEdgeKind, Int)] = []
-    @State private var disagreements: (performers: Int, studios: Int) = (0, 0)
+    /// 🚨 The VIDEOS, not counts.
+    ///
+    /// `performerEdgeDisagreements()` and `studioEdgeDisagreements()` have
+    /// always returned `[UUID]`, and this screen called `.count` on both and
+    /// discarded the ids — so it could say "1 videos disagree with their tags"
+    /// and offer no way to find the one. A list computed and thrown away, which
+    /// is the same defect this screen was already fixed for once.
+    @State private var disagreements: (performers: [UUID], studios: [UUID]) = ([], [])
+    /// 🚨 The edges behind the disagreement, and the only thing that can close
+    /// it. Connecting is `INSERT OR IGNORE` only, so a re-run cannot remove an
+    /// edge whose video no longer names it — the operator re-ran the tool,
+    /// re-fetched the cast, and watched the count go UP.
+    @State private var stale: [LibraryStore.StaleEdge] = []
+    @State private var isPruning = false
     @State private var isWorking = true
     @State private var errorMessage: String?
 
@@ -165,12 +178,9 @@ struct GraphConnectView: View {
                 }
                 if !o.tags.attributeTagsOnVideos.isEmpty {
                     blocker("\(o.tags.attributeTagAssociations) performer traits sit on videos",
-                            detail: "A video isn't a tall — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess. Open one to see which videos carry it.",
+                            detail: "A video isn't a tall — a performer is. These are left alone for enrichment to correct per performer, because which of the cast a trait describes is a guess. Open one to see exactly which videos carry it.",
                             icon: "person.and.arrow.left.and.arrow.right",
-                            entries: o.tags.attributeTagsOnVideos
-                                .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-                                .map { ("\($0.key) — \($0.value) video\($0.value == 1 ? "" : "s")",
-                                        SidebarItem.tag($0.key)) })
+                            entries: traitEntries(o.tags.attributeTagsOnVideos))
                 }
                 if !o.tags.unknownTags.isEmpty {
                     blocker("\(o.tags.unknownTags.count) tags are not in the vocabulary",
@@ -216,18 +226,112 @@ struct GraphConnectView: View {
         Section {
             // ⚠️ Checked per video, not by totals: a migration that connected
             // the right NUMBER of things to the wrong videos would pass a count.
-            if disagreements.performers == 0 && disagreements.studios == 0 {
+            if disagreements.performers.isEmpty && disagreements.studios.isEmpty {
                 Label("Every video's edges match its tags", systemImage: "checkmark.seal")
                     .foregroundStyle(.green)
             } else {
-                Label("\(disagreements.performers + disagreements.studios) videos disagree with their tags",
-                      systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+                // ⚠️ Each kind is its OWN way in, because the two mean
+                // different things: a cast disagreement and a studio
+                // disagreement are investigated differently, and merging them
+                // into one number hid both.
+                if !disagreements.performers.isEmpty {
+                    disagreementRow("cast", disagreements.performers)
+                }
+                if !disagreements.studios.isEmpty {
+                    disagreementRow("studio", disagreements.studios)
+                }
             }
+            if !stale.isEmpty { staleEdgeRepair }
         } header: {
             Text("Verification")
         } footer: {
             Text("Compared one video at a time. Matching totals would not prove the right things were connected to the right videos.")
+        }
+    }
+
+    /// ⭐ The repair, because detecting something nothing can fix is worse than
+    /// not detecting it. Connecting only ever INSERTS, so an edge whose video
+    /// stopped naming it survives every re-run — and re-fetching a cast adds
+    /// the new edges while leaving the old, which makes the number grow.
+    @ViewBuilder
+    private var staleEdgeRepair: some View {
+        let safe = stale.filter(\.videoNamesOthers)
+        let needsAPerson = stale.filter { !$0.videoNamesOthers }
+
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Why re-running does not clear this")
+                .font(.callout)
+            Text("Connecting only ever ADDS edges. When a video's cast changes, the edge for who WAS in it stays — so the graph says one thing and the tags say another, and running this tool again cannot remove it. Re-fetching a cast makes it worse, not better.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            ForEach(safe) { edge in
+                Text("\(edge.displayName) — \(edge.fileName)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+
+            if !safe.isEmpty {
+                Button(isPruning ? "Removing…" : "Remove \(safe.count) leftover edge\(safe.count == 1 ? "" : "s")") {
+                    Task { await prune(safe) }
+                }
+                .disabled(isPruning)
+            }
+
+            if !needsAPerson.isEmpty {
+                // ⚠️ A DIFFERENT case, kept apart. These sit on videos naming no
+                // cast at all, so the strings may be missing rather than the
+                // edge wrong — removing would destroy the only remaining record
+                // of who is in the video.
+                Text("⚠️ \(needsAPerson.count) more sit on videos with no cast listed at all. Those are not offered here: the tags may be missing rather than the edge wrong, and removing them would delete the only record of who is in the video. Open one and set its cast.")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func prune(_ edges: [LibraryStore.StaleEdge]) async {
+        isPruning = true
+        do {
+            let url = libraryURL
+            try await Task.detached(priority: .userInitiated) {
+                let store = try LibraryStore(at: url)
+                // ⭐ Exactly the edges listed above, not a fresh scan. The
+                // operator approved a list; deleting something else is not a
+                // defensible outcome for a destructive action.
+                _ = try store.pruneStaleEdges(edges)
+            }.value
+            let store = try LibraryStore(at: url)
+            disagreements = (try store.performerEdgeDisagreements(),
+                             try store.studioEdgeDisagreements())
+            stale = try store.staleEdges()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isPruning = false
+    }
+
+    /// One disagreement kind, as a way IN to the videos behind it.
+    @ViewBuilder
+    private func disagreementRow(_ kind: String, _ ids: [UUID]) -> some View {
+        let title = "\(ids.count) video\(ids.count == 1 ? "" : "s") disagree\(ids.count == 1 ? "s" : "") "
+            + "with their \(kind) tags"
+        if let onExplore {
+            Button {
+                onExplore(.videoSet("\(kind.capitalized) disagreements", ids))
+                dismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Label(title, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Image(systemName: "arrow.forward.circle").font(.caption2)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            Label(title, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
         }
     }
 
@@ -258,6 +362,28 @@ struct GraphConnectView: View {
             } else {
                 Text("\(value)").foregroundStyle(value == 0 ? .secondary : .primary)
             }
+        }
+    }
+
+    /// One row per trait, each opening the EXACT videos carrying it.
+    ///
+    /// 🚨 `.videoSet`, not `.tag`. The tag page also matches every video whose
+    /// CAST carries the trait, so "Redhead — 11 videos" opened onto several
+    /// hundred and the operator had to hunt for the eleven. Reported from the
+    /// device, 2026-08-08 — and the second time this screen has linked to
+    /// something adjacent to the problem rather than the problem.
+    ///
+    /// Hoisted out of the body because the expression defeated the type
+    /// checker inline, which is a recurring cost in this file.
+    private func traitEntries(_ byTag: [String: [UUID]]) -> [(label: String, item: SidebarItem?)] {
+        let ordered = byTag.sorted { a, b in
+            a.value.count != b.value.count
+                ? a.value.count > b.value.count
+                : a.key < b.key
+        }
+        return ordered.map { tag, ids in
+            let label = "\(tag) — \(ids.count) video\(ids.count == 1 ? "" : "s")"
+            return (label, SidebarItem.videoSet(tag, ids))
         }
     }
 
@@ -358,8 +484,9 @@ struct GraphConnectView: View {
             let filled = try store.backfillMatchEdges()
             backfilledMatches = filled.entities + filled.videos
             edgeCounts = try GraphEdgeKind.allCases.map { ($0, try store.edgeCount($0)) }
-            disagreements = (try store.performerEdgeDisagreements().count,
-                             try store.studioEdgeDisagreements().count)
+            disagreements = (try store.performerEdgeDisagreements(),
+                             try store.studioEdgeDisagreements())
+            stale = try store.staleEdges()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

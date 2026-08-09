@@ -53,6 +53,8 @@ public enum MergeSemantics {
     static func mergedProfileView(higher: EntityProfile, lower: EntityProfile) -> EntityProfile {
         var merged = EntityProfile(
             id: higher.id,
+            entityType: coalesce(higher.entityType, lower.entityType),
+            displayName: coalesce(higher.displayName, lower.displayName),
             bio: coalesce(higher.bio, lower.bio),
             photoUrl: higher.photoUrl ?? lower.photoUrl,
             homePage: coalesce(higher.homePage, lower.homePage),

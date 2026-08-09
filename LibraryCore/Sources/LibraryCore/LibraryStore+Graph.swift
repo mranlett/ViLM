@@ -62,7 +62,11 @@ extension LibraryStore {
     @discardableResult
     public func connectPerformerEdges(dryRun: Bool = false) throws -> ConnectPlan {
         let assets = try fetchAllAssets()
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        // ⭐ A cast NAME is the input and an entity id is the output, so this is
+        // a resolution and not a membership test. Identical today; after the
+        // re-key the resolver returns the local uid, which is the id the edge
+        // must name.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
 
         var associations = 0
         var missing = Set<String>()
@@ -72,8 +76,11 @@ extension LibraryStore {
             // Set: a video crediting the same performer twice is one credit.
             for name in Set(asset.actors) where !name.isEmpty {
                 associations += 1
-                let id = "actor:\(name)"
-                if known.contains(id) { wanted.append((asset.id, id)) } else { missing.insert(name) }
+                if let id = resolver.localId(for: "actor:\(name)") {
+                    wanted.append((asset.id, id))
+                } else {
+                    missing.insert(name)
+                }
             }
         }
 
@@ -119,13 +126,17 @@ extension LibraryStore {
     /// so this compares per video and returns the ones that disagree.
     public func performerEdgeDisagreements() throws -> [UUID] {
         let assets = try fetchAllAssets()
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        // 🚨 Resolved, not intersected. `actual` holds edge endpoints — LOCAL
+        // ids — so after the re-key an intersection against name-form strings
+        // would come back empty and report every video in the library as
+        // disagreeing, on the one check that gates retiring the strings.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
 
         var disagreeing: [UUID] = []
         for asset in assets {
             // Only credits that COULD become edges are compared: a name with no
             // profile is a known, reported gap, not a disagreement.
-            let expected = Set(asset.actors.map { "actor:\($0)" }).intersection(known)
+            let expected = Set(asset.actors.compactMap { resolver.localId(for: "actor:\($0)") })
             let actual = Set(try performerIds(forVideo: asset.id))
             if expected != actual { disagreeing.append(asset.id) }
         }
@@ -167,7 +178,7 @@ extension LibraryStore {
     @discardableResult
     public func connectStudioEdges(dryRun: Bool = false) throws -> StudioConnectPlan {
         let assets = try fetchAllAssets()
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
 
         var associations = 0
         var missing = Set<String>()
@@ -182,8 +193,11 @@ extension LibraryStore {
                 continue
             }
             associations += 1
-            let id = "studio:\(name)"
-            if known.contains(id) { wanted.append((asset.id, id)) } else { missing.insert(name) }
+            if let id = resolver.localId(for: "studio:\(name)") {
+                wanted.append((asset.id, id))
+            } else {
+                missing.insert(name)
+            }
         }
 
         let existingPairs: Set<String> = try dbQueue.read { db in
@@ -231,13 +245,13 @@ extension LibraryStore {
     /// verification could never pass while one existed.
     public func studioEdgeDisagreements() throws -> [UUID] {
         let assets = try fetchAllAssets()
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
 
         var disagreeing: [UUID] = []
         for asset in assets {
             let studios = Set(asset.studios.filter { !$0.isEmpty })
             guard studios.count == 1, let name = studios.first else { continue }
-            let expected = known.contains("studio:\(name)") ? "studio:\(name)" : nil
+            let expected = resolver.localId(for: "studio:\(name)")
             if try studioId(forVideo: asset.id) != expected { disagreeing.append(asset.id) }
         }
         return disagreeing
@@ -265,16 +279,21 @@ extension LibraryStore {
         /// performer as each video is matched, because an attribute read off a
         /// video is a guess about which of its cast it describes.
         ///
-        /// 🚨 A LIST, not a count. This was an `Int`, and the screen reported
-        /// "90 performer traits sit on videos" with no way to find any of the
-        /// ninety — the operator could not act on it at all. The same rule the
-        /// batch runs already follow: *a tally you cannot act on is a dead
-        /// end.* Keyed by tag, valued by how many videos carry it.
-        public let attributeTagsOnVideos: [String: Int]
+        /// 🚨 THE VIDEOS, not a count and not merely a per-tag total.
+        ///
+        /// This was an `Int`, then `[String: Int]` — and the second fix stopped
+        /// one level short. The screen could say "Redhead — 11 videos" but the
+        /// only thing it could link to was the tag, and the tag page shows every
+        /// video whose CAST carries that trait as well. So an operator chasing
+        /// 11 videos was handed several hundred to scroll through.
+        ///
+        /// Keyed by tag, valued by the video ids that actually carry it. Now the
+        /// screen can offer exactly those eleven.
+        public let attributeTagsOnVideos: [String: [UUID]]
 
         /// Total associations, which is what the count used to be.
         public var attributeTagAssociations: Int {
-            attributeTagsOnVideos.values.reduce(0, +)
+            attributeTagsOnVideos.values.reduce(0) { $0 + $1.count }
         }
         /// Tags used by a video but absent from the vocabulary. Promotion should
         /// be run first; reported rather than created so the two steps stay
@@ -306,7 +325,7 @@ extension LibraryStore {
         var videoEdges: [(UUID, String)] = []
         var performerEdges: [(String, String)] = []
         var pending: [(UUID, String)] = []
-        var attributeOnVideo: [String: Int] = [:]
+        var attributeOnVideo: [String: [UUID]] = [:]
         var unknown = Set<String>()
 
         for asset in assets {
@@ -323,7 +342,7 @@ extension LibraryStore {
                     // but RECORDED by tag so the operator can find them —
                     // `record.displayName` rather than the folded key, because
                     // the key is not what any screen shows.
-                    attributeOnVideo[record.displayName, default: 0] += 1
+                    attributeOnVideo[record.displayName, default: []].append(asset.id)
                 }
             }
         }
@@ -601,12 +620,17 @@ extension LibraryStore {
     public func connectEdges(forVideo videoId: UUID,
                              available: [TagKind] = TagKind.seed) throws -> Int {
         guard let asset = try fetchAllAssets().first(where: { $0.id == videoId }) else { return 0 }
-        let profiles = Set(try fetchAllEntityProfiles().map(\.id))
+        // 🚨 The id WRITTEN is the resolved one, not the name-form string that
+        // found it. This is the federation invariant applied locally: a moved
+        // video is rebuilt in a library that may already be re-keyed, and
+        // writing `"actor:\(name)"` there would point the edge at nothing.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         let vocabulary = try fetchTagVocabulary()
         var written = 0
 
-        for name in Set(asset.actors) where profiles.contains("actor:\(name)") {
-            try linkPerformer("actor:\(name)", toVideo: videoId)
+        for name in Set(asset.actors) {
+            guard let performerId = resolver.localId(for: "actor:\(name)") else { continue }
+            try linkPerformer(performerId, toVideo: videoId)
             written += 1
         }
 
@@ -614,8 +638,9 @@ extension LibraryStore {
         // one here would make a move quietly resolve something the dedicated
         // screen exists to put in front of a person.
         let studios = Set(asset.studios.filter { !$0.isEmpty })
-        if studios.count == 1, let name = studios.first, profiles.contains("studio:\(name)") {
-            try setStudio("studio:\(name)", forVideo: videoId)
+        if studios.count == 1, let name = studios.first,
+           let studioId = resolver.localId(for: "studio:\(name)") {
+            try setStudio(studioId, forVideo: videoId)
             written += 1
         }
 
@@ -654,7 +679,17 @@ extension LibraryStore {
     throws -> Set<String> {
         let fromEdges = Set(try performerIds(forVideo: videoId))
         let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
-        let fromStrings = Set((source?.actors ?? []).map { "actor:\($0)" })
+        // 🚨 Both halves must be in the SAME namespace or the union stops being
+        // a union. `fromEdges` holds local ids; after the re-key a name-form
+        // string is a different key for the same person, so the set would hold
+        // both and every performer would be counted twice — silently, on the
+        // read that step 5 relies on to prove retiring a string changes nothing.
+        //
+        // ⚠️ A name with no profile resolves to nothing and is dropped, which
+        // matches the edge side: there is no node to name.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
+        let fromStrings = Set((source?.actors ?? [])
+            .compactMap { resolver.localId(for: "actor:\($0)") })
         return fromEdges.union(fromStrings)
     }
 
@@ -670,7 +705,10 @@ extension LibraryStore {
         let source = try asset ?? fetchAllAssets().first { $0.id == videoId }
         let studios = Set((source?.studios ?? []).filter { !$0.isEmpty })
         guard studios.count == 1, let name = studios.first else { return nil }
-        return "studio:\(name)"
+        // ⚠️ Resolved, because the edge branch above returns a LOCAL id and a
+        // caller cannot be asked to know which branch answered.
+        return try NodeResolver(profiles: fetchAllEntityProfiles())
+            .localId(for: "studio:\(name)")
     }
 
     /// A video's tags, folded so two spellings of one tag answer once.
@@ -799,4 +837,120 @@ extension LibraryStore {
         }
     }
 
+}
+
+// MARK: - Stale edges
+//
+// 🚨 The gap that made the verification unactionable. Connecting is
+// additive-only — `INSERT OR IGNORE`, never a delete — and every path that
+// writes `video_performer` or `video_studio` derives it from the video's tag
+// strings. So the strings are the SOURCE and the edges are DERIVED.
+//
+// A derived set that can only grow is the defect. When a cast changes — a
+// re-match replaces performers, or the operator edits the cast and re-fetches
+// it — the old edge stays and nothing removes it. `performerEdgeDisagreements`
+// then reports a difference forever, and re-running Connect the Graph cannot
+// close it because connecting is exactly the operation that does not delete.
+//
+// ⚠️ Reported from the device 2026-08-08, and the operator's own remediation
+// made it worse: deleting the cast and re-downloading it added the new edges
+// and left the old, taking the count from one video to two.
+
+public extension LibraryStore {
+
+    /// One edge that no tag string on its video supports.
+    struct StaleEdge: Equatable, Sendable, Identifiable {
+        public let videoId: UUID
+        public let fileName: String
+        /// `actor:Name` or `studio:Name`.
+        public let nodeId: String
+        /// ⚠️ Whether the video still names ANY node of this kind.
+        ///
+        /// 🚨 The distinction that decides whether removing is safe. An edge on
+        /// a video that names five other performers is genuinely stale — the
+        /// cast changed and this one was left behind. An edge on a video that
+        /// names NONE is a different situation: the strings may be missing
+        /// rather than the edge wrong, and deleting on that basis would destroy
+        /// the only remaining record of who is in it.
+        public let videoNamesOthers: Bool
+
+        public var id: String { "\(videoId.uuidString)|\(nodeId)" }
+
+        public var displayName: String {
+            guard let colon = nodeId.firstIndex(of: ":") else { return nodeId }
+            return String(nodeId[nodeId.index(after: colon)...])
+        }
+
+        public init(videoId: UUID, fileName: String, nodeId: String,
+                    videoNamesOthers: Bool) {
+            self.videoId = videoId
+            self.fileName = fileName
+            self.nodeId = nodeId
+            self.videoNamesOthers = videoNamesOthers
+        }
+    }
+
+    /// Edges whose video no longer names them.
+    ///
+    /// Compared against the video's OWN strings, exactly as
+    /// `performerEdgeDisagreements` does, so the two can never report
+    /// different things about the same video.
+    func staleEdges() throws -> [StaleEdge] {
+        let assets = try fetchAllAssets()
+        // 🚨 The names are resolved to local ids before being compared against
+        // edge endpoints. Comparing the two namespaces raw would, after the
+        // re-key, report EVERY edge in the library as stale — and this screen
+        // offers to delete what it reports.
+        let resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
+        var found: [StaleEdge] = []
+
+        for asset in assets {
+            let namedPerformers = Set(asset.actors.compactMap {
+                resolver.localId(for: "actor:\($0)")
+            })
+            for edge in try performerIds(forVideo: asset.id)
+            where !namedPerformers.contains(edge) {
+                found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
+                                       nodeId: edge,
+                                       videoNamesOthers: !namedPerformers.isEmpty))
+            }
+
+            let namedStudios = Set(asset.studios.filter { !$0.isEmpty }.compactMap {
+                resolver.localId(for: "studio:\($0)")
+            })
+            if let edge = try studioId(forVideo: asset.id), !namedStudios.contains(edge) {
+                found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
+                                       nodeId: edge,
+                                       videoNamesOthers: !namedStudios.isEmpty))
+            }
+        }
+        return found.sorted { $0.id < $1.id }
+    }
+
+    /// Removes exactly the edges given.
+    ///
+    /// ⭐ Takes the edges rather than re-deriving them, so what is removed is
+    /// what the operator was shown. A second scan could legitimately return a
+    /// different set — the library changes — and "I approved a list and
+    /// something else was deleted" is not a defensible outcome for a
+    /// destructive action.
+    ///
+    /// ⚠️ THE ONLY code in this file that deletes an edge. Everything else is
+    /// `INSERT OR IGNORE`, and that asymmetry was the bug.
+    @discardableResult
+    func pruneStaleEdges(_ edges: [StaleEdge]) throws -> Int {
+        guard !edges.isEmpty else { return 0 }
+        return try dbQueue.write { db in
+            var removed = 0
+            for edge in edges {
+                let table = edge.nodeId.hasPrefix("studio:") ? "video_studio" : "video_performer"
+                let column = table == "video_studio" ? "studio_id" : "performer_id"
+                try db.execute(
+                    sql: "DELETE FROM \(table) WHERE video_id = ? AND \(column) = ?",
+                    arguments: [edge.videoId.uuidString, edge.nodeId])
+                removed += db.changesCount
+            }
+            return removed
+        }
+    }
 }

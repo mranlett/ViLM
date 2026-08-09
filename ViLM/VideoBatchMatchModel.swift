@@ -350,8 +350,16 @@ final class VideoBatchMatchModel: ObservableObject {
             // re-matched.
             if let child = fetched.studio.value, let parent = fetched.studioParent.value,
                !StudioResolution.isSameStudio(child, parent) {
-                try? store.confirmStudio(parent, source: provider.displayName,
-                                         sourceId: fetched.studioParentSourceId.value)
+                // ⚠️ Only a parent the source could IDENTIFY is confirmed —
+                // see `ensureStudioProfile`. The row is created either way so
+                // the hierarchy edge below has something to point at.
+                if let parentSourceId = fetched.studioParentSourceId.value,
+                   !parentSourceId.isEmpty {
+                    try? store.confirmStudio(parent, source: provider.displayName,
+                                             sourceId: parentSourceId)
+                } else {
+                    _ = try? store.ensureStudioProfile(parent)
+                }
                 // Cycles are refused by the store, so a source disagreeing with
                 // itself about which way a hierarchy runs cannot wedge it.
                 try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")

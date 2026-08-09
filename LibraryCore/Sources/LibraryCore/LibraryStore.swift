@@ -309,9 +309,16 @@ public class LibraryStore {
         for (videoId, performerId) in edges {
             byProfile[performerId, default: []].insert(videoId)
         }
+        // 🚨 Keyed by the RESOLVED id, because `byProfile` is already keyed by
+        // `video_performer.performer_id` above. Two namespaces in one dictionary
+        // would split each performer into two entries after the re-key — and
+        // this feeds the alias-split audit, which compares video counts to
+        // decide which of two rows is the alias.
+        let resolver = NodeResolver(profiles: profiles)
         for asset in try fetchAllAssets() {
             for name in Set(asset.actors) {
-                byProfile["actor:\(name)", default: []].insert(asset.id.uuidString)
+                guard let id = resolver.localId(for: "actor:\(name)") else { continue }
+                byProfile[id, default: []].insert(asset.id.uuidString)
             }
         }
         let counts = byProfile.mapValues(\.count)
@@ -394,6 +401,36 @@ public class LibraryStore {
             }
         }
         return missing
+    }
+
+    /// Gives a studio a profile row and claims NOTHING about its identity.
+    ///
+    /// ⭐ The counterpart to `confirmStudio`, for the caller that needs the row
+    /// to exist without being able to evidence a match. A network named by a
+    /// source that supplied no id for it is exactly that case: the row has to
+    /// exist before `setStudioParent` can point at it — an edge to a studio
+    /// with no profile is a dangling parent, one of the defects Studio Health
+    /// reports — but nothing has established WHICH studio it is.
+    ///
+    /// 🚨 The distinction this method exists to preserve: `confirmStudio` sets
+    /// `enrichmentState = .matched`, and `StudioBatchPolicy.skipReason` skips
+    /// anything already matched. So confirming a studio the source could not
+    /// identify closes the door on the one tool that could later identify it,
+    /// while leaving a row that satisfies every column-reading check and holds
+    /// no identity at all. Two studios in the drive library reached that state.
+    ///
+    /// ⚠️ Never disturbs an existing row. A studio already carrying a match —
+    /// or a bio, or a hierarchy — is left exactly as it was; this only fills
+    /// the absence.
+    ///
+    /// Returns whether a row was created, so a caller can report it rather
+    /// than guess.
+    @discardableResult
+    public func ensureStudioProfile(_ name: String) throws -> Bool {
+        let id = "studio:\(name)"
+        guard try fetchEntityProfile(for: id) == nil else { return false }
+        try saveEntityProfile(EntityProfile(id: id))
+        return true
     }
 
     /// Records that a studio came from an external source, and is therefore

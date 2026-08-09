@@ -137,6 +137,18 @@ public struct GraphMergeResult: Sendable, Equatable {
     /// these — they are here so the operator learns the disagreement exists.
     public let disagreements: [GraphDisagreement]
 
+    /// 🚨 What the boundary REFUSED to write, and why.
+    ///
+    /// Phase 0 of v28. Every incoming reference is resolved to a local node
+    /// before anything is written, and a reference that does not resolve is
+    /// counted here rather than dropped. A sync that silently discards edges
+    /// is indistinguishable from one that had nothing to do, which is the
+    /// exact failure mode this boundary exists to prevent.
+    ///
+    /// Defaulted so older construction sites and fixtures keep compiling and
+    /// read as "nothing refused" — which is what they mean.
+    public var integrity = SyncIntegrityReport()
+
     public struct ActorMergeCounts: Sendable, Equatable {
         public let new: Int
         public let updated: Int
@@ -195,10 +207,50 @@ extension LibraryStore {
         // that is knowledge rather than a competing opinion.
         var newStudios = 0, updatedStudios = 0
         var disagreements: [GraphDisagreement] = []
+        // ⚠️ Seeded from the ACTOR half, which ran first and does its own
+        // resolving. Starting fresh here would report a clean sync while the
+        // profile pass had refused a dozen malformed rows.
+        var integrity = actors.integrity
+
+        // 🚨 Phase 0 of v28. Every incoming reference below is resolved through
+        // this, and the LOCAL id it returns is what gets written — never the
+        // string the sender sent. See `NodeResolver` for why.
+        //
+        // Built once from the local index rather than per reference: this runs
+        // over thousands of edges on a real library.
+        var resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
+
         for incoming in export.studios {
-            guard let existing = try fetchEntityProfile(for: incoming.id) else {
-                try saveEntityProfile(incoming)
+            // ⚠️ Resolve BEFORE deciding new-or-existing. The old code fetched
+            // by the sender's key, which silently means "the sender and I
+            // number nodes the same way" — true today and false after either
+            // library is re-keyed.
+            let resolution = resolver.resolve(incoming.id)
+            if resolution == .unparseable || resolution == .ambiguous {
+                // Never minted from, never written. Counted so a sender
+                // emitting malformed ids is visible instead of looking like a
+                // library with nothing new in it.
+                integrity.note(resolution)
+                continue
+            }
+            guard let localId = resolution.writableLocalId,
+                  let existing = try fetchEntityProfile(for: localId) else {
+                // Genuinely absent: mint a node under an id THIS library
+                // derives, rather than adopting the sender's key.
+                //
+                // ⭐ The same string today, because the local form and the
+                // legacy form coincide. That is precisely what makes this safe
+                // to ship ahead of the re-keying — and after it, this is the
+                // line that stops a foreign uid becoming a local primary key.
+                guard let identity = NodeIdentity.parse(incoming.id) else {
+                    integrity.unparseableIds += 1
+                    continue
+                }
+                try saveEntityProfile(incoming.reidentified(as: identity.legacyId))
                 newStudios += 1
+                // ⚠️ Re-index, or a second incoming edge naming this studio
+                // resolves as absent and mints it a second time.
+                resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
                 continue
             }
             if existing.enrichmentState != .matched, incoming.enrichmentState == .matched {
@@ -250,15 +302,31 @@ extension LibraryStore {
 
         // Edges. Both ends must exist here, or the edge names something this
         // library has never heard of — skipped rather than conjuring the node.
-        let known = Set(try fetchAllEntityProfiles().map(\.id))
+        // ⚠️ Rebuilt after the studio loop, which may have minted nodes.
+        resolver = NodeResolver(profiles: try fetchAllEntityProfiles())
         let vocabulary = Set(try fetchTagVocabulary().map(\.identityKey))
 
         var newPerformerTags = 0
         let havePerformerTags = Set(try performerTagPairs())
-        for edge in export.performerTags
-        where !havePerformerTags.contains(edge)
-            && known.contains(edge.from) && vocabulary.contains(edge.to) {
-            try linkTag(edge.to, toPerformer: edge.from)
+        for edge in export.performerTags {
+            // 🚨 The performer end is RESOLVED; the tag end is matched by the
+            // vocabulary's own folded key, which is what the tag path has
+            // always done and is already the right shape.
+            guard let localPerformer = integrity.note(resolver.resolve(edge.from)) else {
+                integrity.skippedEdges += 1
+                continue
+            }
+            guard vocabulary.contains(edge.to) else {
+                // A tag this library does not use. Ordinary, and not an
+                // integrity problem — the vocabulary is a local decision.
+                continue
+            }
+            // ⚠️ Compared against the LOCAL pair, not the arriving one. With
+            // the two keyed differently, comparing the sender's pair would
+            // miss an edge already held and write a duplicate.
+            guard !havePerformerTags.contains(GraphEdgePair(from: localPerformer, to: edge.to))
+            else { continue }
+            try linkTag(edge.to, toPerformer: localPerformer)
             newPerformerTags += 1
         }
 
@@ -280,18 +348,28 @@ extension LibraryStore {
         var datedStudioParents = 0, newStudioParentPeriods = 0
 
         let incomingByStudio = Dictionary(grouping: export.studioParents, by: \.from)
-        for (studioId, incoming) in incomingByStudio.sorted(by: { $0.key < $1.key })
-        where known.contains(studioId) {
+        for (incomingStudioId, incoming) in incomingByStudio.sorted(by: { $0.key < $1.key }) {
+
+            guard let studioId = integrity.note(resolver.resolve(incomingStudioId)) else {
+                integrity.skippedEdges += 1
+                continue
+            }
 
             // ---- The current ownership.
             let myCurrent = try studioParentHistory(of: studioId).first { $0.isCurrent }
 
-            if let theirs = incoming.first(where: { $0.isCurrent }), known.contains(theirs.to) {
+            // ⚠️ The PARENT end resolves independently of the child. An
+            // arriving hierarchy naming a network this library does not hold
+            // is skipped rather than written with an unresolvable id — which
+            // would be a dangling parent the Studio Health audit then reports
+            // forever.
+            if let theirs = incoming.first(where: { $0.isCurrent }),
+               let theirParent = resolver.localId(for: theirs.to) {
                 if let mine = myCurrent {
-                    if mine.parentId != theirs.to {
+                    if mine.parentId != theirParent {
                         disagreements.append(GraphDisagreement(
                             subject: .studioParent, name: studioId,
-                            mine: mine.parentId, theirs: theirs.to))
+                            mine: mine.parentId, theirs: theirParent))
                     } else if mine.from == nil, let start = theirs.validFrom {
                         // ⭐ D4's first rule. Same answer, and the sender knows
                         // WHEN — additive, so take it.
@@ -308,7 +386,7 @@ extension LibraryStore {
                     do {
                         // Genuinely additive: this library had no network for it,
                         // and takes the sender's start date with it.
-                        try setStudioParent(theirs.to, forStudio: studioId,
+                        try setStudioParent(theirParent, forStudio: studioId,
                                             since: theirs.validFrom, source: .operator)
                         newStudioParents += 1
                     } catch is GraphEdgeError {
@@ -327,10 +405,18 @@ extension LibraryStore {
             // historical period overlaps it.
             var held = try studioParentHistory(of: studioId)
 
-            for period in incoming where !period.isCurrent && known.contains(period.to) {
+            for period in incoming where !period.isCurrent {
+                // ⚠️ A FORMER parent resolves the same way a current one does.
+                // Skipping the resolution here would write history pointing at
+                // an id this library cannot join — invisible, because
+                // historical rows are excluded from the current-set audits.
+                guard let periodParent = resolver.localId(for: period.to) else {
+                    integrity.skippedEdges += 1
+                    continue
+                }
                 let candidate = (period.validFrom, period.validTo)
 
-                if held.contains(where: { $0.parentId == period.to
+                if held.contains(where: { $0.parentId == periodParent
                                        && $0.from == period.validFrom
                                        && $0.to == period.validTo }) {
                     continue                                    // already held
@@ -345,17 +431,17 @@ extension LibraryStore {
                     disagreements.append(GraphDisagreement(
                         subject: .studioParentDate, name: studioId,
                         mine: clash.displayText,
-                        theirs: StudioParentPeriod(parentId: period.to,
+                        theirs: StudioParentPeriod(parentId: periodParent,
                                                    from: period.validFrom,
                                                    to: period.validTo).displayText))
                     continue
                 }
                 guard let ended = period.validTo else { continue }
-                try addStudioParentPeriod(period.to, forStudio: studioId,
+                try addStudioParentPeriod(periodParent, forStudio: studioId,
                                           from: period.validFrom, to: ended,
                                           source: .operator)
                 newStudioParentPeriods += 1
-                held.append(StudioParentPeriod(parentId: period.to,
+                held.append(StudioParentPeriod(parentId: periodParent,
                                                from: period.validFrom, to: period.validTo))
             }
         }
@@ -366,11 +452,19 @@ extension LibraryStore {
         var newMatches = 0
         let mine = Dictionary(
             grouping: try allEntityMatches(), by: { "\($0.nodeId)|\($0.source)" })
-        for match in export.entityMatches where known.contains(match.nodeId) {
-            if let held = mine["\(match.nodeId)|\(match.source)"]?.first {
+        for match in export.entityMatches {
+            // 🚨 The most consequential resolution of the lot. A match edge
+            // asserts "this node IS that external record" — attaching one to
+            // the wrong local node would misidentify a performer permanently
+            // and propagate through every later refresh.
+            guard let nodeId = integrity.note(resolver.resolve(match.nodeId)) else {
+                integrity.skippedEdges += 1
+                continue
+            }
+            if let held = mine["\(nodeId)|\(match.source)"]?.first {
                 guard held.sourceId != match.sourceId else { continue }
                 disagreements.append(GraphDisagreement(
-                    subject: .nodeIdentity, name: match.nodeId,
+                    subject: .nodeIdentity, name: nodeId,
                     mine: held.sourceId, theirs: match.sourceId))
                 continue
             }
@@ -378,7 +472,15 @@ extension LibraryStore {
             // id costs nothing to hold and may matter the day that source is
             // installed — refusing it would make the second library's work
             // unrecoverable rather than merely unused.
-            try recordMatch(match, isVideo: false)
+            //
+            // 🚨 Re-keyed to the LOCAL node before writing. Passing `match`
+            // through unchanged would insert the sender's id into
+            // `entity_match.entity_id`, and the foreign key would find nothing
+            // to point at.
+            try recordMatch(NodeMatch(nodeId: nodeId, source: match.source,
+                                      sourceId: match.sourceId, method: match.method,
+                                      matchedAt: match.matchedAt),
+                            isVideo: false)
             newMatches += 1
         }
 
@@ -391,7 +493,8 @@ extension LibraryStore {
             datedStudioParents: datedStudioParents,
             newStudioParentPeriods: newStudioParentPeriods,
             newMatches: newMatches,
-            refusedCycles: refusedCycles, disagreements: disagreements)
+            refusedCycles: refusedCycles, disagreements: disagreements,
+            integrity: integrity)
     }
 
     /// Do two ownership periods cover any of the same time?

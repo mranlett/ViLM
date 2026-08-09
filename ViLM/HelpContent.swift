@@ -351,6 +351,9 @@ enum HelpContent {
                   description: "Reads a file made by Export Graph and merges it in. It only ever adds: an actor, studio or tag you don't have is created, and one you do have keeps what it already knows. Photos are added and never removed. Where the two libraries genuinely disagree — the same tag classified two ways, or an imprint placed under a different network — nothing is changed and the disagreement is listed, so you learn about it instead of one side quietly winning. You see the whole plan before anything is applied."),
 
             // MARK: Maintenance
+            .init(label: "Identity Upgrade",
+                  description: "Checks whether this library is ready to stop using names as record keys. Today it only reports: whether two records claim the same name, whether anything cannot be identified at all, and whether there is room for the upgrade — every photo is copied to its new name before anything is committed, so both copies exist while it runs. Nothing here changes your library. The upgrade itself is a separate step and the only one in this app that cannot be undone, so take a backup immediately before it. Deletion records are deliberately left identified by name: each one names something that no longer exists, so there is nothing to give it a new key from."),
+
             .init(label: "Match Again",
                   description: "Clears the \"already matched\" mark from your videos so they're looked up afresh next time you run a match. Useful after the metadata source has improved, or if an earlier run recorded matches you don't trust. It clears the status only — your videos and everything filled in on them are untouched — but it cannot be undone, and the next full match will take as long as the first."),
         ]

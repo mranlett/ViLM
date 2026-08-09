@@ -116,3 +116,55 @@ final class ActorBatchPolicyTests: XCTestCase {
         XCTAssertEqual(report.fieldsWritten, 2)
     }
 }
+
+// MARK: - 🚨 A unique exact-name hit among several is decisive
+
+extension ActorBatchPolicyTests {
+
+    private func candidate(_ id: String, _ title: String) -> PluginCandidate {
+        PluginCandidate(id: id, title: title, subtitle: nil,
+                        thumbnailURL: nil, fullImageURL: nil)
+    }
+
+    /// The reported case: the library holds "Aj Thornbury", the source has
+    /// "AJ Thornbury", and the search also returns neighbours.
+    func testAUniqueNameMatchAmongSeveralIsTaken() {
+        let hit = ActorBatchPolicy.decisiveCandidate(
+            forName: "Aj Thornbury",
+            candidates: [candidate("1", "AJ Thornbury"),
+                         candidate("2", "Alex Thornbury"),
+                         candidate("3", "Aja Appleby")])
+        XCTAssertEqual(hit?.id, "1")
+    }
+
+    /// ⭐ Spelling differences that carry no meaning are folded away.
+    func testSpacingAndPunctuationDoNotDefeatTheMatch() {
+        XCTAssertTrue(ActorBatchPolicy.isSameName("A.J. Thornbury", "AJ Thornbury"))
+        XCTAssertTrue(ActorBatchPolicy.isSameName("Coast Line", "Coastline"))
+        XCTAssertTrue(ActorBatchPolicy.isSameName("renée", "Renee"))
+        XCTAssertFalse(ActorBatchPolicy.isSameName("Jane Doe", "Jane Roe"))
+    }
+
+    /// 🚨 TWO candidates carrying the name is the real same-name collision, and
+    /// it must still stop. This is the case where picking one lands a bio on
+    /// the wrong person, which is the whole reason the policy exists.
+    func testTwoCandidatesSharingTheNameAreStillAmbiguous() {
+        XCTAssertNil(ActorBatchPolicy.decisiveCandidate(
+            forName: "AJ Thornbury",
+            candidates: [candidate("1", "AJ Thornbury"),
+                         candidate("2", "A.J. Thornbury")]))
+    }
+
+    /// ⚠️ And no name match at all is still a question, not a first-result grab.
+    func testSeveralNearMissesWithNoExactMatchStayAmbiguous() {
+        XCTAssertNil(ActorBatchPolicy.decisiveCandidate(
+            forName: "Jane Doe",
+            candidates: [candidate("1", "Jane Doherty"), candidate("2", "Janet Doe")]))
+    }
+
+    func testASingleCandidateIsStillTakenEvenIfNamedDifferently() {
+        let hit = ActorBatchPolicy.decisiveCandidate(
+            forName: "Jane Doe", candidates: [candidate("1", "Jane D")])
+        XCTAssertEqual(hit?.id, "1", "one result has always been decisive")
+    }
+}

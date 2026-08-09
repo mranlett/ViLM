@@ -37,6 +37,23 @@ enum SidebarItem: Hashable {
     case studioFamily(String)
     case series(String)
     case smartCollection(String, String) // id, name
+
+    /// An EXPLICIT set of videos, named for the title bar.
+    ///
+    /// 🚨 Added because every other case asks a QUESTION the library answers,
+    /// and some screens instead hold an ANSWER already — a list of ids they
+    /// computed. Routing those through `.tag` or `.actor` re-asks a broader
+    /// question and returns a superset.
+    ///
+    /// That is exactly what went wrong on Connect the Graph: "Redhead — 11
+    /// videos" linked to `.tag("Redhead")`, and the tag page also matches every
+    /// video whose CAST carries the trait, so eleven became several hundred to
+    /// scroll through. Reported from the device, 2026-08-08.
+    ///
+    /// ⚠️ Deliberately carries the ids rather than a predicate. The set is a
+    /// snapshot of what a tool found; re-deriving it later could quietly return
+    /// something else and the operator would have no way to tell.
+    case videoSet(String, [UUID])
 }
 
 struct ContentView: View {
@@ -100,6 +117,7 @@ struct ContentView: View {
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
     @State private var isShowingIdentityGaps = false
+    @State private var isShowingIdentityUpgrade = false
     @State private var isShowingTagCaseCleanup = false
     @State private var isShowingReadFilenames = false
     @State private var isShowingBatchMatch = false
@@ -242,38 +260,7 @@ struct ContentView: View {
                 pendingSettingsDeepLink?()
                 pendingSettingsDeepLink = nil
             }) {
-                SettingsView(
-                    libraryURL: selectedLibraryURL,
-                    onOpenLibrary: openLibrary,
-                    onCheckForChanges: validateLibrary,
-                    onAuditFileName: { isShowingFileNameAudit = true },
-                    onFindDuplicates: { isShowingDuplicateDetection = true },
-                    onMigrateEpisodes: { isShowingEpisodeBackfill = true },
-                    onTagCleanup: { isShowingTagCleanup = true },
-                    onClassifyTags: { isShowingTagClassification = true },
-                    onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
-                    onAliasSplits: { isShowingAliasSplits = true },
-                    onRefreshMatched: { isShowingVideoRefresh = true },
-                    onIdentityGaps: { isShowingIdentityGaps = true },
-                    onTagCaseCleanup: { isShowingTagCaseCleanup = true },
-                    onReadFilenames: { isShowingReadFilenames = true },
-                    onBatchMatchVideos: { isShowingBatchMatch = true },
-                    onBatchMatchActors: { isShowingActorBatchMatch = true },
-                    onBatchMatchStudios: { isShowingStudioBatchMatch = true },
-                    onStudioConflicts: { isShowingStudioConflicts = true },
-                    onStudioAudit: { isShowingStudioAudit = true },
-                    onGraphAudit: { isShowingGraphAudit = true },
-                    onConnectGraph: { isShowingGraphConnect = true },
-                    onResetMatches: { isShowingMatchReset = true },
-                    onMoveVideos: { isShowingLibraryTransfer = true },
-                    onBackupRestore: { isShowingLibraryBackup = true },
-                    onExportActorLibrary: { isShowingActorLibraryExport = true },
-                    onImportActorLibrary: { isShowingActorLibraryImport = true },
-                    onSelectAsset: settingsDidSelectAsset,
-                    onSelectActor: settingsDidSelectActor,
-                    onSelectTag: settingsDidSelectTag,
-                    onOpenTagGallery: settingsDidOpenTagGallery
-                )
+                settingsSheet
             }
             .sheet(isPresented: $isShowingFileNameAudit) {
                 if let url = selectedLibraryURL {
@@ -417,15 +404,27 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $isShowingIdentityGaps) {
+            .sheet(isPresented: $isShowingIdentityGaps, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
                 if let url = selectedLibraryURL {
                     // ⭐ Hands the operator straight to the tool that fixes the
                     // recoverable half, rather than naming it and leaving them
                     // to find it.
-                    IdentityGapView(libraryURL: url,
-                                    onRefreshVideos: { isShowingVideoRefresh = true })
+                    IdentityGapView(
+                        libraryURL: url,
+                        onRefreshVideos: { isShowingVideoRefresh = true },
+                        // Stored, not run: this sheet is still on screen, and
+                        // navigating underneath a presented sheet is how a tap
+                        // silently does nothing.
+                        onExplore: { item in
+                            pendingAuditVideo = { openSidebarItem(item) }
+                        })
                 }
             }
+            .modifier(IdentityUpgradeSheet(isPresented: $isShowingIdentityUpgrade,
+                                           libraryURL: selectedLibraryURL))
             .sheet(isPresented: $isShowingVideoRefresh) {
                 VideoRefreshView(libraryURLs: LibrarySession.shared.allURLs) {
                     reloadUnionAssets()
@@ -750,6 +749,52 @@ struct ContentView: View {
 
     // MARK: - Settings Deep Links
     //
+    /// The Settings sheet's content.
+    ///
+    /// 🚨 Extracted because the call defeated the Swift type checker outright —
+    /// "unable to type-check this expression in reasonable time". It carries
+    /// thirty-odd closure arguments, and adding one more (the identity gate)
+    /// tipped it over while sitting inside `body`'s long `.sheet` chain.
+    ///
+    /// ⚠️ A computed property is checked on its own, so the two costs stop
+    /// compounding. This is the third time this file has hit that limit.
+    @ViewBuilder
+    private var settingsSheet: some View {
+            SettingsView(
+                libraryURL: selectedLibraryURL,
+                onOpenLibrary: openLibrary,
+                onCheckForChanges: validateLibrary,
+                onAuditFileName: { isShowingFileNameAudit = true },
+                onFindDuplicates: { isShowingDuplicateDetection = true },
+                onMigrateEpisodes: { isShowingEpisodeBackfill = true },
+                onTagCleanup: { isShowingTagCleanup = true },
+                onClassifyTags: { isShowingTagClassification = true },
+                onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
+                onAliasSplits: { isShowingAliasSplits = true },
+                onRefreshMatched: { isShowingVideoRefresh = true },
+                onIdentityGaps: { isShowingIdentityGaps = true },
+                onIdentityUpgrade: { isShowingIdentityUpgrade = true },
+                onTagCaseCleanup: { isShowingTagCaseCleanup = true },
+                onReadFilenames: { isShowingReadFilenames = true },
+                onBatchMatchVideos: { isShowingBatchMatch = true },
+                onBatchMatchActors: { isShowingActorBatchMatch = true },
+                onBatchMatchStudios: { isShowingStudioBatchMatch = true },
+                onStudioConflicts: { isShowingStudioConflicts = true },
+                onStudioAudit: { isShowingStudioAudit = true },
+                onGraphAudit: { isShowingGraphAudit = true },
+                onConnectGraph: { isShowingGraphConnect = true },
+                onResetMatches: { isShowingMatchReset = true },
+                onMoveVideos: { isShowingLibraryTransfer = true },
+                onBackupRestore: { isShowingLibraryBackup = true },
+                onExportActorLibrary: { isShowingActorLibraryExport = true },
+                onImportActorLibrary: { isShowingActorLibraryImport = true },
+                onSelectAsset: settingsDidSelectAsset,
+                onSelectActor: settingsDidSelectActor,
+                onSelectTag: settingsDidSelectTag,
+                onOpenTagGallery: settingsDidOpenTagGallery
+            )
+    }
+
     // Extracted from the SettingsView(...) call site — inlining these as
     // closures there pushed the surrounding expression past the Swift
     // type-checker's time budget.

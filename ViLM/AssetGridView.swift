@@ -195,6 +195,10 @@ struct AssetsGridView: View {
             let matchesCategory = sidebarSelection.isEmpty ? true : sidebarSelection.allSatisfy { item in
                 switch item {
                 case .dashboard, .allAssets, .actorGallery, .tagGallery, .seriesGallery, .studioGallery, .smartCollection: return true
+                // ⭐ Membership, not a re-derived question. A tool already
+                // decided which videos these are; asking the library again
+                // would risk answering something subtly different.
+                case .videoSet(_, let ids): return ids.contains(asset.id)
                 case .actor(let name): return mappedActors(for: asset).contains(name)
                 case .tag(let name):
                     // A tag can apply directly to a video, or only exist on
@@ -282,6 +286,7 @@ struct AssetsGridView: View {
         case .studioFamily(let name): return "\(name) & imprints"
         case .series(let name): return name
         case .smartCollection(_, let name): return name
+        case .videoSet(let name, _): return name
         }
     }
 
@@ -453,8 +458,29 @@ struct AssetsGridView: View {
             recomputeDisplayedAssets()
         }
         .onChange(of: akaMap) { _, newAkaMap in
-            if let first = sidebarSelection.first, case .actor(let name) = first,
-               let resolved = newAkaMap[name], resolved != name {
+            guard let first = sidebarSelection.first, case .actor(let name) = first,
+                  let resolved = newAkaMap[name], resolved != name else { return }
+            // 🚨 Deferred to the next runloop, deliberately.
+            //
+            // `akaMap` is part of `recomputeSignature`, so a change to it has
+            // ALREADY triggered the recompute above in this same frame. Setting
+            // the selection synchronously changes `filterInputs`, which changes
+            // the signature again — a second full recompute before the first
+            // has been rendered.
+            //
+            // SwiftUI says so out loud: "onChange(of: RecomputeSignature)
+            // action tried to update multiple times per frame", alongside the
+            // same complaint from its own NavigationRequestObserver. Reported
+            // from the Xcode console 2026-08-08.
+            //
+            // ⚠️ The cost is not just the warning. `recomputeDisplayedAssets`
+            // walks the whole library TWICE — once to filter and once to count
+            // what the filter hid — so the wasted pass is four traversals of
+            // two thousand assets for a redirect that is not urgent.
+            DispatchQueue.main.async {
+                // Re-checked: the selection may have moved on while we waited.
+                guard let current = sidebarSelection.first,
+                      case .actor(let stillName) = current, stillName == name else { return }
                 sidebarSelection = [.actor(resolved)]
             }
         }
@@ -1123,6 +1149,7 @@ struct AssetsGridView: View {
         case .studioFamily(let name): return "\(name) & imprints"
         case .series(let name): return name
         case .smartCollection(_, let name): return name
+        case .videoSet(let name, _): return name
         }
     }
 

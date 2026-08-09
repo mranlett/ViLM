@@ -250,8 +250,11 @@ final class ActorBatchMatchModel: ObservableObject {
         // often enough that picking the first is how a bio lands on the wrong
         // person — and the match would then be recorded, so nothing brings it
         // back for review.
-            guard ActorBatchPolicy.isDecisive(candidateCount: candidates.count),
-                  let hit = candidates.first else {
+            // ⭐ One candidate, OR exactly one whose name matches this actor's
+            // however it is spelled. A search returns neighbours as well as the
+            // person; a unique exact-name hit among them is not a guess.
+            guard let hit = ActorBatchPolicy.decisiveCandidate(
+                forName: name, candidates: candidates) else {
                 queue.append(QueuedActor(profile: profile, candidates: candidates,
                                          libraryURL: libraryURL))
                 return .queued(candidateCount: candidates.count)

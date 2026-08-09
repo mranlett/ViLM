@@ -20,10 +20,40 @@ struct IdentityGapView: View {
 
     let libraryURL: URL
     var onRefreshVideos: (() -> Void)?
+    /// Opens the record behind a row.
+    ///
+    /// 🚨 Added 2026-08-08. This screen listed 164 records by name and none of
+    /// them was reachable — the operator could read the worklist and had no way
+    /// into a single item on it. The same defect this app has now fixed three
+    /// times, and the rule it keeps breaking is already written down: *a tally
+    /// you cannot act on is a dead end.*
+    ///
+    /// ⚠️ Worse here than elsewhere, because the footer tells the operator to
+    /// "open one and use Match Again on its profile" — instructions the screen
+    /// itself did not let them follow.
+    var onExplore: ((SidebarItem) -> Void)?
 
     @State private var report: IdentityGapReport?
     @State private var isLoading = true
     @State private var errorMessage: String?
+
+    /// The row being matched, WITHOUT leaving this screen.
+    ///
+    /// 🚨 The whole point. Rows used to dismiss the sheet and navigate away, so
+    /// working a list of 144 meant 144 round trips through Settings — open the
+    /// list, click a row, fix it, close, Settings, Missing Identities, find
+    /// your place, repeat. Reported from the device 2026-08-08.
+    ///
+    /// ⭐ A worklist has to let you work the list.
+    @State private var matching: IdentityGap?
+
+    /// Names solved during this sitting, so the row goes even before a reload.
+    @State private var solved: Set<String> = []
+
+    /// ⚠️ Matched, but the source gave back no identifier — so the edge could
+    /// not be written and the row legitimately cannot clear. Recorded per node
+    /// because otherwise this looks exactly like the bug that WAS just fixed.
+    @State private var matchedWithoutAnId: Set<String> = []
 
     private static let examplesShown = 40
 
@@ -48,6 +78,26 @@ struct IdentityGapView: View {
                 .task { await load() }
         }
         .macSheet(minWidth: 560, minHeight: 520)
+        // ⭐ Presented OVER this list, so the list is still there afterwards.
+        .sheet(item: $matching) { gap in
+            if let provider {
+                ActorEnrichmentSheet(
+                    provider: provider,
+                    entityId: gap.nodeId,
+                    actorName: gap.displayName,
+                    currentProfile: try? LibraryStore(at: libraryURL)
+                        .fetchEntityProfile(for: gap.nodeId),
+                    libraryURL: libraryURL,
+                    onApply: { merged, _ in
+                        // ⚠️ The rename argument is ignored here deliberately.
+                        // A global rename rewrites this record's key, and doing
+                        // that from inside a worklist would move the very row
+                        // the operator is standing on. It stays available on
+                        // the profile page, where the consequence is visible.
+                        apply(merged, for: gap)
+                    })
+            }
+        }
     }
 
     @ViewBuilder
@@ -70,6 +120,13 @@ struct IdentityGapView: View {
             List {
                 Section {
                     Text(report.headline).font(.callout)
+                    if !solved.isEmpty {
+                        // ⭐ Progress within the sitting. Working a list of 144
+                        // with no visible movement is how a worklist gets
+                        // abandoned halfway.
+                        Text("\(solved.count) solved just now")
+                            .font(.caption).foregroundStyle(.green)
+                    }
                 } footer: {
                     Text("These records say a lookup matched them, but nothing recorded WHICH record it matched. Every matching tool skips them, because they are already marked matched — so they cannot be repaired by running one again.")
                 }
@@ -106,21 +163,48 @@ struct IdentityGapView: View {
     private func section(_ gaps: [IdentityGap], title: String, icon: String,
                          tint: Color, footer: String) -> some View {
         Section {
-            ForEach(gaps.prefix(Self.examplesShown)) { gap in
-                HStack(spacing: 8) {
-                    Image(systemName: gap.kind == .actor ? "person" : "building.2")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .frame(width: 14)
-                    Text(gap.displayName).font(.callout)
-                    Spacer()
-                    // ⚠️ Both numbers, because their RATIO is the point: "in 9
-                    // videos, 2 matched" says a refresh will reach them and the
-                    // other seven still will not be identified by it.
-                    Text(gap.matchedVideoCount > 0
-                         ? "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s") · \(gap.matchedVideoCount) matched"
-                         : "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s")")
-                        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+            ForEach(gaps.filter { !solved.contains($0.nodeId) }.prefix(Self.examplesShown)) { gap in
+                Button {
+                    // ⭐ An ACTOR is matched right here, in a sheet over this
+                    // one. Only a studio still navigates away, because there is
+                    // no equivalent in-place matcher for one yet — and sending
+                    // a studio to an actor page finds nothing.
+                    if gap.kind == .actor, provider != nil {
+                        matching = gap
+                    } else {
+                        onExplore?(gap.kind == .actor
+                                   ? .actor(gap.displayName)
+                                   : .studio(gap.displayName))
+                        dismiss()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: gap.kind == .actor ? "person" : "building.2")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .frame(width: 14)
+                        Text(gap.displayName).font(.callout)
+                        Spacer()
+                        // ⚠️ Both numbers, because their RATIO is the point: "in 9
+                        // videos, 2 matched" says a refresh will reach them and the
+                        // other seven still will not be identified by it.
+                        Text(gap.matchedVideoCount > 0
+                             ? "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s") · \(gap.matchedVideoCount) matched"
+                             : "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s")")
+                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                        if matchedWithoutAnId.contains(gap.nodeId) {
+                            // ⚠️ Said on the row. Without this it looks
+                            // identical to the defect where a match simply
+                            // failed to record — and the operator would keep
+                            // re-matching something that can never clear.
+                            Text("no id from source")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
             if gaps.count > Self.examplesShown {
                 // ⚠️ Said out loud. A list that quietly stops at forty reads as
@@ -140,6 +224,40 @@ struct IdentityGapView: View {
         }
     }
 
+    /// The installed actor plugin, or nil when none is configured.
+    private var provider: (any ActorMetadataProvider)? {
+        PluginEnvironment.registry.installedActorProviders().first
+    }
+
+    /// Saves a hand-made match and records the EDGE, then clears the row.
+    ///
+    /// 🚨 The edge is the whole point. Writing only `enrichmentSourceId` is the
+    /// defect that made this screen unfixable — the column said matched, the
+    /// graph held nothing, and the row survived every attempt.
+    private func apply(_ profile: EntityProfile, for gap: IdentityGap) {
+        do {
+            let store = try LibraryStore(at: libraryURL)
+            // ⭐ The one entry point: saves AND records the edge. Writing the
+            // column by hand here is what made three screens each report a
+            // match the graph did not hold.
+            let outcome = try store.applyReviewedMatch(
+                profile, source: provider?.displayName, recordingUnder: gap.nodeId)
+
+            guard outcome == .recorded else {
+                // ⚠️ Matched with nothing to look it up by. The row STAYS, and
+                // is labelled, because it genuinely is not solved.
+                matchedWithoutAnId.insert(gap.nodeId)
+                return
+            }
+            solved.insert(gap.nodeId)
+            matchedWithoutAnId.remove(gap.nodeId)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("ReloadAssets"), object: nil)
+        } catch {
+            errorMessage = "Couldn't record the match: \(error.localizedDescription)"
+        }
+    }
+
     private func load() async {
         do {
             let url = libraryURL
@@ -148,6 +266,8 @@ struct IdentityGapView: View {
             }.value
             await MainActor.run {
                 self.report = found
+                // A fresh audit supersedes this sitting's bookkeeping.
+                self.solved.removeAll()
                 self.isLoading = false
             }
         } catch {

@@ -329,3 +329,97 @@ final class MatchAtWriteTimeTests: XCTestCase {
         XCTAssertLessThan(MatchMethod.name.trust, MatchMethod.operator.trust)
     }
 }
+
+// MARK: - 🚨 Both halves of "look this up again"
+
+extension NodeMatchTests {
+
+    /// Identity known, details missing — learned by propagation.
+    func testANodeWithOnlyALinkedIdentityIsOfferedAgain() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Linked"))
+        try store.recordMatch(
+            NodeMatch(nodeId: "actor:Linked", source: "A Source",
+                      sourceId: "x", method: .linked), isVideo: false)
+
+        XCTAssertTrue(try store.entityIdsAwaitingEnrichment().contains("actor:Linked"))
+    }
+
+    /// 🚨 The mirror case: details fetched, identity never recorded.
+    ///
+    /// 151 actors on the drive library — fully enriched with photos and birth
+    /// dates, matched before the app recorded WHICH record it matched. They
+    /// have no edge at all, so a query looking for a `.linked` edge could not
+    /// see them, and `Match All Actors` skipped every one as "already matched".
+    func testAnEnrichedNodeWithNoIdentityIsAlsoOfferedAgain() throws {
+        var profile = EntityProfile(id: "actor:Enriched")
+        profile.enrichmentState = .matched
+        profile.enrichmentSource = "A Source"
+        profile.photoUrl = "https://example.com/p.jpg"
+        try store.saveEntityProfile(profile)
+
+        XCTAssertTrue(try store.entityIdsAwaitingEnrichment().contains("actor:Enriched"),
+                      "enriched but unidentified must be offered, or it can only be fixed by hand")
+    }
+
+    /// ⚠️ And a node that is genuinely done is NOT offered. Without this the
+    /// batch would re-look-up the whole library on every run.
+    func testAFullyMatchedNodeIsNotOfferedAgain() throws {
+        var profile = EntityProfile(id: "actor:Done")
+        profile.enrichmentState = .matched
+        try store.saveEntityProfile(profile)
+        try store.recordMatch(
+            NodeMatch(nodeId: "actor:Done", source: "A Source",
+                      sourceId: "abc", method: .name), isVideo: false)
+
+        XCTAssertFalse(try store.entityIdsAwaitingEnrichment().contains("actor:Done"))
+    }
+}
+
+// MARK: - 🚨 The one entry point for a reviewed match
+
+extension NodeMatchTests {
+
+    /// Saves AND records the edge, which three separate screens each failed to
+    /// do by hand — leaving records that satisfy every column-reading check and
+    /// stay on the missing-identity worklist forever.
+    func testApplyingAReviewedMatchWritesBothTheRowAndTheEdge() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Jane"))
+        var profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Jane"))
+        profile.enrichmentSourceId = "abc"
+        profile.bio = "reviewed"
+
+        let outcome = try store.applyReviewedMatch(profile, source: "A Source")
+
+        XCTAssertEqual(outcome, .recorded)
+        XCTAssertEqual(try store.fetchEntityProfile(for: "actor:Jane")?.bio, "reviewed")
+        XCTAssertEqual(try store.allEntityMatches().first?.sourceId, "abc")
+    }
+
+    /// ⚠️ No id from the source means no edge is possible — reported rather
+    /// than silently succeeding, so the screen can say why the row stays.
+    func testAReviewedMatchWithNoSourceIdIsReportedNotSilent() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Jane"))
+        let profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Jane"))
+
+        XCTAssertEqual(try store.applyReviewedMatch(profile, source: "A Source"),
+                       .noSourceId)
+        XCTAssertTrue(try store.allEntityMatches().isEmpty)
+    }
+
+    /// 🚨 After a rename the edge must name the row that EXISTS. Attaching it to
+    /// the pre-rename id points it at something that has just moved.
+    func testAfterARenameTheEdgeNamesTheNewId() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Old"))
+        var profile = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:Old"))
+        profile.enrichmentSourceId = "abc"
+        try store.saveEntityProfile(profile)
+        _ = try store.renameTagGlobally(oldTag: "actor:Old", newTag: "actor:New")
+
+        let renamed = try XCTUnwrap(try store.fetchEntityProfile(for: "actor:New"))
+        let outcome = try store.applyReviewedMatch(
+            renamed, source: "A Source", recordingUnder: "actor:New")
+
+        XCTAssertEqual(outcome, .recorded)
+        XCTAssertEqual(try store.allEntityMatches().first?.nodeId, "actor:New")
+    }
+}

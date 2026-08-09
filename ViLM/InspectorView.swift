@@ -905,7 +905,7 @@ struct SingleInspectorView: View {
                     // will never match a fingerprint however many times it is
                     // tried, so there has to be a way to say so and have it
                     // stick.
-                    Toggle(isOn: Binding(
+                    RuledOutOfLookupToggle(isRuledOut: Binding(
                         get: { asset.enrichmentState == .unmatchable },
                         set: { on in
                             // Routed through recordingOutcome rather than
@@ -929,13 +929,7 @@ struct SingleInspectorView: View {
                             }
                             if let url = libraryURL { updateAsset(updated, at: url) }
                         }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Not findable in online sources")
-                            Text("Stops this video appearing in the lookup queue.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    ), caption: "Stops this video appearing in the lookup queue.")
                     .font(.callout)
 
                     Divider()

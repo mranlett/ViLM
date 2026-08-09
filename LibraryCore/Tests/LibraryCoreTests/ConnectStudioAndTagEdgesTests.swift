@@ -124,11 +124,15 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
 
         let plan = try store.connectTagEdges()
 
-        // ⚠️ A LIST since 2026-08-07, not a count: the screen reported a bare
-        // number and gave the operator no way to reach any of the records.
+        // ⚠️ THE VIDEOS since 2026-08-08, not a count and not a per-tag total.
+        //
+        // First it was an `Int`, then `[String: Int]` — and that second fix
+        // stopped one level short: the screen could name the tag but could only
+        // link to the TAG PAGE, which also lists every video whose cast carries
+        // the trait. Eleven videos opened onto several hundred.
         XCTAssertEqual(plan.attributeTagAssociations, 1)
-        XCTAssertEqual(plan.attributeTagsOnVideos, ["Tall": 1],
-                       "named, so the report can lead somewhere")
+        XCTAssertEqual(plan.attributeTagsOnVideos, ["Tall": [v]],
+                       "the actual video, so the report leads to it and not to a superset")
         XCTAssertEqual(try store.tagIds(forVideo: v), [], "no edge")
         XCTAssertEqual(try store.edgeCount(.pendingTagAssociation), 0, "and nothing staged")
     }

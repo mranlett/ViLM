@@ -142,7 +142,22 @@ public enum ActorEnrichment {
             comparing: countryKey))
         scalar(Field.birthYear, "Birth Year",
                current: profile?.birthYear.map(String.init), proposed: proposal.birthYear)
-        scalar(Field.photoUrl, "Photo", current: profile?.photoUrl, proposed: proposal.photoURL)
+        // 🚨 Only when the slot is EMPTY. A differing photo URL is not a
+        // disagreement about who this person is, and listing it as one made
+        // every already-illustrated actor look like a conflict needing a
+        // decision. Operator, 2026-08-08: "the disagreement was the photo link,
+        // which should be ignored."
+        //
+        // ⭐ Nothing is lost by dropping it: the sheet's own Photos section is
+        // where a photo gets chosen, and it offers every image the source has
+        // rather than the one URL this row carried. The row was a worse copy of
+        // a control that already exists.
+        //
+        // ⚠️ A FILL still appears. An actor with no picture at all should be
+        // offered one, and that is a gap rather than a difference of opinion.
+        if (profile?.photoUrl ?? "").isEmpty {
+            scalar(Field.photoUrl, "Photo", current: profile?.photoUrl, proposed: proposal.photoURL)
+        }
         scalar(Field.birthDate, "Birth Date", current: profile?.birthDate, proposed: proposal.birthDate)
         scalar(Field.careerSpanRaw, "Career Span (source text)",
                current: profile?.careerSpanRaw, proposed: proposal.careerSpanRaw)
@@ -209,6 +224,11 @@ public enum ActorEnrichment {
 
         return EntityProfile(
             id: entityId,
+            // ⚠️ Kept from the existing record. Accepting a lookup fills fields
+            // in; it does not rename the node, and a source's spelling must not
+            // silently replace the operator's.
+            entityType: profile?.entityType,
+            displayName: profile?.displayName,
             bio: take(Field.bio, proposal.bio, profile?.bio),
             photoUrl: take(Field.photoUrl, proposal.photoURL.mapString(), profile?.photoUrl),
             homePage: profile?.homePage,          // not proposable today

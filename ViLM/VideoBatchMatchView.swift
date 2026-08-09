@@ -137,6 +137,12 @@ struct VideoBatchMatchView: View {
                     }
                 }
             }
+            // 🚨 A sheet WITHIN a sheet inherits nothing — the outer frame below
+            // does not reach it. Without this the group opened as a title bar
+            // and a Close button with no content area, so "No match — 1" listed
+            // nothing and the one route to matching that video by hand was
+            // unreachable. The list was rendering the whole time.
+            .macSheet(minWidth: 460, minHeight: 380)
         }
         .sheet(item: $reviewing) { item in
             // The library the crawl found it in — not a guess, and never a
@@ -159,9 +165,7 @@ struct VideoBatchMatchView: View {
             // video still returns on a later crawl.
             .onDisappear { model.removeFromQueue(item.asset.id) }
         }
-        #if os(macOS)
-        .frame(minWidth: 460, idealWidth: 520, minHeight: 420, idealHeight: 560)
-        #endif
+        .macSheet(minWidth: 460, minHeight: 420)
     }
 
     @ViewBuilder

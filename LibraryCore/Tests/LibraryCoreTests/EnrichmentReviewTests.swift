@@ -240,12 +240,35 @@ final class EnrichmentReviewTests: XCTestCase {
         XCTAssertEqual(merged.photoUrl, "https://example.test/p.jpg")
     }
 
-    func testAnExistingPhotoIsAConflictRatherThanASilentReplacement() {
+    /// ⭐ STRENGTHENED 2026-08-08. This asserted that a differing photo appears
+    /// as a `.conflict`; it now asserts the photo is not offered for
+    /// replacement AT ALL once one exists.
+    ///
+    /// The original intent — "curated artwork is never silently replaced" — is
+    /// preserved and made stronger: there is no longer a row that could be
+    /// ticked to replace it, deliberately or otherwise.
+    ///
+    /// ⚠️ What changed is the reasoning. A differing photo URL is not a
+    /// disagreement about WHO someone is, and listing it as one made every
+    /// already-illustrated actor look like a conflict awaiting a decision.
+    /// Choosing a picture belongs to the sheet's Photos section, which offers
+    /// every image the source has rather than the single URL this row carried.
+    func testAnExistingPhotoIsNotOfferedForReplacementAtAll() {
         var p = ActorMetadataProposal()
         p.photoURL = ProposedField(URL(string: "https://example.test/new.jpg")!)
         let r = review(profile(photoUrl: "https://example.test/curated.jpg"), p)
-        XCTAssertEqual(change(r, ActorEnrichment.Field.photoUrl)?.kind, .conflict,
-                       "curated artwork is never silently replaced")
+        XCTAssertNil(change(r, ActorEnrichment.Field.photoUrl),
+                     "curated artwork is not even proposed for replacement")
+    }
+
+    /// ⚠️ ...but an actor with NO picture is still offered one. That is a gap,
+    /// not a difference of opinion, and suppressing it would leave illustrated
+    /// and unillustrated actors treated identically.
+    func testAnActorWithNoPhotoIsStillOfferedOne() {
+        var p = ActorMetadataProposal()
+        p.photoURL = ProposedField(URL(string: "https://example.test/new.jpg")!)
+        let r = review(profile(photoUrl: nil), p)
+        XCTAssertEqual(change(r, ActorEnrichment.Field.photoUrl)?.kind, .fill)
     }
 
     // MARK: - Career span (schema v17)

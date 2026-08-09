@@ -138,7 +138,8 @@ final class ActorCSVTests: XCTestCase {
             ActorCSV.header,
             "Name,Bio,PhotoURL,HomePage,Gender,HairColor,BirthYear,CountryOfOrigin,Rating,AKAs,Tags,"
             + "BirthDate,CareerSpan,CareerStart,CareerEnd,AgeAtCareerStart,"
-            + "EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId,Tattoos,Piercings"
+            + "EnrichmentState,EnrichmentSource,EnrichmentCheckedAt,EnrichmentSourceId,Tattoos,Piercings,"
+            + "Links"
         )
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs", "index 9 is a contract — the importer reads positionally")
@@ -242,7 +243,11 @@ final class ActorCSVTests: XCTestCase {
         cols[9] = "b"
         let merged = ActorCSV.merge(columns: cols, existing: existing, decorateCountry: identity)
         XCTAssertEqual(merged?.galleryUrls, ["g1", "g2"], "not in the format, never cleared")
-        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 22, "and no column for it")
+        // ⚠️ Gallery URLs stay unrepresented ON PURPOSE, even though `Links`
+        // was added beside them. They are internal photo tokens rather than
+        // anything a person edits, and a hand-broken token is a broken photo.
+        XCTAssertFalse(ActorCSV.header.contains("GalleryURLs"), "still no column for it")
+        XCTAssertEqual(ActorCSV.header.split(separator: ",").count, 23)
     }
 
     // MARK: - Career span columns (schema v17)
@@ -251,10 +256,10 @@ final class ActorCSVTests: XCTestCase {
         let names = ActorCSV.header.split(separator: ",").map(String.init)
         XCTAssertEqual(names[9], "AKAs")
         XCTAssertEqual(names[10], "Tags")
-        XCTAssertEqual(Array(names.suffix(11)),
+        XCTAssertEqual(Array(names.suffix(12)),
                        ["BirthDate", "CareerSpan", "CareerStart", "CareerEnd", "AgeAtCareerStart",
                         "EnrichmentState", "EnrichmentSource", "EnrichmentCheckedAt",
-                        "EnrichmentSourceId", "Tattoos", "Piercings"])
+                        "EnrichmentSourceId", "Tattoos", "Piercings", "Links"])
     }
 
     func testCareerFieldsRoundTripThroughExportAndImport() {

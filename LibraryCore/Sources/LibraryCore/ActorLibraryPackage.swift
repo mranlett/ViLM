@@ -160,6 +160,12 @@ public struct ActorMergeResult: Sendable {
     public let updatedActorCount: Int
     public let newPhotoCount: Int
     public let duplicatePhotoCount: Int
+
+    /// 🚨 Profiles the boundary refused, and why (v28 phase 0).
+    ///
+    /// Defaulted so existing construction sites read as "nothing refused",
+    /// which is what they mean.
+    public var integrity = SyncIntegrityReport()
 }
 
 extension LibraryStore {
@@ -295,21 +301,44 @@ extension LibraryStore {
     /// on retry.
     @discardableResult
     func applyActorMerge(_ export: ActorLibraryExport, in db: Database) throws -> ActorMergeResult {
-        let existingProfiles = Dictionary(uniqueKeysWithValues: try fetchAllEntityProfiles(in: db).map { ($0.id, $0) })
+        var existingProfiles = Dictionary(uniqueKeysWithValues: try fetchAllEntityProfiles(in: db).map { ($0.id, $0) })
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         try FileManager.default.createDirectory(at: profilesDir, withIntermediateDirectories: true)
         let photosByActor = Dictionary(grouping: export.photos, by: \.actorId)
 
         var newActorCount = 0, updatedActorCount = 0, newPhotoCount = 0, duplicatePhotoCount = 0
+        var integrity = SyncIntegrityReport()
 
         // Deletions the source recorded, applied BEFORE the profile loop so an
         // incoming record cannot re-create what the same export says was
         // removed.
+        // 🚨 Phase 0 of v28. Local ids are resolved from the arriving identity;
+        // nothing the sender sent is ever written to a key column.
+        var resolver = NodeResolver(profiles: try fetchAllEntityProfiles(in: db))
+
+        // ⚠️ Keyed by RESOLUTION KEY, not by raw id.
+        //
+        // 🚨 The set is filled from tombstones and tested against profiles, and
+        // after v28 those two carry DIFFERENT SHAPES: a tombstone is keyed by
+        // the name triple (it must be — it names an entity that no longer
+        // exists, so a uid would point at nothing), while a profile arrives
+        // keyed by the sender's uid. Comparing them raw would stop matching
+        // silently, and the deletion this export carries would be undone by
+        // the very same export — the precise failure `deleted_entities` exists
+        // to prevent.
         var deletedByTombstone = Set<String>()
+
         for tombstone in export.tombstones {
-            let existing = try EntityProfile.fetchOne(db, key: tombstone.entityId)
+            // A tombstone stays NAME-keyed on both sides. D4: "a tombstone
+            // crossing libraries is matched by that same triple, not by uid."
+            let identity = NodeIdentity.parse(tombstone.entityId)
+
+            // ...but the local profile it suppresses is found by resolution,
+            // because THIS library may key its profiles any way it likes.
+            let localId = resolver.localId(for: tombstone.entityId)
+            let existing = try localId.flatMap { try EntityProfile.fetchOne(db, key: $0) }
             if TombstoneRules.shouldPropagate(tombstone: tombstone, to: existing) {
-                _ = try EntityProfile.deleteOne(db, key: tombstone.entityId)
+                if let localId { _ = try EntityProfile.deleteOne(db, key: localId) }
             }
             // Carried forward whether or not this library held a copy: a third
             // library must learn of the deletion from this one too.
@@ -320,15 +349,48 @@ extension LibraryStore {
             // to delete, but the converged export still carries the record from
             // whichever library has yet to catch up — and importing it would
             // undo the deletion using the very sync meant to carry it.
-            let incoming = export.profiles.first { $0.id == tombstone.entityId }
-            if TombstoneRules.suppressesImport(tombstone: tombstone, incoming: incoming) {
-                deletedByTombstone.insert(tombstone.entityId)
+            // ⚠️ Matched by IDENTITY, not by string. Same reason as the set
+            // below: the tombstone and the profile it refers to are keyed
+            // differently once either library is re-keyed.
+            let incoming = export.profiles.first {
+                $0.nodeIdentity?.resolutionKey == identity?.resolutionKey
+            }
+            if TombstoneRules.suppressesImport(tombstone: tombstone, incoming: incoming),
+               let key = identity?.resolutionKey {
+                deletedByTombstone.insert(key)
             }
         }
 
-        for imported in export.profiles where !deletedByTombstone.contains(imported.id) {
-            let existing = existingProfiles[imported.id]
+        for imported in export.profiles {
+            // Resolved once, and used for every subsequent decision about this
+            // profile — the suppression test, the existing-row lookup, the
+            // photo filenames and the id finally written.
+            let resolution = resolver.resolve(imported.id)
+            guard let identity = imported.nodeIdentity else {
+                // 🚨 Not an id in this scheme. Never minted from: a profile
+                // keyed on a malformed string is unreachable and unremovable.
+                integrity.unparseableIds += 1
+                continue
+            }
+            if resolution == .ambiguous {
+                // Two local nodes claim this identity; attaching to either
+                // would be a guess about which person is meant.
+                integrity.ambiguousNodes += 1
+                continue
+            }
+            guard !deletedByTombstone.contains(identity.resolutionKey) else { continue }
+
+            // ⭐ The local id, or the locally-derived form when this library
+            // has never held the node. NEVER `imported.id`.
+            let localId = resolution.writableLocalId ?? identity.legacyId
+            let existing = existingProfiles[localId]
             let existingHashes = existing.map { Self.existingPhotoHashes(for: $0, profilesDir: profilesDir) } ?? []
+            // ⚠️ Keyed by the SENDER's id on purpose. `photosByActor` was
+            // grouped from `photo.actorId`, which is also sender-side, so both
+            // halves of this lookup come from the same library and agree. It is
+            // the one place `imported.id` is still correct — resolving here
+            // would look up a local id in a sender-keyed dictionary and find
+            // nothing, silently dropping every photo.
             let incomingPhotos = photosByActor[imported.id] ?? []
 
             var mergedGalleryUrls = existing?.galleryUrls ?? []
@@ -348,18 +410,18 @@ extension LibraryStore {
 
                 if photo.isPrimary, mergedPhotoUrl == nil {
                     // Destination has no primary yet — adopt this one.
-                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id))
+                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: localId))
                     try photo.data.write(to: fileURL)
                     mergedPhotoUrl = primaryToken
                     if !mergedGalleryUrls.contains(primaryToken) { mergedGalleryUrls.append(primaryToken) }
                 } else if photo.isPrimary, mergedPhotoUrl == primaryToken,
                           !FileManager.default.fileExists(atPath: profilesDir
-                            .appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id)).path) {
+                            .appendingPathComponent(ProfileImageNaming.primaryFileName(for: localId)).path) {
                     // Destination already REFERENCES this photo as its
                     // primary, but the file is missing on disk (token lists
                     // can sync ahead of files — a metadata-only merge, or a
                     // restore whose photos didn't survive). Restore the file.
-                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: imported.id))
+                    let fileURL = profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: localId))
                     if !FileManager.default.fileExists(atPath: fileURL.path) {
                         try photo.data.write(to: fileURL)
                     }
@@ -396,7 +458,7 @@ extension LibraryStore {
                         token = "imported-photo://\(photo.contentHash)"
                     }
                     var fileURL = profilesDir.appendingPathComponent(
-                        ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                        ProfileImageNaming.galleryFileName(for: localId, token: token))
 
                     // The gallery filename is derived from the token, so a
                     // token already holding DIFFERENT bytes here means two
@@ -411,7 +473,7 @@ extension LibraryStore {
                        ProfileImageNaming.sha256Hex(occupying) != photo.contentHash {
                         token = "imported-photo://\(photo.contentHash)"
                         fileURL = profilesDir.appendingPathComponent(
-                            ProfileImageNaming.galleryFileName(for: imported.id, token: token))
+                            ProfileImageNaming.galleryFileName(for: localId, token: token))
                     }
 
                     if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -442,7 +504,15 @@ extension LibraryStore {
             let newerEnrichment = MergeSemantics.newerChecked(imported, existing ?? imported)
 
             let merged = EntityProfile(
-                id: imported.id,
+                // 🚨 The LOCAL id. This line used to write `imported.id` — the
+                // sender's key — which after v28 is a uid minted on another
+                // machine.
+                id: localId,
+                // ⭐ From the RESOLVED identity, which is the name both
+                // libraries agree this node has — not from `localId`, which
+                // after the re-key is a uid carrying nothing.
+                entityType: identity.type,
+                displayName: identity.displayName,
                 bio: MergeSemantics.coalesce(imported.bio, existing?.bio),
                 photoUrl: mergedPhotoUrl,
                 homePage: MergeSemantics.coalesce(imported.homePage, existing?.homePage),
@@ -475,14 +545,23 @@ extension LibraryStore {
             )
             try saveEntityProfile(merged, in: db)
 
-            if existing == nil { newActorCount += 1 } else { updatedActorCount += 1 }
+            if existing == nil {
+                newActorCount += 1
+                existingProfiles[localId] = merged
+                // ⚠️ Re-index, or a second arrival naming this actor resolves
+                // as absent and is treated as new all over again.
+                resolver = NodeResolver(profiles: try fetchAllEntityProfiles(in: db))
+            } else {
+                updatedActorCount += 1
+            }
         }
 
         return ActorMergeResult(
             newActorCount: newActorCount,
             updatedActorCount: updatedActorCount,
             newPhotoCount: newPhotoCount,
-            duplicatePhotoCount: duplicatePhotoCount
+            duplicatePhotoCount: duplicatePhotoCount,
+            integrity: integrity
         )
     }
 

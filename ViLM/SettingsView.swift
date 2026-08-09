@@ -23,6 +23,12 @@ struct SettingsView: View {
     var onAliasSplits: (() -> Void)?
     var onRefreshMatched: (() -> Void)?
     var onIdentityGaps: (() -> Void)?
+    /// The v28 identity upgrade gate. Read-only today.
+    ///
+    /// ⚠️ Declared beside `onIdentityGaps` deliberately — Swift requires
+    /// arguments in declaration order, so a parameter's position here dictates
+    /// where every call site must put it.
+    var onIdentityUpgrade: (() -> Void)?
     var onTagCaseCleanup: (() -> Void)?
     var onReadFilenames: (() -> Void)?
     var onBatchMatchVideos: (() -> Void)?
@@ -218,6 +224,13 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Match Again", icon: "arrow.counterclockwise",
                                action: onResetMatches)
+                        .disabled(session.isFederated)
+                    // ⚠️ Single-library, like Migrate Episode Info. Identity is
+                    // per database — a uid minted in one library means nothing
+                    // in another — so this must never run across an attached
+                    // pair.
+                    toolButton("Identity Upgrade", icon: "key",
+                               action: onIdentityUpgrade)
                         .disabled(session.isFederated)
                 }
 

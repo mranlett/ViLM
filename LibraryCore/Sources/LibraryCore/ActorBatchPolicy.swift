@@ -96,6 +96,47 @@ public enum ActorBatchPolicy {
     public static func isDecisive(candidateCount: Int) -> Bool {
         candidateCount == 1
     }
+
+    /// The same NAME, allowing for how it is written.
+    ///
+    /// ⭐ Folds case, accents, spaces, hyphens, periods — so `Aj Thornbury`,
+    /// `AJ Thornbury` and `A.J. Thornbury` are one person. Deliberately the
+    /// same fold `StudioResolution.identity` already uses, because this is the
+    /// same problem: the operator's spelling and the source's differ in ways
+    /// that carry no meaning.
+    public static func isSameName(_ a: String, _ b: String) -> Bool {
+        func fold(_ value: String) -> String {
+            value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .replacingOccurrences(of: "_", with: "")
+                .replacingOccurrences(of: ".", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let (x, y) = (fold(a), fold(b))
+        return !x.isEmpty && x == y
+    }
+
+    /// 🚨 The candidate to take when a search returns SEVERAL but exactly one
+    /// carries this actor's name.
+    ///
+    /// Measured need: re-running the batch over 150 actors that were enriched
+    /// before ids were recorded sent essentially every one to `ambiguous`,
+    /// because a name search returns neighbours as well as the person. Nothing
+    /// was repaired — the worklist simply moved. 2026-08-08.
+    ///
+    /// ⭐ A unique exact-name match among the results is not a guess. The others
+    /// are near-misses the search threw in; this one IS the name asked for.
+    ///
+    /// ⚠️ Returns nil when TWO candidates carry the name, which is the genuine
+    /// same-name collision this policy exists to protect against — exactly the
+    /// case where picking one lands a bio on the wrong person.
+    public static func decisiveCandidate(
+        forName name: String, candidates: [PluginCandidate]) -> PluginCandidate? {
+        if candidates.count == 1 { return candidates.first }
+        let exact = candidates.filter { isSameName($0.title, name) }
+        return exact.count == 1 ? exact.first : nil
+    }
 }
 
 /// What a whole run did.

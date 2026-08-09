@@ -54,7 +54,36 @@ public enum EnrichmentState: String, Codable, Equatable, Sendable, CaseIterable 
 }
 
 public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, PersistableRecord, Sendable {
-    public let id: String
+    /// The primary key.
+    ///
+    /// ⚠️ `private(set)`, so it can only be changed inside this file — by
+    /// `reidentified(as:)` and nothing else. It was `let`, and had to become
+    /// settable for v28's federation boundary, which must re-key an arriving
+    /// profile to a LOCAL id rather than adopting the sender's.
+    ///
+    /// 🚨 Kept this tight deliberately. A freely mutable primary key is a
+    /// silent corruption waiting to happen, and reconstructing the struct
+    /// field-by-field instead would have added a NINTH place that must be
+    /// updated whenever a property is added — the trap that has already cost
+    /// this project a whole-graph data loss.
+    public private(set) var id: String
+
+    /// `actor` / `studio`, stored rather than parsed out of the key.
+    ///
+    /// ⚠️ Optional because a profile constructed in code has not been through
+    /// the database yet, and every existing call site builds one that way.
+    /// Read `type`, never this.
+    public private(set) var entityType: String?
+
+    /// The name as a person reads it, stored rather than parsed out of the key.
+    ///
+    /// 🚨 This is what makes the re-key survivable. Once `id` is an opaque uid
+    /// it carries no name at all, and a name is NOT recoverable from a uid — so
+    /// the moment ids stop encoding names, this column is the only record of
+    /// what anything is called.
+    ///
+    /// Read `name`, never this.
+    public private(set) var displayName: String?
     public var bio: String?
     public var photoUrl: String?
     public var homePage: String?
@@ -247,7 +276,10 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     
     public static let databaseTableName = "entity_profiles"
     
-    public init(id: String, bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
+    public init(id: String,
+                entityType: String? = nil,
+                displayName: String? = nil,
+                bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
         self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
@@ -259,6 +291,17 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.careerEndYear = careerEndYear
         self.ageAtCareerStart = ageAtCareerStart
         self.id = id
+        // ⭐ Derived when not supplied, so the EIGHT sites that rebuild a
+        // profile field-by-field stay correct without each having to carry
+        // these — while `id` still encodes the name, deriving and carrying
+        // give the same answer.
+        //
+        // 🚨 That equivalence ENDS at the re-key. Once `id` is a uid there is
+        // nothing to derive from, and every one of those sites must pass the
+        // fields through explicitly or it will rebuild a nameless profile.
+        // See `EntityProfilePreservationTests.testFieldCountIsPinned`.
+        self.entityType = entityType ?? NodeIdentity.parse(id)?.type
+        self.displayName = displayName ?? NodeIdentity.parse(id)?.displayName
         self.bio = bio
         self.photoUrl = photoUrl
         self.homePage = homePage
@@ -286,6 +329,11 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public func renamed(to newId: String) -> EntityProfile {
         EntityProfile(
             id: newId,
+            // ⭐ A rename is the one site where the name legitimately CHANGES —
+            // but only while the key still encodes it. Once ids are uids a
+            // rename must not blank the name it cannot read from the new key.
+            entityType: NodeIdentity.parse(newId)?.type ?? entityType,
+            displayName: NodeIdentity.parse(newId)?.displayName ?? displayName,
             bio: bio,
             photoUrl: photoUrl,
             homePage: homePage,
@@ -315,6 +363,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
 
     enum CodingKeys: String, CodingKey {
         case id
+        case entityType = "entity_type"
+        case displayName = "display_name"
         case bio
         case photoUrl = "photo_url"
         case homePage = "home_page"
@@ -344,6 +394,10 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decode(String.self, forKey: .id)
+        // ⚠️ `decodeIfPresent`, so a file or row written before these existed
+        // reads as "derive it from the id" rather than failing.
+        self.entityType = try container.decodeIfPresent(String.self, forKey: .entityType)
+        self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         self.bio = try container.decodeIfPresent(String.self, forKey: .bio)
         self.photoUrl = try container.decodeIfPresent(String.self, forKey: .photoUrl)
         self.homePage = try container.decodeIfPresent(String.self, forKey: .homePage)
@@ -411,6 +465,39 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
 extension EntityProfile {
     public func encode(to container: inout PersistenceContainer) throws {
         container["id"] = id
+
+        // v34 (Opaque Node Identity, additive half). Written on EVERY save, not
+        // only backfilled by the migration.
+        //
+        // 🚨 Without this the columns would be correct for every row that
+        // existed when v34 ran and permanently NULL for every row created
+        // after — a column that is right for the old data and silently empty
+        // for the new is worse than no column, because the first thing to read
+        // it would look correct in testing and be wrong in use.
+        //
+        // ⚠️ Derived from `id` only while `id` still encodes the name. When the
+        // re-keying tool makes `id` an opaque uid, `display_name` becomes
+        // authoritative and these two lines must become stored properties
+        // instead. That is the tool's job, and it rewrites every row anyway.
+        // 🚨 Written ONLY while the id still encodes them.
+        //
+        // After the re-keying tool runs, `id` is an opaque uid with no colon,
+        // so `nodeIdentity` is nil — and assigning nil here would blank
+        // `display_name` on the very next save of every profile, destroying the
+        // only remaining record of what each node is called. The name is not
+        // recoverable from a uid.
+        //
+        // ⚠️ Omitting the keys leaves the stored values untouched: GRDB builds
+        // its UPDATE from the columns present in the container, so a column
+        // that is never set is never written.
+        // ⭐ The RESOLVED values: stored if we have them, derived while the id
+        // still encodes them. Either way the column ends up correct.
+        //
+        // 🚨 Never nil-out. After the re-key `nodeIdentity` is nil, and writing
+        // that would blank the only record of what this node is called on the
+        // very next save.
+        if let type = type { container["entity_type"] = type }
+        if displayName != nil || nodeIdentity != nil { container["display_name"] = name }
         container["bio"] = bio
         container["photo_url"] = photoUrl
         container["home_page"] = homePage
@@ -458,5 +545,49 @@ extension EntityProfile {
         } else {
             container["akas"] = "[]"
         }
+    }
+
+    /// The name to show.
+    ///
+    /// ⭐ Stored value first, then the id-derived one, then the raw id. While
+    /// ids still encode names the first two agree, so preferring the stored one
+    /// changes nothing today and is required the moment they diverge.
+    ///
+    /// ⚠️ Falls back to the id rather than to an empty string: a row rendered
+    /// blank is one nobody can find or fix.
+    public var name: String {
+        displayName ?? nodeIdentity?.displayName ?? id
+    }
+
+    /// What kind of node this is, by the same precedence.
+    public var type: String? {
+        entityType ?? nodeIdentity?.type
+    }
+
+    /// The same profile under a different primary key.
+    ///
+    /// 🚨 Exists for ONE caller: the federation boundary, which must write an
+    /// arriving profile under an id THIS library derives rather than the one
+    /// the sender happened to use. After v28 the sender's id may be an opaque
+    /// uid minted on a machine this library has never seen, and adopting it
+    /// would key a local row by a foreign identifier.
+    ///
+    /// ⭐ Today it is almost always a no-op, because the local form and the
+    /// arriving form are the same string. That is the point — phase 0 changes
+    /// no behaviour, so it can be shipped and exercised on real libraries
+    /// before there is any re-keying to debug it against.
+    ///
+    /// ⚠️ Every other field is carried untouched, and deliberately NOT
+    /// re-listed. Enumerating them here would make this the ninth place that
+    /// must be updated whenever a property is added — the omission that once
+    /// discarded studios, tags and every graph edge on import.
+    ///
+    /// Returns `self` unchanged when the id already matches, so callers need
+    /// not check first.
+    public func reidentified(as newId: String) -> EntityProfile {
+        guard newId != id, !newId.isEmpty else { return self }
+        var copy = self
+        copy.id = newId
+        return copy
     }
 }

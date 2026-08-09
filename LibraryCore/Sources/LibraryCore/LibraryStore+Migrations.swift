@@ -603,6 +603,73 @@ extension LibraryStore {
             }
         }
 
+        // v34 — Opaque Node Identity, the ADDITIVE half only.
+        //
+        // ⭐ v28's spec splits itself in two, and D6 states why: `LibraryStore`
+        // migrates on OPEN, so a registered migration runs the instant any
+        // library is attached — including one whose prerequisites are unmet.
+        // Only the harmless half may live here; minting uids, re-pointing
+        // edges and renaming 8,560 photo files is an operator-invoked tool.
+        //
+        // 🚨 TWO DEPARTURES from the spec's D1, both found by checking it
+        // against the real library on 2026-08-08.
+        //
+        // 1. NO UNIQUE INDEX HERE. D1 asks for a unique index on
+        //    (entity_type, tag_kind, display_name). A unique index can FAIL —
+        //    and a migration that fails runs on open, so it would leave the
+        //    app unable to open that library at all. That directly contradicts
+        //    D6's own requirement that the registered half be "harmless on any
+        //    library". The drive library satisfies it today (checked: zero
+        //    duplicate type+name pairs), but the phone library cannot be
+        //    inspected from here, and "probably fine" is not a property to
+        //    stake app startup on. The unique index moves to the tool, behind
+        //    a pre-flight that REPORTS duplicates instead of failing on them.
+        //
+        // 2. NO `tag_kind` COLUMN, because there is nothing to put in it.
+        //    D1 assumes tags are rows in `entity_profiles`. They are not —
+        //    they live in `tags`, keyed by `identity_key`, and this table holds
+        //    only `actor:` and `studio:` rows (1,351 and 313). The kind axis
+        //    has nothing to index here, and the spec itself notes the triple
+        //    "degenerates to the name" for performers and studios.
+        //
+        //    ⚠️ Consequence worth stating: V2 — "the tag split becomes
+        //    possible" — is NOT delivered by this migration and cannot be
+        //    until tags become entity rows. That is a separate piece of work,
+        //    not a detail of this one.
+        //
+        // `uid` is added and left NULL on purpose. Populating it IS the
+        // minting step, which belongs to the tool.
+        migrator.registerMigration("v34") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "uid", .text)
+                t.add(column: "entity_type", .text)
+                t.add(column: "display_name", .text)
+            }
+
+            // Derived from the id, which still encodes both. Reversible, reads
+            // nothing, and changes no behaviour — nothing consults these
+            // columns yet.
+            //
+            // ⚠️ `instr` returns the FIRST occurrence, which is what makes a
+            // studio named "Vol 2: The Return" survive. The drive library holds
+            // exactly one such row, and a last-colon split would truncate its
+            // name and orphan its edge.
+            try db.execute(sql: """
+                UPDATE entity_profiles
+                   SET entity_type  = substr(id, 1, instr(id, ':') - 1),
+                       display_name = substr(id, instr(id, ':') + 1)
+                 WHERE instr(id, ':') > 1
+                """)
+
+            // ⚠️ NOT unique — see departure 1. This exists so resolution by
+            // name is indexed rather than a table scan; it cannot fail, and it
+            // cannot reject a row.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS entity_lookup
+                    ON entity_profiles(entity_type, display_name)
+                """)
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

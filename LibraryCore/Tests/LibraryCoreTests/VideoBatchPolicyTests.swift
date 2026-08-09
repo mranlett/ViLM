@@ -27,14 +27,38 @@ final class VideoBatchPolicyTests: XCTestCase {
         XCTAssertEqual(fields, ["episodeTitle", "releaseDate"])
     }
 
-    /// The rule that protects work already done. A conflict disagrees with
-    /// something recorded deliberately, and resolving those unattended across a
-    /// library is invisible until long after it happened.
-    func testAConflictIsNeverAppliedUnattended() {
+    /// ⭐ POLICY REVERSED 2026-08-08, at the operator's direction: on a
+    /// fingerprint match the source's value OVERWRITES a differing local one.
+    ///
+    /// This test previously asserted the opposite — "a conflict is never
+    /// applied unattended" — on the reasoning that a conflict disagrees with
+    /// something recorded deliberately. That reasoning holds for an ACTOR, whose
+    /// profile is curated. It does not hold for a VIDEO, whose local title,
+    /// season, date and studio were read off its filename by a parser. The
+    /// source's record of the same scene is simply better.
+    ///
+    /// ⚠️ The protection now lives in the ROUTE, not the change kind — see the
+    /// test below. A fingerprint identifies the file exactly; nothing else may
+    /// overwrite anything.
+    func testAFingerprintOverwritesAConflictingLocalValue() {
         let fields = VideoBatchPolicy.autoApplicableFields(
             route: .fingerprint,
             changes: [change("seriesTitle", .conflict), change("releaseDate", .fill)])
-        XCTAssertEqual(fields, ["releaseDate"])
+        XCTAssertEqual(fields, ["seriesTitle", "releaseDate"])
+    }
+
+    /// 🚨 The rule that now carries the whole weight: a GUESS overwrites
+    /// nothing. A cast or title search returns what is plausible, and
+    /// overwriting good local data on that basis is the one version of this
+    /// policy that would be indefensible.
+    func testASearchMatchOverwritesNothingEvenOnAConflict() {
+        for route in [VideoMatchRoute.cast, .title] {
+            XCTAssertTrue(VideoBatchPolicy.autoApplicableFields(
+                route: route,
+                changes: [change("seriesTitle", .conflict),
+                          change("releaseDate", .fill)]).isEmpty,
+                "a plausible match may not overwrite anything")
+        }
     }
 
     func testASearchMatchWritesNothingAtAll() {
