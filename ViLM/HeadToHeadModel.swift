@@ -29,6 +29,9 @@ final class HeadToHeadModel: ObservableObject {
         let libraryURL: URL?
         /// Which gallery image is showing. D1: tapping browses.
         var galleryIndex: Int = 0
+        /// ⭐ What the library knows them for. The photo is a REMINDER of who
+        /// this is; these are what the judgement is actually about.
+        var knownFor: ActorKnownFor.Summary = .init(titles: [], videoCount: 0)
 
         /// Primary first, then the gallery — so the first thing shown is the
         /// picture the operator already associates with this performer.
@@ -105,6 +108,9 @@ final class HeadToHeadModel: ObservableObject {
 
             let standings = PreferenceStandings.load(for: eligible, subject: subject,
                                                      fallback: fallbackLibrary)
+            // One pass over the assets for everyone, rather than a scan per
+            // contender as each pair comes up.
+            let knownFor = ActorKnownFor.build(assets: assets, profiles: profiles)
             var built: [String: PreferenceContender] = [:]
             var sides: [String: Side] = [:]
             for profile in eligible {
@@ -118,7 +124,9 @@ final class HeadToHeadModel: ObservableObject {
                 sides[profile.id] = Side(
                     id: profile.id, name: profile.name, profile: profile,
                     libraryURL: LibrarySession.shared.url(forProfile: profile.id)
-                        ?? fallbackLibrary)
+                        ?? fallbackLibrary,
+                    knownFor: knownFor[profile.name]
+                        ?? .init(titles: [], videoCount: 0))
             }
             contenders = built
             sidesById = sides

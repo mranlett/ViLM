@@ -174,7 +174,7 @@ struct HeadToHeadView: View {
                             .font(.system(size: 44)).foregroundStyle(.secondary))
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 320)
+                .frame(height: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
                 .onTapGesture { model.browse(side) }
@@ -197,6 +197,26 @@ struct HeadToHeadView: View {
                 .lineLimit(2).minimumScaleFactor(0.8)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
+
+            // ⭐ What the library knows them for, at the operator's direction.
+            // The photo shrank to make room, which is the right trade once it
+            // is a reminder of WHO this is rather than the thing being judged.
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(side.knownFor.titles, id: \.self) { title in
+                    Text("· \(title)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                if side.knownFor.videoCount > 0 {
+                    // ⚠️ A popularity signal in a preference judgement, shown
+                    // at the operator's explicit choice after being told. A
+                    // DELIBERATE trade, not an oversight.
+                    Text(side.knownFor.videoCount == 1
+                         ? "1 video" : "\(side.knownFor.videoCount) videos")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
 
             Button {
                 model.choose(outcome)
