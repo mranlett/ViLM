@@ -119,7 +119,7 @@ public enum ActorPhotoScanner {
                             hammingThreshold: Int = ActorPhotoDeduplicator.defaultHammingThreshold,
                             progress: (@Sendable (Int, Int) -> Void)? = nil) throws -> ActorPhotoScanReport {
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        let profiles = try store.fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+        let profiles = try store.fetchAllEntityProfiles().filter { $0.type == "actor" }
 
         var groups: [DuplicatePhotoGroup] = []
         var filesScanned = 0

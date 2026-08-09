@@ -89,7 +89,7 @@ final class StudioBatchMatchModel: ObservableObject {
         // first library's count and the bar could never pass halfway.
         total = libraryURLs.reduce(0) { running, url in
             running + ((try? LibraryStore(at: url).fetchAllEntityProfiles()
-                .filter { $0.id.hasPrefix("studio:") }.count) ?? 0)
+                .filter { $0.type == "studio" }.count) ?? 0)
         }
 
         let delay = UInt64((1.0 / max(provider.requestsPerSecond, 0.1)) * 1_000_000_000)
@@ -97,7 +97,7 @@ final class StudioBatchMatchModel: ObservableObject {
         for libraryURL in libraryURLs {
             guard let store = try? LibraryStore(at: libraryURL),
                   let profiles = try? store.fetchAllEntityProfiles()
-                    .filter({ $0.id.hasPrefix("studio:") }) else { continue }
+                    .filter({ $0.type == "studio" }) else { continue }
 
             for profile in profiles {
                 if cancelled { break }

@@ -275,7 +275,7 @@ public class LibraryStore {
         // permanently unreachable — reported by one tool and invisible to the
         // tool that report names as the fix.
         let performerTags = try fetchAllEntityProfiles()
-            .filter { $0.id.hasPrefix("actor:") }
+            .filter { $0.type == "actor" }
             .flatMap(\.tags)
         let discovered = TagVocabulary.promoting(try fetchAllAssets(),
                                                  performerTags: performerTags)

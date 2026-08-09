@@ -36,6 +36,48 @@ final class StaleEdgeTests: XCTestCase {
         return asset.id
     }
 
+    // MARK: - 🚨 The edge's kind is carried, not inferred
+
+    /// The remover used to decide which table to DELETE from by testing
+    /// `nodeId.hasPrefix("studio:")`. That is undecidable once an id is a uid:
+    /// every studio edge would be taken for a performer edge, the DELETE would
+    /// match nothing, and the screen whose entire purpose is removing these
+    /// would silently do nothing while reporting success.
+    func testAStaleEdgeRecordsWhichTableItCameFrom() throws {
+        let videoId = try video(["actor:Kept", "studio:Kept Studio"])
+        try store.saveEntityProfile(EntityProfile(id: "actor:Dropped"))
+        try store.saveEntityProfile(EntityProfile(id: "studio:Dropped Studio"))
+        try store.linkPerformer("actor:Dropped", toVideo: videoId)
+        try store.setStudio("studio:Dropped Studio", forVideo: videoId)
+
+        let stale = try store.staleEdges()
+
+        XCTAssertEqual(stale.first(where: { $0.nodeId == "actor:Dropped" })?.kind, .actor)
+        XCTAssertEqual(stale.first(where: { $0.nodeId == "studio:Dropped Studio" })?.kind,
+                       .studio)
+    }
+
+    /// ⭐ And the removal itself works on a node whose id carries NO type —
+    /// the shape every id takes after the re-key. Inferring from the string
+    /// would delete from the wrong table and leave the edge in place.
+    func testAStaleEdgeOnAUidKeyedNodeIsActuallyRemoved() throws {
+        let studioUid = UUID().uuidString
+        let videoId = try video(["studio:Kept Studio"])
+        try store.saveEntityProfile(EntityProfile(id: studioUid, entityType: "studio",
+                                                  displayName: "Dropped Studio"))
+        try store.setStudio(studioUid, forVideo: videoId)
+
+        let stale = try store.staleEdges().filter { $0.nodeId == studioUid }
+        XCTAssertEqual(stale.count, 1, "the edge disagrees with the video's strings")
+        XCTAssertEqual(stale.first?.kind, .studio,
+                       "a uid says nothing about its kind — it must be carried")
+
+        _ = try store.pruneStaleEdges(stale)
+
+        XCTAssertNil(try store.studioId(forVideo: videoId),
+                     "inferring the table from the id would have deleted nothing")
+    }
+
     // S1 — the reproduction: connect, then the cast changes, and the old edge
     // is left behind with nothing able to remove it.
     func testAnEdgeLeftBehindByACastChangeIsFound() throws {

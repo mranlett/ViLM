@@ -347,7 +347,7 @@ extension LibraryStore {
             }
         }
 
-        for profile in profiles where profile.id.hasPrefix("actor:") {
+        for profile in profiles where profile.type == "actor" {
             for name in Set(profile.tags) where !name.isEmpty {
                 let key = TagNormalizer.identityKey(name)
                 guard let record = vocabulary[key] else { unknown.insert(name); continue }
@@ -467,8 +467,12 @@ extension LibraryStore {
         var created = 0, linked = 0
         var vocabulary = try fetchTagVocabulary()
 
-        for id in profileIds where id.hasPrefix("actor:") {
-            guard let profile = try fetchEntityProfile(for: id) else { continue }
+        // ⭐ Fetch first, then filter on the type COLUMN. Testing the id's
+        // prefix returns nothing once ids are uids, and this loop is what
+        // promotes performer traits into the tag vocabulary.
+        for id in profileIds {
+            guard let profile = try fetchEntityProfile(for: id),
+                  profile.type == "actor" else { continue }
             for raw in Set(profile.tags) where !raw.trimmingCharacters(in: .whitespaces).isEmpty {
                 let key = TagNormalizer.identityKey(raw)
                 var record = vocabulary.first { $0.identityKey == key }
@@ -862,8 +866,16 @@ public extension LibraryStore {
     struct StaleEdge: Equatable, Sendable, Identifiable {
         public let videoId: UUID
         public let fileName: String
-        /// `actor:Name` or `studio:Name`.
+        /// The node this edge points at. A local id — `actor:Name` today, an
+        /// opaque uid after the re-key.
         public let nodeId: String
+        /// 🚨 Which edge table this row came from, CARRIED rather than inferred.
+        ///
+        /// The remover used to decide by testing `nodeId.hasPrefix("studio:")`,
+        /// which is undecidable once an id is a uid — every studio edge would
+        /// be taken for a performer edge and the DELETE would silently affect
+        /// nothing, on a screen whose whole purpose is removing these.
+        public let kind: GraphNodeKind
         /// ⚠️ Whether the video still names ANY node of this kind.
         ///
         /// 🚨 The distinction that decides whether removing is safe. An edge on
@@ -882,10 +894,11 @@ public extension LibraryStore {
         }
 
         public init(videoId: UUID, fileName: String, nodeId: String,
-                    videoNamesOthers: Bool) {
+                    kind: GraphNodeKind, videoNamesOthers: Bool) {
             self.videoId = videoId
             self.fileName = fileName
             self.nodeId = nodeId
+            self.kind = kind
             self.videoNamesOthers = videoNamesOthers
         }
     }
@@ -911,7 +924,7 @@ public extension LibraryStore {
             for edge in try performerIds(forVideo: asset.id)
             where !namedPerformers.contains(edge) {
                 found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
-                                       nodeId: edge,
+                                       nodeId: edge, kind: .actor,
                                        videoNamesOthers: !namedPerformers.isEmpty))
             }
 
@@ -920,7 +933,7 @@ public extension LibraryStore {
             })
             if let edge = try studioId(forVideo: asset.id), !namedStudios.contains(edge) {
                 found.append(StaleEdge(videoId: asset.id, fileName: asset.fileName,
-                                       nodeId: edge,
+                                       nodeId: edge, kind: .studio,
                                        videoNamesOthers: !namedStudios.isEmpty))
             }
         }
@@ -943,7 +956,7 @@ public extension LibraryStore {
         return try dbQueue.write { db in
             var removed = 0
             for edge in edges {
-                let table = edge.nodeId.hasPrefix("studio:") ? "video_studio" : "video_performer"
+                let table = edge.kind == .studio ? "video_studio" : "video_performer"
                 let column = table == "video_studio" ? "studio_id" : "performer_id"
                 try db.execute(
                     sql: "DELETE FROM \(table) WHERE video_id = ? AND \(column) = ?",

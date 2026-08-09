@@ -189,7 +189,7 @@ extension LibraryStore {
     ///   file to hash it and then let it go.
     public func exportActorLibrary(onlyActorIds: Set<String>? = nil,
                                    includingPhotoData: Bool = true) throws -> ActorLibraryExport {
-        var actorProfiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+        var actorProfiles = try fetchAllEntityProfiles().filter { $0.type == "actor" }
         if let onlyActorIds {
             actorProfiles = actorProfiles.filter { onlyActorIds.contains($0.id) }
         }

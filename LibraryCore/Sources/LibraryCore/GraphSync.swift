@@ -184,7 +184,7 @@ extension LibraryStore {
                             includingPhotoData: Bool = true) throws -> ActorLibraryExport {
         var export = try exportActorLibrary(onlyActorIds: onlyActorIds,
                                             includingPhotoData: includingPhotoData)
-        export.studios = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("studio:") }
+        export.studios = try fetchAllEntityProfiles().filter { $0.type == "studio" }
         export.tags = try fetchTagVocabulary()
         export.performerTags = try performerTagPairs()
         export.studioParents = try studioParentEdges()
