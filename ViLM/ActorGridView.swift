@@ -59,15 +59,7 @@ struct ActorGridView: View {
     @State private var isShowingFilterBuilder = false
     @State private var isShowingHeadToHead = false
     @State private var isShowingSourceGap = false
-    @State private var sourceGapTarget: SourceGapTarget?
-
-    /// ⚠️ A wrapper so `.sheet(item:)` can drive it. `EntityProfile` is not
-    /// `Identifiable`, and making it so for one call site would be a change to
-    /// a core type for a view's convenience.
-    struct SourceGapTarget: Identifiable {
-        let profile: EntityProfile
-        var id: String { profile.id }
-    }
+    @State private var sourceGapTarget: EntityProfile?
     @State private var isSelectionMode = false
     @State private var isShowingHelp = false
     @State private var searchText = ""
@@ -364,7 +356,7 @@ struct ActorGridView: View {
                                     // operator is already looking at.
                                     if let profile = actorProfiles[actor: actor] {
                                         Button {
-                                            sourceGapTarget = .init(profile: profile)
+                                            sourceGapTarget = profile
                                         } label: {
                                             Label("What else is \(actor) in?",
                                                   systemImage: "sparkle.magnifyingglass")
@@ -384,7 +376,7 @@ struct ActorGridView: View {
         .sheet(isPresented: $isShowingHeadToHead) { headToHeadSheet }
         .sheet(isPresented: $isShowingSourceGap) { sourceGapSheet }
         .sheet(item: $sourceGapTarget) { target in
-            SourceGapView(performers: [target.profile],
+            SourceGapView(performers: [target],
                           allProfiles: entityProfiles.actors,
                           libraryURL: libraryURL)
         }

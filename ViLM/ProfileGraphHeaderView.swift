@@ -24,6 +24,7 @@ struct ProfileGraphHeaderView: View {
     @State private var formerParents: [StudioParentPeriod] = []
     @State private var isShowingEditor = false
     @State private var isShowingEnrichment = false
+    @State private var sourceGapProfile: EntityProfile?
     @State private var isShowingScopedMatch = false
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
@@ -233,6 +234,27 @@ struct ProfileGraphHeaderView: View {
                             } label: {
                                 Label("Match with \(provider.displayName)",
                                       systemImage: "sparkle.magnifyingglass")
+                            }
+
+                            // ⭐ The spec's D2 entry point, and the obvious
+                            // place for it: the operator is already looking at
+                            // this performer. It first shipped as a context
+                            // menu on the grid card, which on iOS means a
+                            // long-press nobody discovers.
+                            //
+                            // ⚠️ Only when the record carries a source id.
+                            // Offering it otherwise buys a request that can
+                            // only fail, and a failure the operator cannot act
+                            // on reads as the feature being broken.
+                            if let id = currentEntityId,
+                               let profile = ownerRawProfile(for: id),
+                               !(profile.enrichmentSourceId ?? "").isEmpty {
+                                Button {
+                                    sourceGapProfile = profile
+                                } label: {
+                                    Label("What else are they in?",
+                                          systemImage: "questionmark.folder")
+                                }
                             }
                         }
 
@@ -563,6 +585,11 @@ struct ProfileGraphHeaderView: View {
                         name: NSNotification.Name("ReloadAssets"), object: nil)
                 }
             }
+        }
+        .sheet(item: $sourceGapProfile) { profile in
+            SourceGapView(performers: [profile], allProfiles: [profile],
+                          libraryURL: LibrarySession.shared.url(forProfile: profile.id)
+                              ?? libraryURL)
         }
         .sheet(isPresented: $isShowingEnrichment) {
             if let provider = installedActorProvider, let id = currentEntityId,
