@@ -41,6 +41,20 @@ struct AssetsGridView: View {
     /// embedded one therefore declines, and the browse column keeps the search
     /// field where it has always been.
     var providesSearchField: Bool = true
+
+    /// Whether tapping a video should PUSH its detail rather than select it.
+    ///
+    /// 🚨 The split layouts show a selected video in the detail column, which
+    /// works for the browse grid — but a profile page IS the detail column, so
+    /// its grid had nowhere to put the selection. Clicking a video from an
+    /// actor's filmography set a local `selectedAssetIDs` that nothing
+    /// rendered, and the video could only be reached by going to All Assets
+    /// and searching for it.
+    ///
+    /// ⭐ Pushing is also the better answer than re-pointing the selection: it
+    /// leaves a back button to the profile, where swapping the pane would
+    /// simply lose it.
+    var pushesVideoDetail: Bool = false
     @Binding var filteredAssetContext: [Asset.ID]
     var onPullToRefresh: () async -> Void = {}
 
@@ -1268,7 +1282,7 @@ struct AssetsGridView: View {
                         selectedAssetIDs.insert(asset.id)
                     }
                 }
-        } else if !usesStackNavigation {
+        } else if !usesStackNavigation && !pushesVideoDetail {
             Button(action: {
                 selectedAssetIDs = [asset.id]
             }) {
@@ -1287,6 +1301,13 @@ struct AssetsGridView: View {
             .contextMenu { selectionContextMenu(for: asset) }
         }
 #else
+        if pushesVideoDetail {
+            NavigationLink(value: AppRoute.asset(asset.id, context: filteredAssetContext)) {
+                gridItem(for: asset)
+            }
+            .buttonStyle(.plain)
+            .contextMenu { playlistContextMenu(for: asset) }
+        } else {
         Button(action: {
             if NSEvent.modifierFlags.contains(.command) {
                 if selectedAssetIDs.contains(asset.id) {
@@ -1301,23 +1322,33 @@ struct AssetsGridView: View {
             gridItem(for: asset)
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            // Right-click acts on the ⌘-click multi-selection when it
-            // includes this card; otherwise just this card.
-            let targets = (selectedAssetIDs.contains(asset.id) && selectedAssetIDs.count > 1)
-                ? Array(selectedAssetIDs) : [asset.id]
-            Menu {
-                AddToPlaylistMenuItems(assetIDs: targets) {
-                    newPlaylistPendingIDs = targets
-                }
-            } label: {
-                Label(targets.count > 1 ? "Add \(targets.count) to Playlist" : "Add to Playlist",
-                      systemImage: "list.and.film")
-            }
+        .contextMenu { playlistContextMenu(for: asset) }
         }
 #endif
     }
-    
+
+#if os(macOS)
+    /// Right-click acts on the ⌘-click multi-selection when it includes this
+    /// card; otherwise just this card.
+    ///
+    /// ⚠️ Shared by both macOS branches. `selectionContextMenu` is inside the
+    /// iOS block — it offers "Select", which needs the edit mode macOS does
+    /// not have — so the pushing branch cannot borrow it.
+    @ViewBuilder
+    private func playlistContextMenu(for asset: Asset) -> some View {
+        let targets = (selectedAssetIDs.contains(asset.id) && selectedAssetIDs.count > 1)
+            ? Array(selectedAssetIDs) : [asset.id]
+        Menu {
+            AddToPlaylistMenuItems(assetIDs: targets) {
+                newPlaylistPendingIDs = targets
+            }
+        } label: {
+            Label(targets.count > 1 ? "Add \(targets.count) to Playlist" : "Add to Playlist",
+                  systemImage: "list.and.film")
+        }
+    }
+#endif
+
     /// How old THIS actor was when the video was released.
     ///
     /// Only on an actor's own page: the figure is a property of the pairing,

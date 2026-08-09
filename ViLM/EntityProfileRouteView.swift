@@ -63,6 +63,10 @@ struct EntityProfileRouteView: View {
             // identifier `com.apple.SwiftUI.search`, which AppKit rejects by
             // crashing. Clicking an actor in the gallery did it every time.
             providesSearchField: false,
+            // ⭐ This grid lives IN the detail column, so a selection has
+            // nowhere to be shown. Push instead, which also leaves a way back
+            // to the profile.
+            pushesVideoDetail: true,
             filteredAssetContext: $filteredAssetContext,
             entityProfiles: entityProfiles,
             akaMap: akaMap,
