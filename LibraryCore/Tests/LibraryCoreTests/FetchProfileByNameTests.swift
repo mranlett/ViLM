@@ -62,6 +62,37 @@ final class FetchProfileByNameTests: XCTestCase {
                        "studio:Vol 2: The Return")
     }
 
+    // MARK: - resolveActorAKA
+
+    func testAnAliasResolvesToItsOwnersName() throws {
+        try store.saveEntityProfile(EntityProfile(id: "actor:Marta Venlowe",
+                                                  akas: ["Marti V"]))
+
+        XCTAssertEqual(try store.resolveActorAKA(for: "Marti V"), "Marta Venlowe")
+    }
+
+    // 🚨 And after the re-key, when the id carries no name at all.
+    func testAnAliasStillResolvesWhenTheIdIsAUid() throws {
+        let uid = UUID().uuidString
+        try store.saveEntityProfile(EntityProfile(id: uid, entityType: "actor",
+                                                  displayName: "Marta Venlowe",
+                                                  akas: ["Marti V"]))
+
+        XCTAssertEqual(try store.resolveActorAKA(for: "Marti V"), "Marta Venlowe")
+    }
+
+    // ⚠️ Only ACTORS own aliases. A studio listing the same string must not
+    // capture it — the old prefix test is what kept them apart.
+    func testAStudioAliasDoesNotClaimAnActorName() throws {
+        try store.saveEntityProfile(EntityProfile(id: UUID().uuidString,
+                                                  entityType: "studio",
+                                                  displayName: "Some Studio",
+                                                  akas: ["Marti V"]))
+
+        XCTAssertEqual(try store.resolveActorAKA(for: "Marti V"), "Marti V",
+                       "unresolved names come back unchanged")
+    }
+
     // MARK: - entityId(named:type:)
 
     // The id-only form, which is what the edge writers take.

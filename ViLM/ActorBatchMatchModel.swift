@@ -197,7 +197,7 @@ final class ActorBatchMatchModel: ObservableObject {
     private func examinable(in store: LibraryStore) -> [EntityProfile] {
         let profiles = (try? store.fetchAllEntityProfiles()) ?? []
         var byId = Dictionary(uniqueKeysWithValues:
-            profiles.filter { $0.id.hasPrefix("actor:") }.map { ($0.id, $0) })
+            profiles.filter { $0.type == "actor" }.map { ($0.id, $0) })
 
         for asset in (try? store.fetchAllAssets()) ?? [] {
             for name in asset.actors where !name.isEmpty {
@@ -283,7 +283,7 @@ final class ActorBatchMatchModel: ObservableObject {
     }
 
     private func displayName(_ profile: EntityProfile) -> String {
-        profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+        profile.name
     }
 
     private func friendly(_ error: Error) -> String {

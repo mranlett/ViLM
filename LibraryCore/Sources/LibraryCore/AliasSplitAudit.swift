@@ -32,12 +32,16 @@ public struct AliasSplitCandidate: Equatable, Sendable, Identifiable {
         public let isMatched: Bool
         public let birthYear: Int?
 
-        public var displayName: String {
-            id.hasPrefix("actor:") ? String(id.dropFirst(6)) : id
-        }
+        /// 🚨 Carried, not derived. It used to be sliced off the id, which
+        /// stops working the moment an id is a uid — and this string is what
+        /// the merge screen puts on its buttons, so it would offer "Keep
+        /// 9F3C-…" instead of a person's name.
+        public let displayName: String
 
-        public init(id: String, videoCount: Int, isMatched: Bool, birthYear: Int?) {
+        public init(id: String, displayName: String, videoCount: Int,
+                    isMatched: Bool, birthYear: Int?) {
             self.id = id
+            self.displayName = displayName
             self.videoCount = videoCount
             self.isMatched = isMatched
             self.birthYear = birthYear
@@ -75,11 +79,11 @@ public enum AliasSplitAudit {
 
     public struct Input: Sendable {
         /// Every actor profile: its id, its alias list, and what is known of it.
-        public let profiles: [(id: String, akas: [String], isMatched: Bool, birthYear: Int?)]
+        public let profiles: [(id: String, name: String, akas: [String], isMatched: Bool, birthYear: Int?)]
         /// Videos per profile id.
         public let videoCounts: [String: Int]
 
-        public init(profiles: [(id: String, akas: [String], isMatched: Bool, birthYear: Int?)],
+        public init(profiles: [(id: String, name: String, akas: [String], isMatched: Bool, birthYear: Int?)],
                     videoCounts: [String: Int]) {
             self.profiles = profiles
             self.videoCounts = videoCounts
@@ -99,14 +103,13 @@ public enum AliasSplitAudit {
         // Folded name → profile id, so a case difference is not a second person.
         var byName: [String: String] = [:]
         for profile in input.profiles {
-            let bare = profile.id.hasPrefix("actor:")
-                ? String(profile.id.dropFirst(6)) : profile.id
-            byName[fold(bare)] = profile.id
+            byName[fold(profile.name)] = profile.id
         }
 
         func claimant(_ id: String) -> AliasSplitCandidate.Claimant? {
             guard let p = input.profiles.first(where: { $0.id == id }) else { return nil }
-            return .init(id: id, videoCount: input.videoCounts[id] ?? 0,
+            return .init(id: id, displayName: p.name,
+                         videoCount: input.videoCounts[id] ?? 0,
                          isMatched: p.isMatched, birthYear: p.birthYear)
         }
 

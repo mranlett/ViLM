@@ -158,7 +158,7 @@ private func filmTitle(_ film: Asset) -> String {
 }
 
 private func actorName(for profile: EntityProfile) -> String {
-    profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+    profile.name
 }
 
 struct UntaggedFilmsView: View {

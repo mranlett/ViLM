@@ -270,7 +270,7 @@ extension LibraryStore {
 
             changes.append(.init(
                 actorId: profile.id,
-                displayName: profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id,
+                displayName: profile.name,
                 isNew: existing == nil,
                 newPhotoCount: newCount,
                 duplicatePhotoCount: dupCount

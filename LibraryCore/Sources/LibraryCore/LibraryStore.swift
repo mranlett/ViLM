@@ -295,7 +295,10 @@ public class LibraryStore {
     /// "0 videos" is the strongest argument for merging one away — so getting
     /// it wrong argues for deleting the wrong half.
     public func auditAliasSplits() throws -> [AliasSplitCandidate] {
-        let profiles = try fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+        // ⭐ Filtered by the type COLUMN. A prefix test returns zero rows on a
+        // re-keyed library, which would not fail — it would silently report
+        // that the library has no alias splits at all.
+        let profiles = try fetchAllEntityProfiles().filter { $0.type == "actor" }
 
         let edges: [(String, String)] = try dbQueue.read { db in
             try Row.fetchAll(db, sql: "SELECT video_id, performer_id FROM video_performer")
@@ -324,7 +327,7 @@ public class LibraryStore {
         let counts = byProfile.mapValues(\.count)
 
         return AliasSplitAudit.findings(.init(
-            profiles: profiles.map { ($0.id, $0.akas,
+            profiles: profiles.map { ($0.id, $0.name, $0.akas,
                                       $0.enrichmentState == .matched, $0.birthYear) },
             videoCounts: counts))
     }
@@ -616,10 +619,12 @@ public class LibraryStore {
     
     public func resolveActorAKA(for normalizedName: String) throws -> String {
         let profiles = try fetchAllEntityProfiles()
-        for profile in profiles where profile.id.hasPrefix("actor:") {
-            let mainName = String(profile.id.dropFirst(6))
+        // ⭐ Grouped and named by the COLUMNS. Both the prefix test and the
+        // slice stop working once an id is a uid, and this is what makes an
+        // alias resolve to its owner at all.
+        for profile in profiles where profile.type == "actor" {
             if profile.akas.contains(normalizedName) {
-                return mainName
+                return profile.name
             }
         }
         return normalizedName

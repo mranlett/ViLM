@@ -51,7 +51,7 @@ struct StudioMatchReviewView: View {
     @State private var failure: String?
 
     private var studioName: String {
-        profile.id.hasPrefix("studio:") ? String(profile.id.dropFirst(7)) : profile.id
+        profile.name
     }
 
     private var provider: (any StudioMetadataProvider)? {

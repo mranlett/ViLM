@@ -232,8 +232,11 @@ struct ActorBatchMatchView: View {
     }
 
     private func name(_ queued: ActorBatchMatchModel.QueuedActor) -> String {
-        queued.profile.id.hasPrefix("actor:")
-            ? String(queued.profile.id.dropFirst(6)) : queued.profile.id
+        // ⚠️ No prefix guard. `name` already falls back to the id when a row
+        // carries no display name, and gating on `hasPrefix("actor:")` would
+        // fail for every uid after the re-key — putting a raw UUID on screen
+        // in place of the performer this queue is asking about.
+        queued.profile.name
     }
 
     private func tally(_ label: String, _ value: Int, _ color: Color) -> some View {

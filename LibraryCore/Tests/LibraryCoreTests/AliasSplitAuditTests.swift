@@ -16,11 +16,40 @@ final class AliasSplitAuditTests: XCTestCase {
                        videos: [String: Int] = [:],
                        matched: Set<String> = [],
                        birthYears: [String: Int] = [:]) -> AliasSplitAudit.Input {
-        .init(profiles: profiles.map { (id: "actor:\($0.0)", akas: $0.1,
+        .init(profiles: profiles.map { (id: "actor:\($0.0)", name: $0.0, akas: $0.1,
                                         isMatched: matched.contains("actor:\($0.0)"),
                                         birthYear: birthYears["actor:\($0.0)"]) },
               videoCounts: Dictionary(uniqueKeysWithValues:
                 videos.map { ("actor:\($0.key)", $0.value) }))
+    }
+
+    /// 🚨 The claimant's display name is CARRIED, not sliced off the id.
+    ///
+    /// It used to be derived as `String(id.dropFirst(6))`, which answers a raw
+    /// UUID once ids are opaque — and this string is what the merge screen puts
+    /// on its "Keep …" buttons, so the operator would be asked to choose
+    /// between two uids.
+    func testAClaimantKeepsItsNameWhenTheIdIsAUid() {
+        let keeperUid = UUID().uuidString
+        let aliasUid = UUID().uuidString
+        let input = AliasSplitAudit.Input(
+            profiles: [
+                (id: keeperUid, name: "Marta Venlowe", akas: ["Marti V"],
+                 isMatched: true, birthYear: 1990),
+                (id: aliasUid, name: "Marti V", akas: [],
+                 isMatched: false, birthYear: nil),
+            ],
+            videoCounts: [keeperUid: 12, aliasUid: 1])
+
+        let found = AliasSplitAudit.findings(input)
+
+        guard let candidate = found.first else {
+            return XCTFail("expected the alias split to be detected")
+        }
+        XCTAssertEqual(candidate.alias.displayName, "Marti V")
+        XCTAssertEqual(candidate.claimants.first?.displayName, "Marta Venlowe")
+        XCTAssertNotEqual(candidate.alias.displayName, aliasUid,
+                          "a uid must never reach the screen as a name")
     }
 
     // MARK: - Detection

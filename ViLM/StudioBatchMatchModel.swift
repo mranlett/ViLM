@@ -31,7 +31,7 @@ final class StudioBatchMatchModel: ObservableObject {
         let libraryURL: URL
         var id: String { profile.id }
         var name: String {
-            profile.id.hasPrefix("studio:") ? String(profile.id.dropFirst(7)) : profile.id
+            profile.name
         }
     }
 
@@ -284,7 +284,7 @@ final class StudioBatchMatchModel: ObservableObject {
     }
 
     private func displayName(_ profile: EntityProfile) -> String {
-        profile.id.hasPrefix("studio:") ? String(profile.id.dropFirst(7)) : profile.id
+        profile.name
     }
 
     private func friendly(_ error: Error) -> String {

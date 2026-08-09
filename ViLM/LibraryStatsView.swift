@@ -362,7 +362,7 @@ struct LibraryStatsView: View {
                 // fetchAllEntityProfiles() returns actors, studios, tags, and
                 // series alike — this page's "Actors" stats only make sense
                 // for actor profiles.
-                let profiles = try store.fetchAllEntityProfiles().filter { $0.id.hasPrefix("actor:") }
+                let profiles = try store.fetchAllEntityProfiles().filter { $0.type == "actor" }
                 
                 let thumbDir = url.appendingPathComponent(".catalog/thumbnails")
                 let profileDir = url.appendingPathComponent(".catalog/profiles")
@@ -414,10 +414,16 @@ struct LibraryStatsView: View {
                 var profilesById: [String: EntityProfile] = [:]
                 for p in profiles { profilesById[p.id] = p }
 
+                // ⚠️ ACTORS only. This loop never had a type filter — it
+                // sliced six characters off every id, so a studio contributed
+                // ":Foo" and a tag "ar": garbage that happened to match
+                // nothing. Reading the name column returns the REAL studio
+                // name, which would land actual studios in the actor lists —
+                // so the filter the old code got away with omitting is now
+                // load-bearing.
                 var akaMap: [String: String] = [:]
-                for p in profiles {
-                    let mainName = String(p.id.dropFirst(6)) // strip "actor:"
-                    for aka in p.akas { akaMap[aka] = mainName }
+                for p in profiles where p.type == "actor" {
+                    for aka in p.akas { akaMap[aka] = p.name }
                 }
 
                 var actorNames = Set<String>()
@@ -426,8 +432,8 @@ struct LibraryStatsView: View {
                         actorNames.insert(akaMap[name] ?? name)
                     }
                 }
-                for p in profiles {
-                    actorNames.insert(String(p.id.dropFirst(6)))
+                for p in profiles where p.type == "actor" {
+                    actorNames.insert(p.name)
                 }
 
                 let actorEntities: [EntityProfile] = actorNames.map { name in
@@ -475,7 +481,7 @@ struct LibraryStatsView: View {
                         aWithImages.append(profile)
                         aTotalPhotos += actorPhotos
 
-                        let displayName = profile.id.hasPrefix("actor:") ? String(profile.id.dropFirst(6)) : profile.id
+                        let displayName = profile.name
                         actorPhotoCounts[displayName] = actorPhotos
                     } else {
                         aNoImages.append(profile)

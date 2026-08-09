@@ -81,9 +81,8 @@ struct SidebarView: View {
         // lookups below stay O(1) instead of rebuilding the whole map on
         // every access.
         var akaMap: [String: String] = [:]
-        for profile in profiles where profile.id.hasPrefix("actor:") {
-            let mainName = String(profile.id.dropFirst(6))
-            for aka in profile.akas { akaMap[aka] = mainName }
+        for profile in profiles where profile.type == "actor" {
+            for aka in profile.akas { akaMap[aka] = profile.name }
         }
 
         for asset in assets {
@@ -114,12 +113,13 @@ struct SidebarView: View {
 
         // Profiles may exist without any assets referencing them yet.
         for profile in profiles {
-            if profile.id.hasPrefix("actor:") {
-                actorSet.insert(String(profile.id.dropFirst(6)))
-            } else if profile.id.hasPrefix("tag:") {
-                tagSet.insert(String(profile.id.dropFirst(4)))
-            } else if profile.id.hasPrefix("studio:") {
-                studioSet.insert(String(profile.id.dropFirst(7)))
+            // ⭐ Split by the type column and named by the name column —
+            // neither survives being derived from a uid.
+            switch profile.type {
+            case "actor":  actorSet.insert(profile.name)
+            case "tag":    tagSet.insert(profile.name)
+            case "studio": studioSet.insert(profile.name)
+            default:       break
             }
         }
 
