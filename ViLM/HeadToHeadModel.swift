@@ -71,17 +71,35 @@ final class HeadToHeadModel: ObservableObject {
 
     // MARK: - Loading
 
-    func load(profiles: EntityProfileIndex, fallbackLibrary: URL?) async {
+    /// How many contenders the current pool admits — shown so the operator
+    /// always knows who is in the game.
+    @Published private(set) var poolCount = 0
+
+    func load(profiles: EntityProfileIndex, assets: [Asset],
+              photoFileNames: Set<String>, pool: ActorFilterCriteria,
+              fallbackLibrary: URL?) async {
         state = .loading
         do {
-            let eligible = profiles.actors.filter { Self.hasAnImage($0) }
+            let withImages = profiles.actors.filter { Self.hasAnImage($0) }
+
+            // D1b — the pool decides who is IN the game. Reuses the same
+            // criteria and the same matcher the actor grid uses, so a filter
+            // means the same thing in both places.
+            let eligible = Self.pooled(withImages, pool: pool, profiles: profiles,
+                                       assets: assets, photoFileNames: photoFileNames)
+            poolCount = eligible.count
+
             guard eligible.count >= 2 else {
-                // ⚠️ Names the shortfall in the operator's terms. "Cannot play"
-                // alone reads as a bug; saying how many can play says the pool
-                // is the problem.
-                state = .unplayable(eligible.isEmpty
-                    ? "No performer in this library has a photo yet, so there is nothing to compare."
-                    : "Only one performer has a photo, and a comparison needs two.")
+                // ⚠️ T12 — names the shortfall in the operator's terms, and
+                // says whether the POOL caused it. "Cannot play" alone reads as
+                // a bug; "your filter leaves one" says what to change.
+                let filtered = !pool.isEmpty
+                state = .unplayable(
+                    filtered
+                    ? "This pool has \(eligible.count == 1 ? "only one performer" : "no performers") with a photo. Widen it to play."
+                    : (withImages.isEmpty
+                       ? "No performer in this library has a photo yet, so there is nothing to compare."
+                       : "Only one performer has a photo, and a comparison needs two."))
                 return
             }
 
@@ -107,6 +125,30 @@ final class HeadToHeadModel: ObservableObject {
             try advance()
         } catch {
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Applies the pool criteria, using the SAME matcher the actor grid uses.
+    ///
+    /// ⚠️ A real `ActorContext` — video counts and photo presence included —
+    /// rather than a stubbed one. A pool filtering on video count against
+    /// zeroed counts would silently admit nobody, and the operator would see
+    /// "no performers" with no idea why.
+    private static func pooled(_ candidates: [EntityProfile],
+                               pool: ActorFilterCriteria,
+                               profiles: EntityProfileIndex,
+                               assets: [Asset],
+                               photoFileNames: Set<String>) -> [EntityProfile] {
+        guard !pool.isEmpty else { return candidates }
+        let counts = ActorVideoCounts.build(assets: assets, profiles: profiles)
+        return candidates.filter { profile in
+            let safeId = ProfileImageNaming.safeId(for: profile.id)
+            let hasLocalPhoto = photoFileNames.contains("\(safeId).jpg")
+                || photoFileNames.contains { $0.hasPrefix("\(safeId)_") }
+            return pool.matches(actor: profile.name,
+                                context: .init(profile: profile,
+                                               videoCount: counts[profile.name] ?? 0,
+                                               hasLocalPhoto: hasLocalPhoto))
         }
     }
 

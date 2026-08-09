@@ -358,9 +358,7 @@ struct ActorGridView: View {
         #if os(iOS)
         .refreshable { await onPullToRefresh() }
         #endif
-        .sheet(isPresented: $isShowingHeadToHead) {
-            HeadToHeadView(entityProfiles: entityProfiles, libraryURL: libraryURL)
-        }
+        .sheet(isPresented: $isShowingHeadToHead) { headToHeadSheet }
         .sheet(isPresented: $isShowingFilterBuilder) {
             ActorFilterBuilderView(
                 allUniqueGenders: uniqueGenders,
@@ -592,6 +590,20 @@ struct ActorGridView: View {
         selectedAssetIDs.removeAll()
     }
     
+    /// ⚠️ A computed property, not inline in `body`. An eight-argument
+    /// initialiser inside the view builder tipped this file past the
+    /// type-checker's budget — the fourth time it has hit that limit.
+    private var headToHeadSheet: some View {
+        HeadToHeadView(entityProfiles: entityProfiles,
+                       assets: assets,
+                       profileImageFileNames: profileImageFileNames,
+                       allUniqueGenders: uniqueGenders,
+                       allUniqueHairColors: uniqueHairColors,
+                       allUniqueCountries: uniqueCountries,
+                       allUniqueTags: allUniqueTags,
+                       libraryURL: libraryURL)
+    }
+
     @ViewBuilder
     private func interactiveGridItem(for actor: String, isSelected: Bool) -> some View {
 #if os(iOS)
