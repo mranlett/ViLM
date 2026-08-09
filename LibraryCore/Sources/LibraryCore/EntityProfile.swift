@@ -318,6 +318,23 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.createdAt = createdAt
     }
     
+    /// The same node under a new NAME, keeping its id.
+    ///
+    /// ⭐ What a rename becomes after the re-key. The node does not move —
+    /// its uid is stable — so nothing else in the library has to be told
+    /// about it. Compare `renamed(to:)`, which changes the key and therefore
+    /// obliges the caller to re-point every edge and photo that named it.
+    ///
+    /// ⚠️ Refuses an empty name. A profile with no display name is one the
+    /// operator can no longer find, and after the re-key the name is the only
+    /// record of what the node is called.
+    public func renamedInPlace(to newName: String) -> EntityProfile {
+        guard !newName.isEmpty else { return self }
+        var copy = self
+        copy.displayName = newName
+        return copy
+    }
+
     /// The same profile under a new id.
     ///
     /// Exists so that renaming enumerates the fields in exactly ONE place. Every

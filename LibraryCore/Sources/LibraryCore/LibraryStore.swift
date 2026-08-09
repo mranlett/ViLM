@@ -740,8 +740,32 @@ public class LibraryStore {
         // silently vanished from the UI. Now a failed move aborts with the
         // catalog untouched, and a failed DB write moves the files back;
         // either way disk and database agree, and errors reach the caller.
-        let oldSafeId = normalizedOld.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-        let newSafeId = normalizedNew.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+        // 🚨 A RENAME STOPS MOVING THINGS AFTER THE RE-KEY.
+        //
+        // Today a rename changes the id, so the profile row moves to a new
+        // key, every edge has to be re-pointed at it, the photo files have to
+        // be renamed, and a tombstone has to record that the old id is gone.
+        // All of that is bookkeeping for a key that happens to contain a name.
+        //
+        // ⭐ Once the id is an opaque uid the node does not move at all. A pure
+        // rename becomes one column update — `display_name` — plus the tag
+        // strings on the videos. Re-pointing edges would be pointless; moving
+        // photos would be actively wrong, since the files are named after the
+        // stable uid.
+        //
+        // ⚠️ A MERGE still moves everything in both eras. Two distinct nodes
+        // becoming one genuinely does re-point edges and photos, and the loser
+        // genuinely is deleted. What changes is only the pure-rename case.
+        let rekeyed = try isRekeyed()
+        let entities = try resolveRenameEndpoints(oldTag: oldTag,
+                                                  normalizedOld: normalizedOld,
+                                                  normalizedNew: normalizedNew,
+                                                  rekeyed: rekeyed)
+
+        // Photo filenames follow the ENTITY ID, so the move is planned from the
+        // resolved ids — and skipped entirely when the id is not changing.
+        let oldSafeId = ProfileImageNaming.safeId(for: entities.sourceId ?? normalizedOld)
+        let newSafeId = ProfileImageNaming.safeId(for: entities.destinationId ?? normalizedNew)
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
         var performedMoves: [(from: URL, to: URL)] = []
         // A destination file that already exists means the merge target owns
@@ -754,7 +778,7 @@ public class LibraryStore {
                 try? FileManager.default.moveItem(at: to, to: from)
             }
         }
-        if FileManager.default.fileExists(atPath: profilesDir.path) {
+        if oldSafeId != newSafeId, FileManager.default.fileExists(atPath: profilesDir.path) {
             let names = try FileManager.default.contentsOfDirectory(atPath: profilesDir.path)
             for move in Self.plannedProfileImageRenames(fileNames: names, oldSafeId: oldSafeId, newSafeId: newSafeId) {
                 let from = profilesDir.appendingPathComponent(move.from)
@@ -777,7 +801,8 @@ public class LibraryStore {
         do {
             outcome = try renameTagInDatabase(oldTag: oldTag,
                                               normalizedOld: normalizedOld,
-                                              normalizedNew: normalizedNew)
+                                              normalizedNew: normalizedNew,
+                                              entities: entities)
         } catch {
             rollbackMoves()
             throw error
@@ -791,9 +816,76 @@ public class LibraryStore {
         return outcome
     }
 
+    /// Which rows a rename actually touches.
+    ///
+    /// ⭐ Resolved ONCE, before any file or database work, because the photo
+    /// move and the edge move both need the same answer and must not disagree.
+    struct RenameEndpoints {
+        /// The entity being renamed, if the library holds one.
+        let sourceId: String?
+        /// The entity it is merging INTO, if one already exists under the new
+        /// name. Nil for a pure rename.
+        let mergeTargetId: String?
+        /// Whether this library's keys are opaque uids.
+        let rekeyed: Bool
+        /// The `type:Name` form of the new name, which IS the new key before
+        /// the re-key and is only a name after it.
+        let newNameFormId: String
+
+        /// Where the photos and edges end up.
+        ///
+        /// 🚨 The whole inversion lives in this one property. For a merge it is
+        /// the target, in both eras. For a PURE RENAME it is the new name-form
+        /// id before the re-key — the key genuinely moves — and the UNCHANGED
+        /// source id after, which is what makes the photo move and the edge
+        /// re-point correctly become no-ops.
+        var destinationId: String? {
+            if let mergeTargetId { return mergeTargetId }
+            guard let sourceId else { return nil }
+            return rekeyed ? sourceId : newNameFormId
+        }
+    }
+
+    private func resolveRenameEndpoints(oldTag: String,
+                                        normalizedOld: String, normalizedNew: String,
+                                        rekeyed: Bool) throws -> RenameEndpoints {
+        guard rekeyed else {
+            // Before the re-key the id IS the name, so the ids are the strings.
+            let source = try fetchEntityProfile(for: normalizedOld)?.id
+            let target = try fetchEntityProfile(for: normalizedNew)?.id
+            return RenameEndpoints(sourceId: source,
+                                   mergeTargetId: target,
+                                   rekeyed: false,
+                                   newNameFormId: normalizedNew)
+        }
+        // After it, both ends are found by identity — the strings are names.
+        //
+        // 🚨 The source is looked up under the spelling the CALLER gave first,
+        // and only then under the normalized one. `normalize` title-cases, so
+        // "tag:scuba" becomes "tag:Scuba" and a lookup by that name misses the
+        // row stored in lower case — which is precisely the row a case
+        // collision repair exists to find. This file already learned that
+        // lesson for the asset tags; the profile lookup has to follow it too.
+        let new = NodeIdentity.parse(normalizedNew)
+        var source: String?
+        for candidate in [NodeIdentity.parse(oldTag), NodeIdentity.parse(normalizedOld)] {
+            guard let candidate, source == nil else { continue }
+            source = try fetchEntityProfile(named: candidate.displayName,
+                                            type: candidate.type)?.id
+        }
+        let target = try new.flatMap {
+            try fetchEntityProfile(named: $0.displayName, type: $0.type)?.id
+        }
+        return RenameEndpoints(sourceId: source,
+                               mergeTargetId: target == source ? nil : target,
+                               rekeyed: true,
+                               newNameFormId: normalizedNew)
+    }
+
     @discardableResult
     private func renameTagInDatabase(oldTag: String, normalizedOld: String,
-                                     normalizedNew: String) throws -> TagRenameOutcome {
+                                     normalizedNew: String,
+                                     entities: RenameEndpoints) throws -> TagRenameOutcome {
         var videosChanged = 0, profileMoved = false, vocabularyRespelled = false
         try dbQueue.write { db in
             let assets = try Asset.fetchAll(db)
@@ -886,8 +978,35 @@ public class LibraryStore {
             }
 
             // Handle Entity Profile merging
-            if let oldProfile = try EntityProfile.fetchOne(db, key: normalizedOld) {
-                if var dest = try EntityProfile.fetchOne(db, key: normalizedNew) {
+            if let sourceId = entities.sourceId,
+               let oldProfile = try EntityProfile.fetchOne(db, key: sourceId) {
+
+                // ⭐ A PURE RENAME AFTER THE RE-KEY MOVES NOTHING.
+                //
+                // The node keeps its uid, so there is no new key to write, no
+                // edge to re-point, no photo to move and nothing to tombstone.
+                // Only the name changes. Doing the old bookkeeping here would
+                // re-point every edge at the id it already has and rename
+                // photo files out from under themselves.
+                if entities.rekeyed, entities.mergeTargetId == nil {
+                    // ⚠️ Reports what actually happened. An unparseable or
+                    // empty new name leaves the profile alone — and must not
+                    // then claim the profile moved, or the caller shows a
+                    // success for a rename that only touched the tag strings.
+                    if let newName = NodeIdentity.parse(normalizedNew)?.displayName,
+                       !newName.isEmpty {
+                        try oldProfile.renamedInPlace(to: newName).save(db)
+                        profileMoved = true
+                    }
+                    // Nothing follows this block inside the transaction — the
+                    // tag strings and the vocabulary were handled above, and
+                    // their counts are already recorded.
+                    return
+                }
+
+                if var dest = try entities.mergeTargetId.flatMap({
+                    try EntityProfile.fetchOne(db, key: $0)
+                }) {
                     // Destination already has a profile: merge instead of
                     // discarding the source. The destination's own values win
                     // where set; the source fills gaps, and list fields are
@@ -950,11 +1069,16 @@ public class LibraryStore {
                                         ("studio_parent", "studio_id"),
                                         ("studio_parent", "parent_studio_id"),
                                         ("entity_match", "entity_id")] {
+                    // ⚠️ Resolved ids, never the name strings. After the
+                    // re-key the endpoints are uids and a name-form string
+                    // matches no edge at all — the UPDATE would touch nothing
+                    // and the DELETE that follows would then destroy the
+                    // source's edges outright, via ON DELETE CASCADE.
                     try db.execute(sql:
                         "UPDATE OR IGNORE \(table) SET \(column) = ? WHERE \(column) = ?",
-                        arguments: [normalizedNew, normalizedOld])
+                        arguments: [entities.destinationId ?? normalizedNew, sourceId])
                     try db.execute(sql: "DELETE FROM \(table) WHERE \(column) = ?",
-                                   arguments: [normalizedOld])
+                                   arguments: [sourceId])
                 }
                 // ⚠️ A merge can make a studio its own parent — if the losing
                 // studio was a child of the winner, remapping both columns
@@ -970,6 +1094,8 @@ public class LibraryStore {
                 // concerned. Without this, accepting a canonical name from a
                 // lookup leaves the OLD name alive elsewhere, and the next sync
                 // copies it back — the renamed actor reappears under both names.
+                // ⚠️ NAME-keyed, per D4 — a tombstone names something that no
+                // longer exists, so it can never hold a uid.
                 try recordTombstone(EntityTombstone(entityId: normalizedOld,
                                                     replacedBy: normalizedNew), in: db)
                 // The destination id is deliberately live now, so any stale
