@@ -120,14 +120,32 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     /// A date buried in display text cannot make that comparison.
     public let releaseDate: String?
 
+    /// The studio that released this, where the candidate is a scene.
+    ///
+    /// ⭐ Structured for the same reason `releaseDate` is, and the reason is
+    /// worth stating because it is the second time it has come up: the studio
+    /// was already fetched and already shown, joined into `subtitle` with a
+    /// date and a cast list. Display text cannot be compared. Deciding whether
+    /// a candidate shares a studio with the library means splitting a string on
+    /// " · " and guessing which part is which.
+    ///
+    /// ⚠️ Singular, because a SCENE has one studio. A performer's studio set is
+    /// the union of this across their `knownWorks`, which is the caller's job —
+    /// the candidate describes one record, not a career.
+    ///
+    /// Nil where the source does not say, and for candidates that are not
+    /// scenes at all.
+    public let studioName: String?
+
     public init(id: String, title: String, subtitle: String? = nil,
                 thumbnailURL: URL? = nil, fullImageURL: URL? = nil,
                 imageURLs: [URL] = [], durationSeconds: Int? = nil,
-                releaseDate: String? = nil) {
+                releaseDate: String? = nil, studioName: String? = nil) {
         self.id = id
         self.title = title
         self.durationSeconds = durationSeconds
         self.releaseDate = releaseDate
+        self.studioName = studioName
         self.subtitle = subtitle
         self.thumbnailURL = thumbnailURL
         self.fullImageURL = fullImageURL ?? thumbnailURL
