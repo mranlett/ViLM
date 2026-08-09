@@ -17,6 +17,7 @@
 // hard, and it tests without either.
 
 import Foundation
+import GRDB
 
 /// One thing the source knows about and this library does not.
 public struct SourceGap: Equatable, Sendable, Identifiable {
@@ -136,5 +137,66 @@ public enum SourceGapAudit {
                                localVideos: localVideos,
                                identifiedLocalVideos: max(0, min(identifiedLocalVideos, localVideos)),
                                sourceTruncated: truncated)
+    }
+}
+
+public extension LibraryStore {
+
+    /// Every video identity this library holds from one source.
+    ///
+    /// ⚠️ Filtered in SQL by source rather than in the caller. The whole point
+    /// of `SourceGapAudit`'s scoping is that another provider's ids must never
+    /// enter the comparison, and a read that hands back all of them invites
+    /// exactly that mistake one call site later.
+    func videoMatches(source: String) throws -> [NodeMatch] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT video_id, source, source_id, method, matched_at
+                  FROM video_match WHERE source = ?
+                """, arguments: [source]).map { row in
+                NodeMatch(nodeId: row["video_id"], source: row["source"],
+                          sourceId: row["source_id"],
+                          method: MatchMethod(rawValue: row["method"]) ?? .title,
+                          matchedAt: row["matched_at"] ?? Date())
+            }
+        }
+    }
+
+    /// How many videos feature this performer, and how many of those carry an
+    /// identity — the two numbers D1's confidence line is built from.
+    ///
+    /// ⭐ Counts through BOTH representations, edges and tag strings, because a
+    /// video connected one way and not the other is still a video the operator
+    /// has. Undercounting here would overstate how exact a gap list is, which
+    /// is the direction that misleads.
+    func videoIdentityFootprint(forActor name: String,
+                                source: String) throws -> (total: Int, identified: Int) {
+        try dbQueue.read { db in
+            var videos = Set<String>()
+
+            // Through the graph.
+            let byEdge = try String.fetchAll(db, sql: """
+                SELECT vp.video_id FROM video_performer vp
+                  JOIN entity_profiles p ON p.id = vp.performer_id
+                 WHERE p.entity_type = 'actor' AND p.display_name = ?
+                """, arguments: [name])
+            videos.formUnion(byEdge)
+
+            // ⚠️ And through the strings, which are still where much of the
+            // library lives. `json_each` rather than a LIKE, so a performer
+            // whose name is a substring of another's is not counted twice.
+            let byString = try String.fetchAll(db, sql: """
+                SELECT DISTINCT a.id FROM assets a, json_each(a.tags) j
+                 WHERE j.value = ?
+                """, arguments: ["actor:\(name)"])
+            videos.formUnion(byString)
+
+            guard !videos.isEmpty else { return (0, 0) }
+
+            let identified = try Set(String.fetchAll(db, sql: """
+                SELECT DISTINCT video_id FROM video_match WHERE source = ?
+                """, arguments: [source]))
+            return (videos.count, videos.filter { identified.contains($0) }.count)
+        }
     }
 }

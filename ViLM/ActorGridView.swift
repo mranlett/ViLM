@@ -58,6 +58,16 @@ struct ActorGridView: View {
     @State private var filterCriteria = ActorFilterCriteria()
     @State private var isShowingFilterBuilder = false
     @State private var isShowingHeadToHead = false
+    @State private var isShowingSourceGap = false
+    @State private var sourceGapTarget: SourceGapTarget?
+
+    /// ⚠️ A wrapper so `.sheet(item:)` can drive it. `EntityProfile` is not
+    /// `Identifiable`, and making it so for one call site would be a change to
+    /// a core type for a view's convenience.
+    struct SourceGapTarget: Identifiable {
+        let profile: EntityProfile
+        var id: String { profile.id }
+    }
     @State private var isSelectionMode = false
     @State private var isShowingHelp = false
     @State private var searchText = ""
@@ -348,6 +358,19 @@ struct ActorGridView: View {
                         ForEach(filteredActors, id: \.self) { actor in
                             let isSelected = sidebarSelection.contains(.actor(actor))
                             interactiveGridItem(for: actor, isSelected: isSelected)
+                                .contextMenu {
+                                    // #41 — the per-actor entry point. Cheap,
+                                    // and answers the question for someone the
+                                    // operator is already looking at.
+                                    if let profile = actorProfiles[actor: actor] {
+                                        Button {
+                                            sourceGapTarget = .init(profile: profile)
+                                        } label: {
+                                            Label("What else is \(actor) in?",
+                                                  systemImage: "sparkle.magnifyingglass")
+                                        }
+                                    }
+                                }
                         }
                     }
                     .padding(.horizontal)
@@ -359,6 +382,12 @@ struct ActorGridView: View {
         .refreshable { await onPullToRefresh() }
         #endif
         .sheet(isPresented: $isShowingHeadToHead) { headToHeadSheet }
+        .sheet(isPresented: $isShowingSourceGap) { sourceGapSheet }
+        .sheet(item: $sourceGapTarget) { target in
+            SourceGapView(performers: [target.profile],
+                          allProfiles: entityProfiles.actors,
+                          libraryURL: libraryURL)
+        }
         .sheet(isPresented: $isShowingFilterBuilder) {
             ActorFilterBuilderView(
                 allUniqueGenders: uniqueGenders,
@@ -447,6 +476,12 @@ struct ActorGridView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isShowingHeadToHead = true }) {
                     Label("Head to Head", systemImage: "square.split.2x1")
+                }
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { isShowingSourceGap = true }) {
+                    Label("What You're Missing", systemImage: "sparkle.magnifyingglass")
                 }
             }
 
@@ -593,6 +628,13 @@ struct ActorGridView: View {
     /// ⚠️ A computed property, not inline in `body`. An eight-argument
     /// initialiser inside the view builder tipped this file past the
     /// type-checker's budget — the fourth time it has hit that limit.
+    /// #42 — the sweep. Empty `performers` means "choose them for me".
+    private var sourceGapSheet: some View {
+        SourceGapView(performers: [],
+                      allProfiles: entityProfiles.actors,
+                      libraryURL: libraryURL)
+    }
+
     private var headToHeadSheet: some View {
         HeadToHeadView(entityProfiles: entityProfiles,
                        assets: assets,
