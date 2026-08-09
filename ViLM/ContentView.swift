@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var isShowingTagCleanup = false
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
+    @State private var isShowingPhotoTopUp = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
     @State private var isShowingIdentityGaps = false
@@ -457,6 +458,11 @@ struct ContentView: View {
                     )
                 }
             }
+            .sheet(isPresented: $isShowingPhotoTopUp) {
+                if let url = selectedLibraryURL {
+                    ActorPhotoTopUpView(libraryURL: url)
+                }
+            }
             .sheet(isPresented: $isShowingTagCleanup) {
                 if let url = selectedLibraryURL {
                     TagCleanupView(
@@ -771,6 +777,7 @@ struct ContentView: View {
                 onTagCleanup: { isShowingTagCleanup = true },
                 onClassifyTags: { isShowingTagClassification = true },
                 onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
+                onPhotoTopUp: { isShowingPhotoTopUp = true },
                 onAliasSplits: { isShowingAliasSplits = true },
                 onRefreshMatched: { isShowingVideoRefresh = true },
                 onIdentityGaps: { isShowingIdentityGaps = true },

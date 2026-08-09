@@ -20,6 +20,7 @@ struct SettingsView: View {
     var onTagCleanup: (() -> Void)?
     var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
+    var onPhotoTopUp: (() -> Void)?
     var onAliasSplits: (() -> Void)?
     var onRefreshMatched: (() -> Void)?
     var onIdentityGaps: (() -> Void)?
@@ -142,6 +143,8 @@ struct SettingsView: View {
                     toolButton("Merge Duplicate Performers",
                                icon: "person.2.badge.gearshape", action: onAliasSplits)
                         .disabled(session.isFederated)
+                    toolButton("Get More Photos",
+                               icon: "photo.badge.plus", action: onPhotoTopUp)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
                     toolButton("Remove Orphaned Profiles", icon: "trash.slash", action: onTagCleanup)
