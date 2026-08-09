@@ -3,7 +3,7 @@
 
 ---
 spec: "Opaque Node Identity (schema v28)"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Opaque-Node-Identity-schema-v28-3b3adccaf4288154b1a2f54712801de9
@@ -541,3 +541,26 @@ Presence is now recorded under **both** the id and the identity key, and `librar
 | `dropFirst(6)` name extraction (step 3) | ~45 |
 Plus: **renames invert.** After the re-key a rename touches `display_name` and the tag strings while the id stays put — the opposite of today's `renameTagGlobally`, and six sites assume the old behaviour. This likely retires `recordingUnder:` on `applyReviewedMatch`.
 🚨 **Do not wire the re-key button.** With those sites still reading names out of ids, running the tool would leave a correct database the UI cannot render.
+---
+# ✅ IMPLEMENTED — the drive library is re-keyed, 2026-08-09
+Run by the operator against the drive library after a fresh backup.
+| Reported | Reconciles as |
+| --- | --- |
+| **1,817 nodes re-keyed** | every profile in the library |
+| **5,498 photos moved** | of 9,232 files present; the rest belong to no current profile |
+| **9,477 edges re-pointed** | 3,715 + 1,830 + 516 + 258 + 258 + 2,900 — `studio_parent` counted **twice**, because both its columns hold node ids |
+Verified afterwards: **0 dangling edges** across all six tables, **0 duplicate (type, name)**, **0 profiles without a name**, `foreign_key_check` and `quick_check` clean. Studio Health and Connect the Graph were both exercised and behaved.
+## 🚨 The one defect the first real run found
+Four actors created *minutes after* the upgrade came out keyed `actor:Name` — legacy keys inside a re-keyed library, arriving one profile at a time.
+**Cause:** a distinction that existed in reasoning but not in code. A fallback used for READING is fine as the name form — a photo filename or a label is harmless when the row does not exist. A fallback used for WRITING is not: the editor saves through the id it is handed.
+**Fix:** `LibraryStore.entityIdForWriting(named:type:)` — resolve first, mint second, never fall back to a name form. Both actor editors use it; the read-path fallbacks are deliberately unchanged.
+⚠️ **It also produced a DUPLICATE, which is worse than a mixed key.** "the performer" already existed as a uid; because the write path never resolved, a second profile was created for the same person — same source id, same birth date, same 32 AKAs. A duplicate `(entity_type, display_name)` is a **pre-flight blocker**, so the library could not have been re-keyed again until it was merged.
+Repaired with the catalogue copied first: the duplicate merged into the uid row keeping the stronger `operator` provenance over the uid row's `name`, and the other three re-keyed children-first with foreign keys deferred. The library now holds **1,811 profiles, zero legacy keys**.
+## ⛔ What this spec does NOT deliver
+- **V2 — "the tag split becomes possible" was never achievable by this migration.** Tags live in the `tags` table keyed by `identity_key`; `entity_profiles` holds only actors and studios. The spec claimed this unlock from the day it was written. Splitting a colliding tag into an action and an attribute node needs tags to become entity rows first, which is its own work.
+- **The phone library is not re-keyed.** D4's mixed state is supported — federation resolves by the name triple — so this is a valid configuration, not a debt. The write-path fix above landed before that library was touched.
+- **Retiring the legacy tag strings (the Epic's step 5) is untouched.** Reads still union edges and strings, and `asset.tags` remains a live namespace the re-key deliberately does not enter.
+## Deliberately deferred, and why
+`renameTagInDatabase` is ~150 lines doing six jobs, and a partial photo-rollback failure is swallowed rather than surfaced. Both are real findings from an independent audit. Neither was worth changing in the commit immediately before the one irreversible operation in the project — they belong to a pass after it, not before.
+## Evidence
+Nine commits, `81f222f`…`b2dabd0`. **1,551 LibraryCore tests, 0 failures; macOS and iOS build.** Independently audited four times — test quality (findings acted on, then verified by mutation), efficiency and crash safety, code smells, and the diff itself.
