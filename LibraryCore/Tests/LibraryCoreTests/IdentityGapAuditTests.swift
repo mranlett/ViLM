@@ -126,7 +126,7 @@ final class IdentityGapAuditTests: XCTestCase {
         XCTAssertFalse(report.isEmpty, "the gap must not vanish with the id shape")
         XCTAssertEqual(report.gaps.first?.displayName, "Alice")
         XCTAssertEqual(report.gaps.first?.videoCount, 4)
-        XCTAssertTrue(report.gaps.first!.isRecoverableByRefresh)
+        XCTAssertEqual(report.gaps.first?.isRecoverableByRefresh, true)
     }
 
     /// G2 — ⚠️ the worklist SORTS by this name, so a chopped-up uid would not
