@@ -455,7 +455,7 @@ Found by checking the v34 backfill against the initialiser rather than assuming 
 ---
 # ✅ The two studios — resolved, and the framing corrected
 The previous entry said *"two studios remain with no source id and may belong at **`unmatchable`**."* Measured on the drive library: they do not.
-Both carry `enrichment_state = matched`, `enrichment_source = the source`, an **empty-string** source id, and **no ****`entity_match`**** edge at all**. They are the only two of 468 studios in that shape.
+Both carry `enrichment_state = matched`, `enrichment_source` set to the provider's name, an **empty-string** source id, and **no ****`entity_match`**** edge at all**. They are the only two of 468 studios in that shape.
 ```javascript
 SELECT id FROM entity_profiles p LEFT JOIN entity_match m ON m.entity_id = p.id
 WHERE p.enrichment_state='matched'
