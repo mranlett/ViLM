@@ -13,15 +13,13 @@ final class AgeAtReleaseFilterTests: XCTestCase {
               tags: actors.map { "actor:\($0)" }, releaseDate: released)
     }
 
-    private func profiles(_ entries: [(String, String?, Int?)]) -> [String: EntityProfile] {
-        var out: [String: EntityProfile] = [:]
-        for (name, birthDate, birthYear) in entries {
+    private func profiles(_ entries: [(String, String?, Int?)]) -> EntityProfileIndex {
+        EntityProfileIndex(entries.map { name, birthDate, birthYear in
             var p = EntityProfile(id: "actor:\(name)")
             p.birthDate = birthDate
             p.birthYear = birthYear
-            out["actor:\(name)"] = p
-        }
-        return out
+            return p
+        })
     }
 
     private func criteria(min: Int? = nil, max: Int? = nil) -> AssetFilterCriteria {
@@ -32,7 +30,7 @@ final class AgeAtReleaseFilterTests: XCTestCase {
     }
 
     private func matches(_ c: AssetFilterCriteria, _ a: Asset,
-                         _ p: [String: EntityProfile]) -> Bool {
+                         _ p: EntityProfileIndex) -> Bool {
         c.matches(a, mappedActors: Set(a.actors), entityProfiles: p)
     }
 
@@ -107,7 +105,7 @@ final class AgeAtReleaseFilterTests: XCTestCase {
     }
 
     func testAVideoWithNoCreditedPerformersDoesNotMatch() {
-        XCTAssertFalse(matches(criteria(min: 18), asset("2020-06-01", actors: []), [:]))
+        XCTAssertFalse(matches(criteria(min: 18), asset("2020-06-01", actors: []), .empty))
     }
 
     // MARK: - Several performers
@@ -127,7 +125,7 @@ final class AgeAtReleaseFilterTests: XCTestCase {
 
     func testAnUnsetAgeFilterIsEmptyAndMatchesEverything() {
         XCTAssertTrue(AssetFilterCriteria().isEmpty)
-        XCTAssertTrue(matches(AssetFilterCriteria(), asset(nil), [:]))
+        XCTAssertTrue(matches(AssetFilterCriteria(), asset(nil), .empty))
     }
 
     func testAnAgeFilterMakesTheCriteriaNonEmpty() {

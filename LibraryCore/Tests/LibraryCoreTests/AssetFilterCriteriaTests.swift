@@ -22,7 +22,7 @@ final class AssetFilterCriteriaTests: XCTestCase {
         _ criteria: AssetFilterCriteria,
         _ asset: Asset,
         akaMap: [String: String] = [:],
-        profiles: [String: EntityProfile] = [:]
+        profiles: EntityProfileIndex = .empty
     ) -> Bool {
         let mapped = AssetFilterCriteria.mappedActors(for: asset, akaMap: akaMap)
         return criteria.matches(asset, mappedActors: mapped, entityProfiles: profiles)
@@ -154,17 +154,17 @@ final class AssetFilterCriteriaTests: XCTestCase {
         var criteria = AssetFilterCriteria()
         criteria.actorHairColorsLogic = .or
         criteria.selectedActorHairColors = ["Blonde"]
-        let profiles = ["actor:Jane": EntityProfile(id: "actor:Jane", hairColor: "Blonde")]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jane", hairColor: "Blonde")])
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane"]), profiles: profiles))
         XCTAssertFalse(matches(criteria, asset(tags: ["actor:Jane"]),
-                               profiles: ["actor:Jane": EntityProfile(id: "actor:Jane", hairColor: "Brown")]))
+                               profiles: EntityProfileIndex([EntityProfile(id: "actor:Jane", hairColor: "Brown")])))
     }
 
     func testActorMetadataCommaSeparatedValuesAreSplit() {
         var criteria = AssetFilterCriteria()
         criteria.selectedActorGenders = ["Female"]
         // One profile lists two genders comma-separated; the "Female" token must match.
-        let profiles = ["actor:Jamie": EntityProfile(id: "actor:Jamie", gender: "Male, Female")]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jamie", gender: "Male, Female")])
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jamie"]), profiles: profiles))
     }
 
@@ -174,10 +174,7 @@ final class AssetFilterCriteriaTests: XCTestCase {
         criteria.selectedActorHairColors = ["Blonde", "Brown"]
         // Two actors between them cover both colors → AND is satisfied at the
         // video level (not required per-actor).
-        let profiles = [
-            "actor:Jane": EntityProfile(id: "actor:Jane", hairColor: "Blonde"),
-            "actor:John": EntityProfile(id: "actor:John", hairColor: "Brown")
-        ]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jane", hairColor: "Blonde"), EntityProfile(id: "actor:John", hairColor: "Brown")])
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane", "actor:John"]), profiles: profiles))
         XCTAssertFalse(matches(criteria, asset(tags: ["actor:Jane"]), profiles: profiles),
                        "one Blonde actor can't satisfy an AND that also requires Brown")
@@ -186,10 +183,10 @@ final class AssetFilterCriteriaTests: XCTestCase {
     func testActorTagsFilterMatchesThroughProfileTags() {
         var criteria = AssetFilterCriteria()
         criteria.selectedActorTags = ["tag:Lead"]
-        let profiles = ["actor:Jane": EntityProfile(id: "actor:Jane", tags: ["tag:Lead"])]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jane", tags: ["tag:Lead"])])
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane"]), profiles: profiles))
         XCTAssertFalse(matches(criteria, asset(tags: ["actor:Jane"]),
-                               profiles: ["actor:Jane": EntityProfile(id: "actor:Jane", tags: ["tag:Extra"])]))
+                               profiles: EntityProfileIndex([EntityProfile(id: "actor:Jane", tags: ["tag:Extra"])])))
     }
 
     // MARK: - Minimum actor rating (matched through featured actors' profiles)
@@ -197,25 +194,22 @@ final class AssetFilterCriteriaTests: XCTestCase {
     func testMinActorRatingMatchesWhenAnyFeaturedActorQualifies() {
         var criteria = AssetFilterCriteria()
         criteria.minActorRating = 4
-        let profiles = [
-            "actor:Jane": EntityProfile(id: "actor:Jane", rating: 5),
-            "actor:John": EntityProfile(id: "actor:John", rating: 2)
-        ]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jane", rating: 5), EntityProfile(id: "actor:John", rating: 2)])
         // One qualifying actor is enough, even alongside a low-rated one.
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane", "actor:John"]), profiles: profiles))
         // Exactly at the bar counts.
         XCTAssertTrue(matches(criteria, asset(tags: ["actor:Jane"]),
-                              profiles: ["actor:Jane": EntityProfile(id: "actor:Jane", rating: 4)]))
+                              profiles: EntityProfileIndex([EntityProfile(id: "actor:Jane", rating: 4)])))
     }
 
     func testMinActorRatingRejectsLowRatedUnratedAndUnprofiled() {
         var criteria = AssetFilterCriteria()
         criteria.minActorRating = 4
         XCTAssertFalse(matches(criteria, asset(tags: ["actor:John"]),
-                               profiles: ["actor:John": EntityProfile(id: "actor:John", rating: 3)]))
+                               profiles: EntityProfileIndex([EntityProfile(id: "actor:John", rating: 3)])))
         XCTAssertFalse(matches(criteria, asset(tags: ["actor:John"]),
-                               profiles: ["actor:John": EntityProfile(id: "actor:John")]), "unrated actor doesn't qualify")
-        XCTAssertFalse(matches(criteria, asset(tags: ["actor:Nobody"]), profiles: [:]), "no profile at all doesn't qualify")
+                               profiles: EntityProfileIndex([EntityProfile(id: "actor:John")])), "unrated actor doesn't qualify")
+        XCTAssertFalse(matches(criteria, asset(tags: ["actor:Nobody"]), profiles: .empty), "no profile at all doesn't qualify")
         XCTAssertFalse(criteria.isEmpty, "an active actor-rating bar counts as a filter")
     }
 
@@ -263,7 +257,7 @@ extension AssetFilterCriteriaTests {
     private func matches(_ filter: EnrichmentFilter, _ state: EnrichmentState?) -> Bool {
         var criteria = AssetFilterCriteria()
         criteria.enrichment = filter
-        return criteria.matches(asset(state), mappedActors: [], entityProfiles: [:])
+        return criteria.matches(asset(state), mappedActors: [], entityProfiles: .empty)
     }
 
     func testAnyAcceptsEverything() {
@@ -299,7 +293,7 @@ extension AssetFilterCriteriaTests {
         criteria.reviewStatus = .unreviewed
         var video = asset(.matched)
         video.status = .reviewed
-        XCTAssertFalse(criteria.matches(video, mappedActors: [], entityProfiles: [:]),
+        XCTAssertFalse(criteria.matches(video, mappedActors: [], entityProfiles: .empty),
                        "matched but reviewed — the review filter still applies")
     }
 

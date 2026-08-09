@@ -281,20 +281,36 @@ struct FileNameParseReviewView: View {
                 // that is a known studio and a guessed actor resolves by check
                 // order rather than by confidence.
                 for profile in try store.fetchAllEntityProfiles() {
+                    // 🚨 Pooled by IDENTITY, not by id. Two libraries holding
+                    // the same performer agree on the name and — after the
+                    // re-key — disagree on the id, so an id-keyed pool would
+                    // stop recognising them as one record and the "matched
+                    // wins" rule below would never fire across libraries.
+                    // ⚠️ An empty name falls back to the id, mirroring
+                    // `EntityProfileIndex.merged`. Without that guard every
+                    // unnamed profile of one type shares a key and they
+                    // overwrite each other.
+                    let key: String
+                    if let type = profile.type, !type.isEmpty, !profile.name.isEmpty {
+                        key = NodeIdentity(type: type, displayName: profile.name).resolutionKey
+                    } else {
+                        key = profile.id
+                    }
+
                     // A name confirmed ANYWHERE is confirmed — so a matched
                     // profile always wins, whichever library it came from.
                     // First-wins would let an unmatched copy in one library
                     // shadow a matched one in another and silently drop the
                     // confirmation.
-                    if profile.enrichmentState == .matched || profiles[profile.id] == nil {
-                        profiles[profile.id] = profile
+                    if profile.enrichmentState == .matched || profiles[key] == nil {
+                        profiles[key] = profile
                     }
                 }
             }
             // Pooled across every open library. A studio known only to one of
             // them still explains a filename in the other, so pooling reads
             // MORE than scanning each alone would.
-            let vocabulary = NameVocabulary(assets: all, profiles: profiles)
+            let vocabulary = NameVocabulary(assets: all, profiles: EntityProfileIndex(Array(profiles.values)))
             assets = all
             owner = ownership
             libraryCount = libraryURLs.count

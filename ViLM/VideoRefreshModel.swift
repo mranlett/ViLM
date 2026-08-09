@@ -203,8 +203,10 @@ final class VideoRefreshModel: ObservableObject {
             // Cycles are refused by the store, and an existing parent is never
             // overruled — `setStudioParent` re-asserting the same one is a
             // no-op rather than a new period.
-            if (try? store.parentStudioId(of: "studio:\(child)")) == nil {
-                try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")
+            if let childId = try? store.entityId(named: child, type: "studio"),
+               let parentId = try? store.entityId(named: parent, type: "studio"),
+               (try? store.parentStudioId(of: childId)) == nil {
+                try? store.setStudioParent(parentId, forStudio: childId)
                 report.hierarchies += 1
             }
         }

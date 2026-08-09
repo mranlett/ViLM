@@ -16,16 +16,16 @@ final class GraphAuditTests: XCTestCase {
 
     private func profile(_ name: String = "Someone", birthDate: String? = nil,
                          birthYear: Int? = nil, start: Int? = nil,
-                         end: Int? = nil) -> [String: EntityProfile] {
+                         end: Int? = nil) -> EntityProfileIndex {
         var p = EntityProfile(id: "actor:\(name)")
         p.birthDate = birthDate
         p.birthYear = birthYear
         p.careerStartYear = start
         p.careerEndYear = end
-        return ["actor:\(name)": p]
+        return EntityProfileIndex([p])
     }
 
-    private func run(_ a: [Asset], _ p: [String: EntityProfile]) -> [GraphCheck] {
+    private func run(_ a: [Asset], _ p: EntityProfileIndex) -> [GraphCheck] {
         GraphAudit.run(GraphAudit.Input(assets: a, profiles: p))
     }
 
@@ -41,7 +41,7 @@ final class GraphAuditTests: XCTestCase {
     }
 
     func testAPerformerWithNoProfileIsNotChecked() {
-        XCTAssertTrue(run([asset("2020-06-01")], [:]).isEmpty)
+        XCTAssertTrue(run([asset("2020-06-01")], .empty).isEmpty)
     }
 
     // MARK: - 🚨 Released before birth
@@ -134,8 +134,8 @@ final class GraphAuditTests: XCTestCase {
         for _ in 0..<5 { assets.append(asset("2010-06-01", actors: ["Late"])) }
         assets.append(asset("1980-06-01", actors: ["Impossible"]))
 
-        var profiles = profile("Late", birthDate: "1990-01-01", start: 2015)
-        profiles.merge(profile("Impossible", birthDate: "1995-01-01")) { a, _ in a }
+        let profiles = EntityProfileIndex(profile("Late", birthDate: "1990-01-01", start: 2015).all
+                                          + profile("Impossible", birthDate: "1995-01-01").all)
 
         let checks = run(assets, profiles)
         XCTAssertEqual(checks.first?.kind, .releasedBeforeBirth)
@@ -160,8 +160,8 @@ final class GraphAuditTests: XCTestCase {
     /// Only the credited performer is judged, not the whole cast.
     func testOnlyTheOffendingPerformerIsReported() {
         let a = asset("2020-06-01", actors: ["Fine", "Impossible"])
-        var profiles = profile("Fine", birthDate: "1990-01-01")
-        profiles.merge(profile("Impossible", birthDate: "2025-01-01")) { x, _ in x }
+        let profiles = EntityProfileIndex(profile("Fine", birthDate: "1990-01-01").all
+                                          + profile("Impossible", birthDate: "2025-01-01").all)
 
         let checks = run([a], profiles)
         XCTAssertEqual(checks.first?.findings.map(\.performer), ["Impossible"])

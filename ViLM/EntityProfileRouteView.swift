@@ -14,7 +14,7 @@ struct EntityProfileRouteView: View {
     let assets: [Asset]
     let libraryURL: URL?
     let gridRefreshID: UUID
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     let akaMap: [String: String]
     @State private var localSelection: Set<SidebarItem>
     @State private var searchText = ""
@@ -22,7 +22,7 @@ struct EntityProfileRouteView: View {
     @State private var missingAssetIDs: Set<Asset.ID> = []
     @State private var filteredAssetContext: [Asset.ID] = []
 
-    init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID, entityProfiles: [String: EntityProfile] = [:], akaMap: [String: String] = [:]) {
+    init(category: String, name: String, assets: [Asset], libraryURL: URL?, gridRefreshID: UUID, entityProfiles: EntityProfileIndex = .empty, akaMap: [String: String] = [:]) {
         self.category = category
         self.name = name
         self.assets = assets

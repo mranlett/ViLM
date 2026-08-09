@@ -144,7 +144,7 @@ extension AssetFilterCriteria {
     public func matches(
         _ asset: Asset,
         mappedActors: Set<String>,
-        entityProfiles: [String: EntityProfile]
+        entityProfiles: EntityProfileIndex
     ) -> Bool {
         // Review status
         switch reviewStatus {
@@ -204,7 +204,7 @@ extension AssetFilterCriteria {
         // together — the first filter here that no single record can answer.
         if minAgeAtRelease != nil || maxAgeAtRelease != nil {
             let ages = mappedActors.compactMap { name in
-                entityProfiles["actor:\(name)"].flatMap {
+                entityProfiles[actor: name].flatMap {
                     AgeAtReleaseCalculator.age(of: $0, at: asset.releaseDate)
                 }
             }
@@ -216,7 +216,7 @@ extension AssetFilterCriteria {
 
         // Actor-metadata filters match a video through the profiles of the
         // actors appearing in it. Each specified set must pass.
-        let assetActorProfiles = mappedActors.compactMap { entityProfiles["actor:\($0)"] }
+        let assetActorProfiles = mappedActors.compactMap { entityProfiles[actor: $0] }
 
         if !selectedActorTags.isEmpty {
             let allTagsInVideo = Set(assetActorProfiles.flatMap { $0.tags })

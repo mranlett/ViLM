@@ -156,23 +156,25 @@ public enum StudioAudit {
     /// tedious to reproduce in a real library and trivial to state as data.
     public struct Input: Sendable {
         public let assets: [Asset]
-        /// Every `entity_profiles` id, of every kind.
-        public let profileIds: Set<String>
-        /// Studio ids whose `enrichmentState` is `.matched`.
-        public let confirmedStudioIds: Set<String>
+        /// The library's profiles, reached by NAME.
+        ///
+        /// 🚨 Was two sets of ids (`profileIds`, `confirmedStudioIds`), tested
+        /// with `contains("studio:\(name)")`. Every one of those tests goes
+        /// false the moment ids stop encoding names — so a re-keyed library
+        /// would report every studio as having no profile and none as
+        /// confirmed, i.e. the audit would invent hundreds of defects.
+        public let profiles: EntityProfileIndex
         /// The `video_studio` edge, by video.
         public let studioIdByVideo: [UUID: String]
         /// The `studio_parent` edge: `from` is the imprint, `to` the network.
         public let parentPairs: [GraphEdgePair]
 
         public init(assets: [Asset],
-                    profileIds: Set<String>,
-                    confirmedStudioIds: Set<String>,
+                    profiles: EntityProfileIndex,
                     studioIdByVideo: [UUID: String],
                     parentPairs: [GraphEdgePair]) {
             self.assets = assets
-            self.profileIds = profileIds
-            self.confirmedStudioIds = confirmedStudioIds
+            self.profiles = profiles
             self.studioIdByVideo = studioIdByVideo
             self.parentPairs = parentPairs
         }
@@ -248,7 +250,7 @@ public enum StudioAudit {
         for asset in input.assets {
             let studios = Set(asset.studios.filter { !$0.isEmpty })
             guard studios.count == 1, let name = studios.first else { continue }
-            guard input.profileIds.contains("studio:\(name)") else { continue }
+            guard input.profiles[studio: name] != nil else { continue }
             if input.studioIdByVideo[asset.id] == nil {
                 byStudio[name, default: 0] += 1
             }
@@ -263,7 +265,15 @@ public enum StudioAudit {
             let studios = Set(asset.studios.filter { !$0.isEmpty })
             guard studios.count == 1, let name = studios.first else { continue }
             guard let edge = input.studioIdByVideo[asset.id] else { continue }
-            if edge != "studio:\(name)" {
+            // The edge holds a LOCAL id; compare it to the id the name
+            // resolves to, never to a name-form string.
+            //
+            // ⚠️ A name with NO profile is skipped rather than counted. It is
+            // already reported by `missingProfiles`, and treating the absent
+            // id as a disagreement would report the same studio twice — once
+            // truthfully and once as an edge fault it does not have.
+            guard let expected = input.profiles[studio: name]?.id else { continue }
+            if edge != expected {
                 byStudio[name, default: 0] += 1
             }
         }
@@ -274,7 +284,7 @@ public enum StudioAudit {
         var counts: [String: Int] = [:]
         for asset in input.assets {
             for name in Set(asset.studios) where !name.isEmpty {
-                guard !input.profileIds.contains("studio:\(name)") else { continue }
+                guard input.profiles[studio: name] == nil else { continue }
                 counts[name, default: 0] += 1
             }
         }
@@ -285,7 +295,7 @@ public enum StudioAudit {
         var counts: [String: Int] = [:]
         for asset in input.assets {
             for name in Set(asset.studios) where !name.isEmpty {
-                guard !input.confirmedStudioIds.contains("studio:\(name)") else { continue }
+                guard input.profiles[studio: name]?.enrichmentState != .matched else { continue }
                 counts[name, default: 0] += 1
             }
         }
@@ -294,10 +304,10 @@ public enum StudioAudit {
 
     /// A studio profile nothing is filed under.
     static func orphanProfiles(_ input: Input) -> StudioCheck {
-        let inUse = Set(allStudioNames(input).map { "studio:\($0)" })
-        let items = input.profileIds
-            .filter { $0.hasPrefix("studio:") && !inUse.contains($0) }
-            .map { String($0.dropFirst(7)) }
+        let inUse = allStudioNames(input)
+        let items = input.profiles.studios
+            .map(\.name)
+            .filter { !inUse.contains($0) }
             .sorted()
         return StudioCheck(kind: .orphanProfile, items: items)
     }
@@ -305,7 +315,7 @@ public enum StudioAudit {
     /// A `studio_parent` row pointing at a network with no profile.
     static func danglingParents(_ input: Input) -> StudioCheck {
         let items = Set(input.parentPairs.map(\.to))
-            .filter { !input.profileIds.contains($0) }
+            .filter { input.profiles.profile(id: $0) == nil }
             .map(displayName)
             .sorted()
         return StudioCheck(kind: .danglingParent, items: items)

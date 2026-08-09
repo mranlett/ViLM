@@ -31,7 +31,7 @@ public struct QuickActionPicker {
     public func pick(
         _ action: QuickAction,
         assets: [Asset],
-        entityProfiles: [String: EntityProfile],
+        entityProfiles: EntityProfileIndex,
         akaMap: [String: String],
         now: Date = Date(),
         using rng: inout some RandomNumberGenerator
@@ -113,7 +113,7 @@ public struct QuickActionPicker {
     // MARK: - Discover Mix
 
     private func pickDiscoverMix(
-        assets: [Asset], entityProfiles: [String: EntityProfile], akaMap: [String: String],
+        assets: [Asset], entityProfiles: EntityProfileIndex, akaMap: [String: String],
         using rng: inout some RandomNumberGenerator
     ) -> QuickActionResult {
         let filmTags = Set(assets.flatMap { $0.actions }).sorted()
@@ -121,7 +121,7 @@ public struct QuickActionPicker {
 
         let actorTags = Set(assets.flatMap { asset in
             AssetFilterCriteria.mappedActors(for: asset, akaMap: akaMap)
-                .compactMap { entityProfiles["actor:\($0)"] }
+                .compactMap { entityProfiles[actor: $0] }
                 .flatMap { $0.tags }
         }).sorted()
 

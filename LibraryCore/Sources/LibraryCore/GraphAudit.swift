@@ -138,10 +138,10 @@ public enum GraphAudit {
     /// Everything the audit needs, gathered by the caller.
     public struct Input: Sendable {
         public let assets: [Asset]
-        /// Performer profiles keyed by `"actor:<name>"`.
-        public let profiles: [String: EntityProfile]
+        /// The library's profiles, reached by name through the index.
+        public let profiles: EntityProfileIndex
 
-        public init(assets: [Asset], profiles: [String: EntityProfile]) {
+        public init(assets: [Asset], profiles: EntityProfileIndex) {
             self.assets = assets
             self.profiles = profiles
         }
@@ -189,7 +189,7 @@ public enum GraphAudit {
                   let releaseYear = year(of: released) else { continue }
 
             for name in Set(asset.actors) {
-                guard let profile = input.profiles["actor:\(name)"] else { continue }
+                guard let profile = input.profiles[actor: name] else { continue }
 
                 // 🚨 Certain. Checked FIRST and independently of the age
                 // calculator, which deliberately returns nil here — so this is

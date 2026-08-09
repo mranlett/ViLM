@@ -216,10 +216,30 @@ final class LibrarySession: ObservableObject {
         profilePresence = map
     }
 
+    /// Every library holding this profile, in precedence order.
+    ///
+    /// 🚨 Tries the id first, then the node's IDENTITY. Callers reach these
+    /// methods with a name-form id they built themselves (`"actor:\(name)"`),
+    /// and after the re-key that matches no uid — so an id-only lookup would
+    /// miss every time, `url(forProfile:)` would fall back to the primary
+    /// library, and an attachment's profile would be written into the wrong
+    /// catalogue with nothing reporting it.
+    ///
+    /// ⚠️ Both forms are recorded by `ContentView.loadEntityProfiles`, so this
+    /// resolves whether it is handed a uid or a legacy name-form id.
+    private func libraries(holdingProfile id: String) -> [URL] {
+        if let direct = profilePresence[id] { return direct }
+        if let identity = NodeIdentity.parse(id),
+           let byIdentity = profilePresence[identity.resolutionKey] {
+            return byIdentity
+        }
+        return []
+    }
+
     /// The library that owns writes for this profile: the highest-precedence
     /// open library that has it, or the primary for a brand-new profile.
     func url(forProfile id: String) -> URL? {
-        profilePresence[id]?.first ?? primaryURL
+        libraries(holdingProfile: id).first ?? primaryURL
     }
 
     func store(forProfile id: String) throws -> LibraryStore {
@@ -230,7 +250,7 @@ final class LibrarySession: ObservableObject {
     /// Open libraries (beyond the owner) that also contain this profile —
     /// what the editor's "edits apply to …" note is based on.
     func otherLibraries(containingProfile id: String) -> [URL] {
-        Array((profilePresence[id] ?? []).dropFirst())
+        Array(libraries(holdingProfile: id).dropFirst())
     }
 
     /// Every open library's profile-photo directory, in precedence order.

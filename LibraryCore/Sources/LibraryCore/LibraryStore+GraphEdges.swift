@@ -315,13 +315,9 @@ extension LibraryStore {
     /// entire, and asking them per record is what made an earlier version of
     /// `promoteStudioProfiles` unusable with the external drive attached.
     public func auditStudios() throws -> [StudioCheck] {
-        let profiles = try fetchAllEntityProfiles()
         return StudioAudit.run(StudioAudit.Input(
             assets: try fetchAllAssets(),
-            profileIds: Set(profiles.map(\.id)),
-            confirmedStudioIds: Set(profiles
-                .filter { $0.id.hasPrefix("studio:") && $0.enrichmentState == .matched }
-                .map(\.id)),
+            profiles: EntityProfileIndex(try fetchAllEntityProfiles()),
             studioIdByVideo: try studioIdsByVideo(),
             parentPairs: try studioParentPairs()))
     }
@@ -332,10 +328,9 @@ extension LibraryStore {
     /// library entire, and asking them per record is what made an earlier
     /// version of `promoteStudioProfiles` unusable with the drive attached.
     public func auditGraph() throws -> [GraphCheck] {
-        let profiles = try fetchAllEntityProfiles()
         return GraphAudit.run(GraphAudit.Input(
             assets: try fetchAllAssets(),
-            profiles: Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })))
+            profiles: EntityProfileIndex(try fetchAllEntityProfiles())))
     }
 
     public func tagIds(forVideo videoId: UUID) throws -> [String] {

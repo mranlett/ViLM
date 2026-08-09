@@ -16,18 +16,22 @@ public enum ActorVideoCounts {
     /// credits any name on their AKA list. An asset that does both counts once —
     /// this counts assets, not name matches.
     ///
-    /// - Parameter profiles: keyed as `"actor:Name"`, matching `EntityProfile.id`.
-    ///   Only the AKA lists are read; an actor with no profile row still counts
-    ///   by name.
+    /// - Parameter profiles: the library's profiles. Only actors' AKA lists are
+    ///   read; an actor with no profile row still counts by name.
     public static func build(assets: [Asset],
-                             profiles: [String: EntityProfile]) -> [String: Int] {
+                             profiles: EntityProfileIndex) -> [String: Int] {
 
         // aka -> the actors who list it. Several actors may list the same alias,
         // so the value is a set rather than a single owner.
+        //
+        // ⭐ Three separate id assumptions used to live in this loop: filtering
+        // by `hasPrefix("actor:")`, deriving the canonical name with
+        // `dropFirst`, and iterating a dictionary keyed by id. After the re-key
+        // the filter matches nothing, so the whole AKA map would come out empty
+        // and every alias would silently stop crediting its owner.
         var akaOwners: [String: Set<String>] = [:]
-        for (key, profile) in profiles {
-            guard key.hasPrefix(prefix) else { continue }
-            let canonical = String(key.dropFirst(prefix.count))
+        for profile in profiles.actors {
+            let canonical = profile.name
             for aka in profile.akas where !aka.isEmpty {
                 akaOwners[aka, default: []].insert(canonical)
             }
@@ -47,8 +51,6 @@ public enum ActorVideoCounts {
         return counts
     }
 
-    private static let prefix = "actor:"
-
     /// The previous per-actor computation, kept so a test can assert the fast
     /// path agrees with it.
     ///
@@ -57,8 +59,8 @@ public enum ActorVideoCounts {
     /// exists to be the oracle, not the implementation.
     static func referenceCount(for actor: String,
                                assets: [Asset],
-                               profiles: [String: EntityProfile]) -> Int {
-        let akas = Set(profiles[prefix + actor]?.akas ?? [])
+                               profiles: EntityProfileIndex) -> Int {
+        let akas = Set(profiles[actor: actor]?.akas ?? [])
         return assets.filter { asset in
             if asset.actors.contains(actor) { return true }
             return !Set(asset.actors).isDisjoint(with: akas)

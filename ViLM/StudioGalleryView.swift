@@ -17,7 +17,7 @@ struct StudioGalleryView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     let libraryURL: URL?
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     var onPullToRefresh: () async -> Void = {}
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
@@ -48,7 +48,7 @@ struct StudioGalleryView: View {
     }
 
     private var unconfirmedCount: Int {
-        allStudios.filter { entityProfiles["studio:\($0)"]?.enrichmentState != .matched }.count
+        allStudios.filter { entityProfiles[studio: $0]?.enrichmentState != .matched }.count
     }
 
     var body: some View {
@@ -122,7 +122,7 @@ struct StudioGalleryView: View {
         let card = StudioGalleryItemView(
             name: studio,
             count: studioCounts[studio] ?? 0,
-            isConfirmed: entityProfiles["studio:\(studio)"]?.enrichmentState == .matched)
+            isConfirmed: entityProfiles[studio: studio]?.enrichmentState == .matched)
 
         if usesStackNavigation {
             NavigationLink(value: AppRoute.entityProfile(category: "studio", name: studio)) {

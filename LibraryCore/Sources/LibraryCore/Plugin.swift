@@ -168,9 +168,9 @@ public struct PerformerIdentity: Equatable, Sendable {
     /// Builds identities from the library's own profiles, so a search carries
     /// what previous matching established.
     public static func from(names: [String],
-                            profiles: [String: EntityProfile]) -> [PerformerIdentity] {
+                            profiles: EntityProfileIndex) -> [PerformerIdentity] {
         names.map { name in
-            let profile = profiles["actor:\(name)"] ?? profiles[name]
+            let profile = profiles[actor: name]
             return PerformerIdentity(name: name,
                                      birthDate: profile?.birthDate,
                                      sourceId: profile?.enrichmentSourceId)

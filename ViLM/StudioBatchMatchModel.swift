@@ -273,10 +273,13 @@ final class StudioBatchMatchModel: ObservableObject {
     /// the defects Studio Health reports.
     private func recordParent(_ name: String, sourceId: String?,
                               for studioId: String, in store: LibraryStore) {
-        let parentId = "studio:\(name)"
-        let isNew = (try? store.fetchEntityProfile(for: parentId)) ?? nil == nil
+        let isNew = ((try? store.fetchEntityProfile(named: name, type: "studio")) ?? nil) == nil
         try? store.confirmStudio(name, source: providerName, sourceId: sourceId)
-        try? store.setStudioParent(parentId, forStudio: studioId)
+        // ⚠️ Resolved AFTER the confirm, which is what creates the row when it
+        // is new — asking before would find nothing and skip the hierarchy.
+        if let parentId = try? store.entityId(named: name, type: "studio") {
+            try? store.setStudioParent(parentId, forStudio: studioId)
+        }
         if isNew, !networksDiscovered.contains(name) { networksDiscovered.append(name) }
     }
 

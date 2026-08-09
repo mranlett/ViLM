@@ -31,7 +31,7 @@ struct TagGalleryView: View {
     let libraryURL: URL?
     // Loaded once at the ContentView level and shared across every screen
     // that needs entity profiles, instead of re-fetching independently here.
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     var onPullToRefresh: () async -> Void = {}
 
     @State private var alphaFilter: Character? = nil
@@ -55,8 +55,12 @@ struct TagGalleryView: View {
     }
 
     private func recomputeTags() {
-        let tagProfiles = entityProfiles.filter { $0.key.hasPrefix("tag:") }
-        let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
+        // ⭐ Grouped by the type column. `asset.tags` below still uses the
+        // "tag:" string prefix, and correctly so — those are the tag-string
+        // namespace on a video, which the re-key does not touch. Only profile
+        // ids stop carrying their type.
+        let tagProfiles = entityProfiles.tags
+        let actorProfiles = entityProfiles.actors
 
         // Two spellings of one tag are one tag. Without this the gallery
         // renders them as separate cards with separate counts, which is what
@@ -71,8 +75,8 @@ struct TagGalleryView: View {
                 occurrences.append(String(tag.dropFirst(4)))
             }
         }
-        for profile in actorProfiles.values { occurrences.append(contentsOf: profile.tags) }
-        for key in tagProfiles.keys { occurrences.append(String(key.dropFirst(4))) }
+        for profile in actorProfiles { occurrences.append(contentsOf: profile.tags) }
+        for profile in tagProfiles { occurrences.append(profile.name) }
 
         let canonical = TagVocabulary.canonicalSpellings(occurrences, preferring: tagVocabulary)
         func display(_ name: String) -> String { canonical[name] ?? name }
@@ -83,12 +87,12 @@ struct TagGalleryView: View {
                 filmTagSet.insert(display(String(tag.dropFirst(4))))
             }
         }
-        for key in tagProfiles.keys {
-            filmTagSet.insert(display(String(key.dropFirst(4))))
+        for profile in tagProfiles {
+            filmTagSet.insert(display(profile.name))
         }
 
         var actorTagSet = Set<String>()
-        for profile in actorProfiles.values {
+        for profile in actorProfiles {
             actorTagSet.formUnion(profile.tags.map(display))
         }
 
@@ -111,7 +115,7 @@ struct TagGalleryView: View {
                 matchedNames.insert(display(String(tag.dropFirst(4))))
             }
             for actor in asset.actors {
-                if let profile = actorProfiles["actor:\(actor)"] {
+                if let profile = entityProfiles[actor: actor] {
                     matchedNames.formUnion(profile.tags.map(display))
                 }
             }

@@ -9,7 +9,16 @@ import LibraryCore
 struct FilterBuilderView: View {
     let assets: [Asset]
     @Binding var criteria: AssetFilterCriteria
-    let actorProfiles: [String: EntityProfile]
+    /// ⚠️ Named `actorProfiles`, but BOTH callers pass the whole profile set —
+    /// studios and tags included. So these lists have always been built from
+    /// every profile, not just actors.
+    ///
+    /// `.all` is used below to preserve that exactly. Narrowing to `.actors`
+    /// is probably the correct behaviour and is visibly tempting here, but it
+    /// would change what the filter offers, and a behaviour change smuggled in
+    /// under an identity migration is the hardest kind to notice afterwards.
+    /// Worth its own change.
+    let actorProfiles: EntityProfileIndex
     @Environment(\.dismiss) private var dismiss
     
     @AppStorage("defaultAssetFiltersStr") private var defaultFilterCriteriaStr: String = ""
@@ -72,22 +81,22 @@ struct FilterBuilderView: View {
     }
     
     var allUniqueActorTags: [String] {
-        let tagsSet = Set(actorProfiles.values.flatMap { $0.tags })
+        let tagsSet = Set(actorProfiles.all.flatMap { $0.tags })
         return Array(tagsSet).sorted()
     }
     
     var allUniqueActorHairColors: [String] {
-        let colorsSet = Set(actorProfiles.values.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let colorsSet = Set(actorProfiles.all.compactMap { $0.hairColor }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         return Array(colorsSet).sorted()
     }
     
     var allUniqueActorGenders: [String] {
-        let gendersSet = Set(actorProfiles.values.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let gendersSet = Set(actorProfiles.all.compactMap { $0.gender }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         return Array(gendersSet).sorted()
     }
     
     var allUniqueActorCountries: [String] {
-        let countriesSet = Set(actorProfiles.values.compactMap { $0.countryOfOrigin }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let countriesSet = Set(actorProfiles.all.compactMap { $0.countryOfOrigin }.flatMap { $0.components(separatedBy: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         return Array(countriesSet).sorted()
     }
     

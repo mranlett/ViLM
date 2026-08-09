@@ -120,10 +120,10 @@ final class LookupRouteFilterTests: XCTestCase {
         var quickPile = AssetFilterCriteria()
         quickPile.enrichment = .ambiguous
         quickPile.lookupRoute = .fingerprint
-        XCTAssertTrue(quickPile.matches(asset, mappedActors: [], entityProfiles: [:]))
+        XCTAssertTrue(quickPile.matches(asset, mappedActors: [], entityProfiles: .empty))
 
         var investigations = quickPile
         investigations.lookupRoute = .title
-        XCTAssertFalse(investigations.matches(asset, mappedActors: [], entityProfiles: [:]))
+        XCTAssertFalse(investigations.matches(asset, mappedActors: [], entityProfiles: .empty))
     }
 }

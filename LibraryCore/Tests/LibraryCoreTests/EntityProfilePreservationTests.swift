@@ -247,7 +247,7 @@ extension EntityProfilePreservationTests {
         profile.enrichmentSourceId = "f0640c6c"
 
         let identities = PerformerIdentity.from(names: ["Robin Vale", "Someone Unknown"],
-                                                profiles: [profile.id: profile])
+                                                profiles: EntityProfileIndex([profile]))
         XCTAssertEqual(identities[0].birthDate, "1997-09-20")
         XCTAssertEqual(identities[0].sourceId, "f0640c6c")
         XCTAssertNil(identities[1].birthDate, "nothing known, nothing invented")

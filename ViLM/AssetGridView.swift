@@ -47,7 +47,7 @@ struct AssetsGridView: View {
     // Loaded once at the ContentView level and shared across every screen
     // that needs entity profiles, instead of each screen independently
     // re-fetching the same data on its own `.onAppear`.
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     let akaMap: [String: String]
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
@@ -153,7 +153,7 @@ struct AssetsGridView: View {
     private struct RecomputeSignature: Equatable {
         let inputs: FilterInputs
         let assets: [Asset]
-        let entityProfiles: [String: EntityProfile]
+        let entityProfiles: EntityProfileIndex
         let akaMap: [String: String]
         let fileSizes: [Asset.ID: Int64]?
     }
@@ -187,6 +187,31 @@ struct AssetsGridView: View {
             : max(0, computeFilteredAssets(applyingCriteria: false).count - displayedAssets.count)
     }
 
+    /// The View Options menu, lifted out of the toolbar builder.
+    ///
+    /// ⚠️ Extracted for the type-checker, not for tidiness. Inline, this
+    /// expression exceeded the solver's budget — it had simply never been
+    /// reached before, because a type error earlier in the file stopped
+    /// compilation first. Identical content; no behaviour change.
+    @ViewBuilder
+    private var viewOptionsMenuContent: some View {
+        Picker("Preview", selection: $gridStyle) {
+            Label("Poster frame", systemImage: "photo").tag(GridStyle.singleFrame)
+            Label("Contact sheet", systemImage: "square.grid.3x3").tag(GridStyle.contactSheet)
+        }
+        Divider()
+        Picker("Columns", selection: $gridColumnCount) {
+            Text("Auto").tag(0)
+            Text("1 per row").tag(1)
+            Text("2 per row").tag(2)
+            Text("3 per row").tag(3)
+        }
+        Divider()
+        Button(action: { isShowingHelp = true }) {
+            Label("Help", systemImage: "questionmark.circle")
+        }
+    }
+
     /// - Parameter applyingCriteria: pass `false` to skip the persisted filter
     ///   model and get what this page WOULD show without it. Used to report how
     ///   many items a filter is hiding, so an empty page is never silent.
@@ -215,7 +240,7 @@ struct AssetsGridView: View {
                         return true
                     }
                     return mappedActors(for: asset).contains { actor in
-                        entityProfiles["actor:\(actor)"]?.tags
+                        entityProfiles[actor: actor]?.tags
                             .contains { TagNormalizer.identityKey($0) == wanted } ?? false
                     }
                 case .studio(let name): return asset.tags.contains("studio:\(name)")
@@ -392,7 +417,7 @@ struct AssetsGridView: View {
                     actorNavigationWrapper(for: actor) {
                         ActorGridItemView(
                             actor: actor,
-                            profile: entityProfiles["actor:\(actor)"],
+                            profile: entityProfiles[actor: actor],
                             assetsCount: matchingActorsCount(for: actor),
                             isSelected: false,
                             libraryURL: libraryURL
@@ -572,8 +597,59 @@ struct AssetsGridView: View {
         }
     }
 
+    /// "N actors" or "N items", depending on what the page is showing.
+    ///
+    /// ⚠️ Lifted out of `body` for the type-checker: a ternary whose branches
+    /// are both string interpolations is among the most expensive shapes to
+    /// solve inline, and `body` here is a long enough modifier chain to be at
+    /// the budget already. No behaviour change.
+    private var navigationSubtitleText: String {
+        if isFiltered && resultViewMode == .actors {
+            return "\(matchingActors.count) actors"
+        }
+        return "\(displayedAssets.count) items"
+    }
+
     // MARK: - Body
     var body: some View {
+        chromeContent
+        .sheet(isPresented: $isShowingFilterBuilder) {
+            FilterBuilderView(assets: assets, criteria: $filterCriteria,
+                              actorProfiles: entityProfiles)
+        }
+        .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
+        .sheet(isPresented: $isShowingHelp) {
+            HelpView(initialTopicID: currentHelpTopicID)
+        }
+        .alert("Save Smart Collection", isPresented: $isShowingSaveCollection) {
+            TextField("Collection Name", text: $newCollectionName)
+            Button("Cancel", role: .cancel) { newCollectionName = "" }
+            Button("Save") {
+                saveSmartCollection()
+            }
+        } message: {
+            Text("Enter a name for this smart collection.")
+        }
+        // File sizes are only used for size-sorting. Reading attributes for
+        // the whole library on the main actor stalls the UI (badly on
+        // network/USB volumes), so only load when size sort is active and do
+        // the I/O off the main thread.
+        .task(id: FileSizeTrigger(assetCount: assets.count, sortBySize: sortOption == .size)) {
+            guard sortOption == .size, !assets.isEmpty else { return }
+            fileSizes = await loadFileSizes()
+        }
+    }
+
+    /// The grid plus its navigation chrome, split from the presentation
+    /// modifiers in `body`.
+    ///
+    /// ⚠️ Split for the type-checker, not for tidiness. `body` was one
+    /// ~150-line modifier chain that the solver could just about handle until
+    /// anything else in the file grew, at which point it failed with "unable
+    /// to type-check in reasonable time" pointing at whichever line it gave up
+    /// on rather than the real cause. No behaviour change — the modifiers
+    /// apply in exactly the same order.
+    private var chromeContent: some View {
         stateManagedContent
 #if os(macOS)
         // Escape clears the current video selection. Hidden button rather
@@ -587,7 +663,7 @@ struct AssetsGridView: View {
         )
 #endif
         .navigationTitle(sidebarSelectionTitle)
-        .navigationSubtitle(isFiltered && resultViewMode == .actors ? "\(matchingActors.count) actors" : "\(displayedAssets.count) items")
+        .navigationSubtitle(navigationSubtitleText)
         .searchableIfProvided(providesSearchField, text: $searchText,
                               prompt: "Search title, actor, tag, studio, notes…")
 #if os(iOS)
@@ -637,21 +713,7 @@ struct AssetsGridView: View {
                     }
 
                     Menu {
-                        Picker("Preview", selection: $gridStyle) {
-                            Label("Poster frame", systemImage: "photo").tag(GridStyle.singleFrame)
-                            Label("Contact sheet", systemImage: "square.grid.3x3").tag(GridStyle.contactSheet)
-                        }
-                        Divider()
-                        Picker("Columns", selection: $gridColumnCount) {
-                            Text("Auto").tag(0)
-                            Text("1 per row").tag(1)
-                            Text("2 per row").tag(2)
-                            Text("3 per row").tag(3)
-                        }
-                        Divider()
-                        Button(action: { isShowingHelp = true }) {
-                            Label("Help", systemImage: "questionmark.circle")
-                        }
+                        viewOptionsMenuContent
                     } label: {
                         Label("View Options", systemImage: "square.grid.2x2")
                     }
@@ -707,43 +769,29 @@ struct AssetsGridView: View {
             }
 #endif
         }
-        .sheet(isPresented: $isShowingFilterBuilder) {
-            FilterBuilderView(assets: assets, criteria: $filterCriteria, actorProfiles: entityProfiles)
+    }
+
+    /// Reads every visible file's size off the main thread.
+    ///
+    /// ⚠️ Lifted out of the `.task` modifier for the type-checker, not for
+    /// tidiness — see `viewOptionsMenuContent`. Same work, same actor hops:
+    /// the paths are gathered on the main actor because `LibrarySession` is
+    /// main-actor state, and only the attribute reads are detached.
+    @MainActor
+    private func loadFileSizes() async -> [Asset.ID: Int64] {
+        let paths: [(Asset.ID, String)] = assets.compactMap { asset in
+            LibrarySession.shared.videoURL(for: asset).map { (asset.id, $0.path) }
         }
-        .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
-        .sheet(isPresented: $isShowingHelp) {
-            HelpView(initialTopicID: currentHelpTopicID)
-        }
-        .alert("Save Smart Collection", isPresented: $isShowingSaveCollection) {
-            TextField("Collection Name", text: $newCollectionName)
-            Button("Cancel", role: .cancel) { newCollectionName = "" }
-            Button("Save") {
-                saveSmartCollection()
-            }
-        } message: {
-            Text("Enter a name for this smart collection.")
-        }
-        // File sizes are only used for size-sorting. Reading attributes for
-        // the whole library on the main actor stalls the UI (badly on
-        // network/USB volumes), so only load when size sort is active and do
-        // the I/O off the main thread.
-        .task(id: FileSizeTrigger(assetCount: assets.count, sortBySize: sortOption == .size)) {
-            guard sortOption == .size, !assets.isEmpty else { return }
-            let paths: [(Asset.ID, String)] = assets.compactMap { asset in
-                LibrarySession.shared.videoURL(for: asset).map { (asset.id, $0.path) }
-            }
-            let newSizes = await Task.detached(priority: .utility) {
-                var sizes: [Asset.ID: Int64] = [:]
-                for (id, path) in paths {
-                    if let attr = try? FileManager.default.attributesOfItem(atPath: path),
-                       let size = attr[.size] as? Int64 {
-                        sizes[id] = size
-                    }
+        return await Task.detached(priority: .utility) {
+            var sizes: [Asset.ID: Int64] = [:]
+            for (id, path) in paths {
+                if let attr = try? FileManager.default.attributesOfItem(atPath: path),
+                   let size = attr[.size] as? Int64 {
+                    sizes[id] = size
                 }
-                return sizes
-            }.value
-            fileSizes = newSizes
-        }
+            }
+            return sizes
+        }.value
     }
     
     // MARK: - Sub-Expressions (Helpers to fix compiler error)
@@ -811,11 +859,10 @@ struct AssetsGridView: View {
         // "exactly the notion the ASSET filter uses", and an exact match here
         // would break that promise the moment two casings exist.
         let wanted = TagNormalizer.identityKey(name)
-        return entityProfiles.compactMap { key, profile -> String? in
-            guard key.hasPrefix("actor:"),
-                  profile.tags.contains(where: { TagNormalizer.identityKey($0) == wanted })
+        return entityProfiles.actors.compactMap { profile -> String? in
+            guard profile.tags.contains(where: { TagNormalizer.identityKey($0) == wanted })
             else { return nil }
-            return String(key.dropFirst(6))
+            return profile.name
         }.sorted()
     }
 
@@ -882,7 +929,7 @@ struct AssetsGridView: View {
     private var careerArcSections: [CareerArc.Section] {
         guard let actor = selectedActor else { return [] }
         return CareerArc.sections(assets: displayedAssets,
-                                  profile: entityProfiles["actor:\(actor)"])
+                                  profile: entityProfiles[actor: actor])
     }
 
     /// Split by age only when it says something, and only when the page is
@@ -967,9 +1014,13 @@ struct AssetsGridView: View {
         resolvedFamilyRoot = root
         // A different studio's sections have nothing to do with this one's.
         collapsedImprints = []
+        // ⭐ The root is resolved to a LOCAL id before the tree walk. A
+        // name-form id finds no row after the re-key, so the family would
+        // silently collapse to the root studio alone.
         guard let libraryURL,
-              let ids = try? LibraryStore(at: libraryURL)
-                .studioIdWithDescendants("studio:\(root)") else {
+              let store = try? LibraryStore(at: libraryURL),
+              let rootId = try? store.entityId(named: root, type: "studio"),
+              let ids = try? store.studioIdWithDescendants(rootId) else {
             familyStudios = [root]
             return
         }
@@ -1126,7 +1177,7 @@ struct AssetsGridView: View {
         strings.append(contentsOf: asset.actions)
         strings.append(contentsOf: asset.studios)
         for actor in mappedActors(for: asset) {
-            if let profile = entityProfiles["actor:\(actor)"] {
+            if let profile = entityProfiles[actor: actor] {
                 if let bio = profile.bio { strings.append(bio) }
                 strings.append(contentsOf: profile.akas)
             }
@@ -1288,7 +1339,7 @@ struct AssetsGridView: View {
     private func ageAtRelease(for asset: Asset) -> AgeAtRelease? {
         guard sidebarSelection.count == 1,
               case .actor(let name)? = sidebarSelection.first,
-              let profile = entityProfiles["actor:\(name)"]
+              let profile = entityProfiles[actor: name]
         else { return nil }
         return AgeAtReleaseCalculator.age(of: profile, at: asset.releaseDate)
     }

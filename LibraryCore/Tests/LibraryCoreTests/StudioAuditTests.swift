@@ -14,17 +14,29 @@ final class StudioAuditTests: XCTestCase {
               tags: studios.map { "studio:\($0)" } + extra)
     }
 
+    /// Studio profiles for these names, all confirmed.
+    private func confirmed(_ names: [String]) -> EntityProfileIndex {
+        EntityProfileIndex(names.map {
+            EntityProfile(id: "studio:\($0)", enrichmentState: .matched)
+        })
+    }
+
+    /// Studio profiles for these names, none confirmed.
+    private func unconfirmedProfiles(_ names: [String]) -> EntityProfileIndex {
+        EntityProfileIndex(names.map { EntityProfile(id: "studio:\($0)") })
+    }
+
     /// Everything present and correct, so every check has nothing to say.
     private func healthy(_ assets: [Asset]) -> StudioAudit.Input {
         let names = Set(assets.flatMap(\.studios))
-        let ids = Set(names.map { "studio:\($0)" })
         var edges: [UUID: String] = [:]
         for a in assets where a.studios.count == 1 {
             edges[a.id] = "studio:\(a.studios[0])"
         }
-        return StudioAudit.Input(assets: assets, profileIds: ids,
-                                 confirmedStudioIds: ids,
-                                 studioIdByVideo: edges, parentPairs: [])
+        return StudioAudit.Input(
+            assets: assets,
+            profiles: confirmed(Array(names)),
+            studioIdByVideo: edges, parentPairs: [])
     }
 
     // MARK: - Silence
@@ -47,8 +59,8 @@ final class StudioAuditTests: XCTestCase {
         assets.append(asset(["Coast Line", "Harbour Lane"]))
 
         var input = healthy(assets)
-        input = StudioAudit.Input(assets: assets, profileIds: input.profileIds,
-                                  confirmedStudioIds: [],   // nothing confirmed
+        input = StudioAudit.Input(assets: assets,
+                                  profiles: unconfirmedProfiles(input.profiles.studios.map(\.name)),
                                   studioIdByVideo: input.studioIdByVideo,
                                   parentPairs: [])
 
@@ -89,8 +101,7 @@ final class StudioAuditTests: XCTestCase {
         let conflicted = asset(["Coast Line", "Harbour Lane"])
         let input = StudioAudit.Input(
             assets: [conflicted],
-            profileIds: ["studio:Coast Line", "studio:Harbour Lane"],
-            confirmedStudioIds: ["studio:Coast Line", "studio:Harbour Lane"],
+            profiles: confirmed(["Coast Line", "Harbour Lane"]),
             studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertTrue(StudioAudit.missingEdges(input).items.isEmpty)
@@ -103,7 +114,7 @@ final class StudioAuditTests: XCTestCase {
     func testAStudioWithNoProfileIsNotReportedAsAMissingEdge() {
         let input = StudioAudit.Input(
             assets: [asset(["Silver River"])],
-            profileIds: [], confirmedStudioIds: [],
+            profiles: .empty,
             studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertTrue(StudioAudit.missingEdges(input).items.isEmpty)
@@ -113,8 +124,7 @@ final class StudioAuditTests: XCTestCase {
     func testAStudioWithAProfileAndNoEdgeIsReported() {
         let one = asset(["Silver River"])
         let input = StudioAudit.Input(
-            assets: [one], profileIds: ["studio:Silver River"],
-            confirmedStudioIds: ["studio:Silver River"],
+            assets: [one], profiles: confirmed(["Silver River"]),
             studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertEqual(StudioAudit.missingEdges(input).items, ["Silver River — 1 video"])
@@ -123,8 +133,7 @@ final class StudioAuditTests: XCTestCase {
     func testAnEdgeNamingADifferentStudioIsADisagreement() {
         let one = asset(["Silver River"])
         let input = StudioAudit.Input(
-            assets: [one], profileIds: ["studio:Silver River"],
-            confirmedStudioIds: ["studio:Silver River"],
+            assets: [one], profiles: confirmed(["Silver River"]),
             studioIdByVideo: [one.id: "studio:Coast Line"], parentPairs: [])
 
         XCTAssertEqual(StudioAudit.edgeDisagreements(input).count, 1)
@@ -137,8 +146,8 @@ final class StudioAuditTests: XCTestCase {
     func testAProfileNoVideoUsesIsAnOrphan() {
         let input = StudioAudit.Input(
             assets: [asset(["Silver River"])],
-            profileIds: ["studio:Silver River", "studio:Coast Line"],
-            confirmedStudioIds: [], studioIdByVideo: [:], parentPairs: [])
+            profiles: unconfirmedProfiles(["Silver River", "Coast Line"]),
+            studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertEqual(StudioAudit.orphanProfiles(input).items, ["Coast Line"])
     }
@@ -148,8 +157,10 @@ final class StudioAuditTests: XCTestCase {
     func testOnlyStudioProfilesCountAsStudioOrphans() {
         let input = StudioAudit.Input(
             assets: [asset(["Silver River"])],
-            profileIds: ["studio:Silver River", "actor:Someone", "tag:Outdoors"],
-            confirmedStudioIds: [], studioIdByVideo: [:], parentPairs: [])
+            profiles: EntityProfileIndex([EntityProfile(id: "studio:Silver River"),
+                                          EntityProfile(id: "actor:Someone"),
+                                          EntityProfile(id: "tag:Outdoors")]),
+            studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertTrue(StudioAudit.orphanProfiles(input).items.isEmpty)
     }
@@ -159,18 +170,37 @@ final class StudioAuditTests: XCTestCase {
     func testANetworkWithNoProfileIsDangling() {
         let input = StudioAudit.Input(
             assets: [asset(["Coast Line"])],
-            profileIds: ["studio:Coast Line"],
-            confirmedStudioIds: [], studioIdByVideo: [:],
+            profiles: unconfirmedProfiles(["Coast Line"]),
+            studioIdByVideo: [:],
             parentPairs: [GraphEdgePair(from: "studio:Coast Line", to: "studio:Example Network")])
 
         XCTAssertEqual(StudioAudit.danglingParents(input).items, ["Example Network"])
     }
 
+    /// ⚠️ A studio with an edge but NO profile is one finding, not two.
+    ///
+    /// Reported by `missingProfiles`; reporting it again as an edge
+    /// disagreement would blame the edge for a fault it does not have. The
+    /// name-to-id comparison makes this easy to get wrong, because an absent
+    /// profile resolves to nil and nil differs from every edge.
+    func testAStudioWithNoProfileIsNotAlsoAnEdgeDisagreement() {
+        let one = asset(["Silver River"])
+        let input = StudioAudit.Input(
+            assets: [one],
+            profiles: .empty,
+            studioIdByVideo: [one.id: "studio:Silver River"],
+            parentPairs: [])
+
+        XCTAssertTrue(StudioAudit.edgeDisagreements(input).items.isEmpty,
+                      "the missing profile is already reported on its own")
+        XCTAssertEqual(StudioAudit.missingProfiles(input).count, 1)
+    }
+
     func testAKnownNetworkIsNotDangling() {
         let input = StudioAudit.Input(
             assets: [asset(["Coast Line"])],
-            profileIds: ["studio:Coast Line", "studio:Example Network"],
-            confirmedStudioIds: [], studioIdByVideo: [:],
+            profiles: unconfirmedProfiles(["Coast Line", "Example Network"]),
+            studioIdByVideo: [:],
             parentPairs: [GraphEdgePair(from: "studio:Coast Line", to: "studio:Example Network")])
 
         XCTAssertTrue(StudioAudit.danglingParents(input).items.isEmpty)
@@ -180,7 +210,7 @@ final class StudioAuditTests: XCTestCase {
     /// the database was edited by hand.
     func testAStudioBeneathItselfIsReported() {
         let input = StudioAudit.Input(
-            assets: [], profileIds: [], confirmedStudioIds: [], studioIdByVideo: [:],
+            assets: [], profiles: .empty, studioIdByVideo: [:],
             parentPairs: [
                 GraphEdgePair(from: "studio:Coast Line", to: "studio:Example Network"),
                 GraphEdgePair(from: "studio:Example Network", to: "studio:Coast Line"),
@@ -194,7 +224,7 @@ final class StudioAuditTests: XCTestCase {
     /// reason it carries a visited set.
     func testASelfParentTerminates() {
         let input = StudioAudit.Input(
-            assets: [], profileIds: [], confirmedStudioIds: [], studioIdByVideo: [:],
+            assets: [], profiles: .empty, studioIdByVideo: [:],
             parentPairs: [GraphEdgePair(from: "studio:Coast Line", to: "studio:Coast Line")])
 
         XCTAssertEqual(StudioAudit.parentCycles(input).items, ["Coast Line"])
@@ -202,7 +232,7 @@ final class StudioAuditTests: XCTestCase {
 
     func testADeepHierarchyIsNotACycle() {
         let input = StudioAudit.Input(
-            assets: [], profileIds: [], confirmedStudioIds: [], studioIdByVideo: [:],
+            assets: [], profiles: .empty, studioIdByVideo: [:],
             parentPairs: [
                 GraphEdgePair(from: "studio:Harbour Lane", to: "studio:Coast Line"),
                 GraphEdgePair(from: "studio:Coast Line", to: "studio:Example Network"),
@@ -228,7 +258,7 @@ final class StudioAuditTests: XCTestCase {
         var assets = [Asset](repeating: asset(["Silver River"]), count: 3)
         assets.append(asset(["Coast Line"]))
         let input = StudioAudit.Input(
-            assets: assets, profileIds: [], confirmedStudioIds: [],
+            assets: assets, profiles: .empty,
             studioIdByVideo: [:], parentPairs: [])
 
         XCTAssertEqual(StudioAudit.missingProfiles(input).items,

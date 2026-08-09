@@ -81,7 +81,7 @@ public struct NameVocabulary: Sendable {
     /// populates only as records are re-matched, so requiring it would leave
     /// the validated set empty and the lexicon useless for a year. The id is
     /// the stronger signal and supersedes this as it fills in.
-    public init(assets: [Asset], profiles: [String: EntityProfile]) {
+    public init(assets: [Asset], profiles: EntityProfileIndex) {
         var actors = Set<String>(), studios = Set<String>(), tags = Set<String>()
         for asset in assets {
             actors.formUnion(asset.actors)
@@ -89,18 +89,21 @@ public struct NameVocabulary: Sendable {
             tags.formUnion(asset.actions)
         }
 
+        // ⭐ Grouped by type and named by the column, rather than by testing
+        // the id's prefix and slicing the name back out of it. Both of those
+        // stop working the moment an id is a uid — the prefix matches nothing,
+        // so the vocabulary would come out empty and every parsed name would
+        // read as unvalidated.
+        //
+        // The empty-name guard stays: a malformed row would otherwise
+        // contribute an empty string, which matches an empty entry and
+        // validates nothing.
         var validatedActors = Set<String>(), validatedStudios = Set<String>()
-        for (id, profile) in profiles where profile.enrichmentState == .matched {
-            // A malformed id like "actor:" would otherwise contribute an empty
-            // string, which matches an empty entry and validates nothing.
-            if id.hasPrefix("actor:") {
-                let name = String(id.dropFirst(6))
-                if !name.isEmpty { validatedActors.insert(name) }
-            }
-            if id.hasPrefix("studio:") {
-                let name = String(id.dropFirst(7))
-                if !name.isEmpty { validatedStudios.insert(name) }
-            }
+        for profile in profiles.actors where profile.enrichmentState == .matched {
+            if !profile.name.isEmpty { validatedActors.insert(profile.name) }
+        }
+        for profile in profiles.studios where profile.enrichmentState == .matched {
+            if !profile.name.isEmpty { validatedStudios.insert(profile.name) }
         }
 
         self.init(actors: actors, studios: studios, tags: tags,

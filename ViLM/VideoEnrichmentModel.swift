@@ -446,7 +446,7 @@ final class VideoEnrichmentModel: ObservableObject {
     /// Whether a studio NAME has already been confirmed by a person or a source.
     private func isStudioVerified(_ name: String) -> Bool {
         guard let store = try? LibraryStore(at: libraryURL) else { return false }
-        let profile = try? store.fetchEntityProfile(for: "studio:\(name)")
+        let profile = try? store.fetchEntityProfile(named: name, type: "studio")
         return profile?.enrichmentState == .matched
     }
 
@@ -604,16 +604,19 @@ final class VideoEnrichmentModel: ObservableObject {
     private var providerName: String? { provider?.displayName }
 
     /// Profiles for this video's cast, from whichever library owns each.
-    private func actorProfiles() -> [String: EntityProfile] {
-        var out: [String: EntityProfile] = [:]
+    private func actorProfiles() -> EntityProfileIndex {
+        var out: [EntityProfile] = []
         for name in asset.actors {
+            // ⭐ Resolved by NAME. The cast name is what this has; building
+            // `"actor:\(name)"` and treating it as a key stops working at the
+            // re-key, and would silently return nil for every performer.
             let entityId = "actor:\(name)"
             if let profile = try? LibrarySession.shared.store(forProfile: entityId)
-                .fetchEntityProfile(for: entityId) {
-                out[entityId] = profile
+                .fetchEntityProfile(named: name, type: "actor") {
+                out.append(profile)
             }
         }
-        return out
+        return EntityProfileIndex(out)
     }
 
     /// The asset as it would be saved, or nil when nothing was accepted.
@@ -669,8 +672,10 @@ final class VideoEnrichmentModel: ObservableObject {
                 // Cycles are refused by the store; a source that disagrees with
                 // itself about which way a hierarchy runs must not be able to
                 // wedge the graph.
-                try? store?.setStudioParent("studio:\(pair.parent)",
-                                            forStudio: "studio:\(pair.child)")
+                if let parentId = try? store?.entityId(named: pair.parent, type: "studio"),
+                   let childId = try? store?.entityId(named: pair.child, type: "studio") {
+                    try? store?.setStudioParent(parentId, forStudio: childId)
+                }
             }
         }
 

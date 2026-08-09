@@ -395,9 +395,16 @@ public class LibraryStore {
         }
         guard !missing.isEmpty else { return [] }
 
+        // ⚠️ `missing` holds `studio:Name` TAG strings off videos, which is the
+        // right input — but the ROW is minted through the one decision, so a
+        // re-keyed library gets a uid rather than the tag string as a key.
+        let rekeyed = try isRekeyed()
         try dbQueue.write { db in
-            for id in missing {
-                try saveEntityProfile(EntityProfile(id: id), in: db)
+            for tag in missing {
+                let name = String(tag.dropFirst("studio:".count))
+                let profile = EntityProfile(id: rekeyed ? UUID().uuidString : tag,
+                                            entityType: "studio", displayName: name)
+                try saveEntityProfile(profile, in: db)
             }
         }
         return missing
@@ -427,9 +434,8 @@ public class LibraryStore {
     /// than guess.
     @discardableResult
     public func ensureStudioProfile(_ name: String) throws -> Bool {
-        let id = "studio:\(name)"
-        guard try fetchEntityProfile(for: id) == nil else { return false }
-        try saveEntityProfile(EntityProfile(id: id))
+        guard try fetchEntityProfile(named: name, type: "studio") == nil else { return false }
+        try saveEntityProfile(try newEntityProfile(named: name, type: "studio"))
         return true
     }
 
@@ -459,8 +465,12 @@ public class LibraryStore {
     /// is the overrule every other write path here refuses.
     public func confirmStudio(_ name: String, source: String?,
                               sourceId: String? = nil) throws {
-        let id = "studio:\(name)"
-        var profile = try fetchEntityProfile(for: id) ?? EntityProfile(id: id)
+        // ⭐ Resolved by NAME and minted through the single decision, so this
+        // finds the existing studio after the re-key instead of creating a
+        // second one under a legacy-shaped key.
+        var profile = try fetchEntityProfile(named: name, type: "studio")
+            ?? (try newEntityProfile(named: name, type: "studio"))
+        let id = profile.id
 
         let missingId = profile.enrichmentSourceId?.isEmpty ?? true
         if profile.enrichmentState == .matched {
@@ -498,7 +508,102 @@ public class LibraryStore {
             try EntityProfile.fetchOne(db, key: id)
         }
     }
+
+    /// The profile for a node of this type with this display name.
+    ///
+    /// 🚨 The lookup that survives the re-key. Callers overwhelmingly hold a
+    /// NAME — a cast name off a video, a studio the source reported — and have
+    /// been reaching profiles by building `"actor:\(name)"` and treating it as
+    /// a primary key. That is only a key while the id encodes the name; after
+    /// v28 it matches nothing and every one of those lookups returns nil,
+    /// silently.
+    ///
+    /// ⭐ Reads the `entity_type` / `display_name` columns, which is what the
+    /// `entity_lookup` index is on, so this is a keyed read rather than a
+    /// scan. On today's rows it returns exactly what `fetchEntityProfile(for:)`
+    /// returns for the equivalent legacy id — the columns are backfilled from
+    /// that id by v34.
+    ///
+    /// ⚠️ Returns the FIRST match. `(entity_type, display_name)` is not unique
+    /// — the unique index was deliberately moved to the migration tool's
+    /// pre-flight so a duplicate cannot make a library unopenable. A caller
+    /// that must distinguish duplicates should read them itself rather than
+    /// asking for one.
+    public func fetchEntityProfile(named name: String, type: String) throws -> EntityProfile? {
+        guard !name.isEmpty, !type.isEmpty else { return nil }
+        return try dbQueue.read { db in
+            try EntityProfile
+                .filter(sql: "entity_type = ? AND display_name = ?", arguments: [type, name])
+                .fetchOne(db)
+        }
+    }
     
+    /// Whether this library's primary keys are already opaque uids.
+    ///
+    /// 🚨 The test is `uid IS NOT NULL AND id = uid`, which is precisely the
+    /// state `IdentityRekey.rekeyCommit` leaves behind — it mints into `uid`
+    /// and then assigns `id = uid` in one transaction.
+    ///
+    /// ⚠️ Deliberately NOT "does any id lack a colon". That would also be true
+    /// of a single malformed legacy row, and would flip the whole library's
+    /// minting behaviour on one piece of damage. It is also not "is `uid`
+    /// populated", which is true in the window after minting and before the
+    /// commit — during which the keys are still legacy.
+    ///
+    /// An empty library answers false, which is right: a fresh library is
+    /// created in the legacy shape and re-keyed later like any other.
+    public func isRekeyed() throws -> Bool {
+        try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(
+                    SELECT 1 FROM entity_profiles WHERE uid IS NOT NULL AND id = uid
+                )
+                """) ?? false
+        }
+    }
+
+    /// A NEW profile for a node with this name, keyed the way this library
+    /// keys things.
+    ///
+    /// ⭐ The single minting decision for the whole app, made in one place.
+    /// Every path that creates an entity — confirming a studio, importing a
+    /// CSV row, promoting a string — must come through here, or a re-keyed
+    /// library starts quietly acquiring legacy-shaped ids again and ends up
+    /// permanently half-migrated.
+    ///
+    /// ⚠️ The library decides, not the caller and not a build flag. Minting a
+    /// uid before the re-key would be worse than useless: ~140 call sites still
+    /// reach profiles by `"actor:\(name)"`, so a new actor would be created
+    /// and then be invisible to the app that created it. Following the
+    /// library's existing shape keeps this a no-op until the re-key genuinely
+    /// runs, which is the same discipline as the rest of phase 0.
+    ///
+    /// ⚠️ `entityType` and `displayName` are always passed EXPLICITLY, in both
+    /// branches. After the re-key there is nothing to derive them from, and a
+    /// uid-keyed row without them is a profile with no recoverable name.
+    ///
+    /// Does NOT save. Minting and persisting are separate acts, and several
+    /// callers build a stand-in they never intend to write.
+    public func newEntityProfile(named name: String, type: String) throws -> EntityProfile {
+        EntityProfile(id: try isRekeyed() ? UUID().uuidString : "\(type):\(name)",
+                      entityType: type,
+                      displayName: name)
+    }
+
+    /// The LOCAL id for a node named this, or nil when the library has none.
+    ///
+    /// ⭐ For the callers that need an id to hand to an edge writer —
+    /// `setStudioParent`, `linkPerformer`, `setStudio` — and hold only a name.
+    /// Building `"studio:\(name)"` and passing it works today and points at
+    /// nothing after the re-key.
+    ///
+    /// ⚠️ Never mints. A caller that wants a row to exist says so explicitly
+    /// (`ensureStudioProfile`), because minting from a name is exactly what the
+    /// graph refuses to do by accident.
+    public func entityId(named name: String, type: String) throws -> String? {
+        try fetchEntityProfile(named: name, type: type)?.id
+    }
+
     public func fetchAllEntityProfiles() throws -> [EntityProfile] {
         try dbQueue.read { db in
             try fetchAllEntityProfiles(in: db)

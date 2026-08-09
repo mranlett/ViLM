@@ -316,7 +316,7 @@ final class VideoBatchMatchModel: ObservableObject {
             let proposal: VideoMetadataProposal
             switch VideoEnrichmentReview.studioResolution(
                 proposal: fetched,
-                isVerified: { (try? store.fetchEntityProfile(for: "studio:\($0)"))?
+                isVerified: { (try? store.fetchEntityProfile(named: $0, type: "studio"))?
                     .enrichmentState == .matched }
             ) {
             case let .use(choice):
@@ -362,7 +362,13 @@ final class VideoBatchMatchModel: ObservableObject {
                 }
                 // Cycles are refused by the store, so a source disagreeing with
                 // itself about which way a hierarchy runs cannot wedge it.
-                try? store.setStudioParent("studio:\(parent)", forStudio: "studio:\(child)")
+                    // ⭐ Both ends resolved to LOCAL ids. A hierarchy edge
+                    // built from name-form strings points at nothing once the
+                    // library is re-keyed.
+                    if let parentId = try? store.entityId(named: parent, type: "studio"),
+                       let childId = try? store.entityId(named: child, type: "studio") {
+                        try? store.setStudioParent(parentId, forStudio: childId)
+                    }
             }
 
             // Same as the per-video path: a studio the source supplied verifies
@@ -403,14 +409,14 @@ final class VideoBatchMatchModel: ObservableObject {
         // 2 — cast. Queued, never applied.
         // Same identity carried here: a batch run guessing the wrong person of
         // a shared name reports "no match" across the whole library, silently.
-        var profiles: [String: EntityProfile] = [:]
+        var castProfiles: [EntityProfile] = []
         for name in asset.actors {
-            let entityId = "actor:\(name)"
-            if let profile = try? store.fetchEntityProfile(for: entityId) {
-                profiles[entityId] = profile
+            if let profile = try? store.fetchEntityProfile(named: name, type: "actor") {
+                castProfiles.append(profile)
             }
         }
-        let performers = PerformerIdentity.from(names: asset.actors, profiles: profiles)
+        let performers = PerformerIdentity.from(names: asset.actors,
+                                                profiles: EntityProfileIndex(castProfiles))
         if performers.count >= 2,
            let hits = try? await provider.search(performers: performers,
                                                  studio: asset.studios.first),

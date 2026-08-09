@@ -64,7 +64,7 @@ struct ContentView: View {
     // loadEntityProfiles(from:) whenever "ReloadAssets" fires — that
     // notification is this app's general "library data changed" signal, not
     // just for assets.
-    @State private var entityProfiles: [String: EntityProfile] = [:]
+    @State private var entityProfiles: EntityProfileIndex = .empty
     @State private var profileImageFileNames: Set<String> = []
     @State private var akaMap: [String: String] = [:]
     @State private var selectedLibraryURL: URL?
@@ -869,7 +869,8 @@ struct ContentView: View {
         }
         var rng = SystemRandomNumberGenerator()
         let result = QuickActionPicker().pick(
-            action, assets: assets, entityProfiles: entityProfiles, akaMap: akaMap, using: &rng)
+            action, assets: assets, entityProfiles: entityProfiles,
+            akaMap: akaMap, using: &rng)
 
         switch result {
         case .openFilteredList(let criteria):
@@ -1520,7 +1521,7 @@ struct ContentView: View {
         let openURLs = LibrarySession.shared.allURLs
         Task.detached(priority: .userInitiated) {
             do {
-                var layers: [[String: EntityProfile]] = []
+                var layers: [[EntityProfile]] = []
                 var fileNamesUnion = Set<String>()
                 for libURL in openURLs {
                     let store = try LibraryStore(at: libURL)
@@ -1543,28 +1544,47 @@ struct ContentView: View {
                     if await LibrarySession.shared.markStudiosPromoted(libURL) {
                         _ = try? store.promoteStudioProfiles()
                     }
-                    let profiles = try store.fetchAllEntityProfiles()
-                    layers.append(Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) }))
+                    layers.append(try store.fetchAllEntityProfiles())
                     let dir = libURL.appendingPathComponent(".catalog/profiles")
                     if let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
                         fileNamesUnion.formUnion(names)
                     }
                 }
 
-                let merged = MergeSemantics.mergedProfileView(ordered: layers)
+                // 🚨 Folded by IDENTITY. The old fold keyed on `EntityProfile.id`,
+                // which is only the same across two libraries while the id
+                // encodes the name — after the re-key each library mints its
+                // own uid and the same performer would appear twice, each copy
+                // missing whatever the other held.
+                let merged = EntityProfileIndex.merged(ordered: layers)
 
                 var newAkaMap: [String: String] = [:]
-                for profile in merged.values where profile.id.hasPrefix("actor:") {
-                    let mainName = String(profile.id.dropFirst(6))
+                for profile in merged.actors {
                     for aka in profile.akas {
-                        newAkaMap[aka] = mainName
+                        newAkaMap[aka] = profile.name
                     }
                 }
 
+                // Which libraries hold each profile, so an edit targets the one
+                // that owns it.
+                //
+                // 🚨 Recorded under BOTH the profile's id and its identity key.
+                // Callers reach this with a name-form id they built themselves
+                // (`"actor:\(name)"`), which after the re-key matches no uid —
+                // so an id-only map would miss, fall back to the primary
+                // library, and silently write an attachment's profile into the
+                // wrong catalogue. `url(forProfile:)` tries both.
                 var presence: [String: [URL]] = [:]
                 for (libURL, layer) in zip(openURLs, layers) {
-                    for id in layer.keys {
-                        presence[id, default: []].append(libURL)
+                    for profile in layer {
+                        presence[profile.id, default: []].append(libURL)
+                        guard let type = profile.type, !profile.name.isEmpty else { continue }
+                        let key = NodeIdentity(type: type,
+                                               displayName: profile.name).resolutionKey
+                        guard key != profile.id else { continue }
+                        if !(presence[key]?.contains(libURL) ?? false) {
+                            presence[key, default: []].append(libURL)
+                        }
                     }
                 }
 

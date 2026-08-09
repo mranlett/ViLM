@@ -143,8 +143,7 @@ final class TagVocabularyPersistenceTests: XCTestCase {
         try insert(["studio:Example Studio"])
         try store.promoteStudioProfiles()
 
-        let profiles = Dictionary(uniqueKeysWithValues:
-            try store.fetchAllEntityProfiles().map { ($0.id, $0) })
+        let profiles = EntityProfileIndex(try store.fetchAllEntityProfiles())
         let vocabulary = NameVocabulary(assets: try store.fetchAllAssets(),
                                         profiles: profiles)
 

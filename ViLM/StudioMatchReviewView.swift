@@ -360,7 +360,9 @@ struct StudioMatchReviewView: View {
             } else {
                 _ = try? store.ensureStudioProfile(parent)
             }
-            try? store.setStudioParent("studio:\(parent)", forStudio: updated.id)
+            if let parentId = try? store.entityId(named: parent, type: "studio") {
+                try? store.setStudioParent(parentId, forStudio: updated.id)
+            }
         }
 
         NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)

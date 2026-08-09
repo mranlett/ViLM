@@ -89,11 +89,15 @@ public enum AgeAtReleaseCalculator {
     /// than present with a nil — a caller iterating this should see only what
     /// is actually known.
     public static func ages(for asset: Asset,
-                            profiles: [String: EntityProfile]) -> [String: AgeAtRelease] {
+                            profiles: EntityProfileIndex) -> [String: AgeAtRelease] {
         guard let releaseDate = asset.releaseDate else { return [:] }
         var result: [String: AgeAtRelease] = [:]
         for name in asset.actors {
-            guard let profile = profiles["actor:\(name)"] ?? profiles[name] else { continue }
+            // ⭐ One lookup where there were two. The old `?? profiles[name]`
+            // fallback existed because some callers passed a name-keyed
+            // dictionary and some an id-keyed one; the index takes a name and
+            // is the only shape, so the ambiguity is gone rather than handled.
+            guard let profile = profiles[actor: name] else { continue }
             guard let age = age(of: profile, at: releaseDate) else { continue }
             result[name] = age
         }
@@ -107,7 +111,7 @@ public enum AgeAtReleaseCalculator {
     /// a record in or out on a fact nobody knows, and the whole point of
     /// carrying `isExact` is to avoid exactly that.
     public static func anyActorAge(for asset: Asset,
-                                   profiles: [String: EntityProfile],
+                                   profiles: EntityProfileIndex,
                                    within range: ClosedRange<Int>) -> Bool {
         ages(for: asset, profiles: profiles).values.contains { age in
             age.possibleAges.overlaps(range)
@@ -120,7 +124,7 @@ public enum AgeAtReleaseCalculator {
     /// has a birth date" are both reasons a video is missing from an age
     /// filter, and neither is the same as the actor being outside the range.
     public static func isAgeKnown(for asset: Asset,
-                                  profiles: [String: EntityProfile]) -> Bool {
+                                  profiles: EntityProfileIndex) -> Bool {
         !ages(for: asset, profiles: profiles).isEmpty
     }
 }

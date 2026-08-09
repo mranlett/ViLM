@@ -40,7 +40,7 @@ struct LibraryTransferView: View {
     // just the highly-rated / unreviewed / specific-actor subset. The source
     // library's profiles + AKA map power the actor-metadata filters.
     @State private var filterCriteria = AssetFilterCriteria()
-    @State private var sourceEntityProfiles: [String: EntityProfile] = [:]
+    @State private var sourceEntityProfiles: EntityProfileIndex = .empty
     @State private var sourceAkaMap: [String: String] = [:]
     @State private var isShowingFilter = false
 
@@ -519,7 +519,7 @@ struct LibraryTransferView: View {
         moveAlphaFilter = nil
         Task.detached(priority: .userInitiated) {
             var rows: [MoveRow] = []
-            var profiles: [String: EntityProfile] = [:]
+            var profileList: [EntityProfile] = []
             var akaMap: [String: String] = [:]
             do {
                 // A read failure must be REPORTED, not rendered as "No Videos
@@ -534,12 +534,13 @@ struct LibraryTransferView: View {
                 // Profiles + AKA map (from the source library) power the
                 // actor-metadata filters and alias resolution, mirroring how
                 // ContentView builds them for the All Assets grid.
-                for profile in try store.fetchAllEntityProfiles() {
-                    profiles[profile.id] = profile
-                    if profile.id.hasPrefix("actor:") {
-                        let mainName = String(profile.id.dropFirst(6))
-                        for aka in profile.akas { akaMap[aka] = mainName }
-                    }
+                profileList = try store.fetchAllEntityProfiles()
+                // ⭐ Grouped and named by the columns rather than by picking the
+                // id apart. After the re-key the prefix matches nothing, so
+                // every alias would silently stop resolving — and this map is
+                // what makes an AKA searchable at all.
+                for profile in EntityProfileIndex(profileList).actors {
+                    for aka in profile.akas { akaMap[aka] = profile.name }
                 }
             } catch {
                 await MainActor.run {
@@ -550,7 +551,7 @@ struct LibraryTransferView: View {
             }
             rows.sort { ($0.asset.videoName ?? $0.asset.fileName).localizedStandardCompare($1.asset.videoName ?? $1.asset.fileName) == .orderedAscending }
             let finalRows = rows
-            let finalProfiles = profiles
+            let finalProfiles = EntityProfileIndex(profileList)
             let finalAkaMap = akaMap
             await MainActor.run {
                 self.moveRows = finalRows

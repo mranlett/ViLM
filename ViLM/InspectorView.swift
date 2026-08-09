@@ -792,16 +792,19 @@ struct SingleInspectorView: View {
     }
 
     /// Profiles for this video's cast, from whichever library owns each one.
-    private var actorProfiles: [String: EntityProfile] {
-        var out: [String: EntityProfile] = [:]
+    private var actorProfiles: EntityProfileIndex {
+        var out: [EntityProfile] = []
         for name in asset.actors {
+            // ⭐ Resolved by NAME. The cast name is what this has; building
+            // `"actor:\(name)"` and treating it as a key stops working at the
+            // re-key, and would silently return nil for every performer.
             let entityId = "actor:\(name)"
             if let profile = try? LibrarySession.shared.store(forProfile: entityId)
-                .fetchEntityProfile(for: entityId) {
-                out[entityId] = profile
+                .fetchEntityProfile(named: name, type: "actor") {
+                out.append(profile)
             }
         }
-        return out
+        return EntityProfileIndex(out)
     }
 
     @ViewBuilder

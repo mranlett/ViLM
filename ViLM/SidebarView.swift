@@ -20,7 +20,7 @@ struct SidebarView: View {
     let libraryURL: URL?
     // Loaded once at the ContentView level and shared across every screen
     // that needs entity profiles, instead of re-fetching independently here.
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     let onApplyFilters: () -> Void
     /// Multi-library session: attach a picked library / detach an open one.
     var onAttachLibrary: (URL) -> Void = { _ in }
@@ -31,7 +31,7 @@ struct SidebarView: View {
     @ObservedObject private var session = LibrarySession.shared
     @State private var isShowingAttachPicker = false
 
-    private var profiles: [EntityProfile] { Array(entityProfiles.values) }
+    private var profiles: [EntityProfile] { entityProfiles.all }
 
     @State private var isActorsExpanded = true
     @State private var isTagsExpanded = true

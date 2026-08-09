@@ -96,15 +96,13 @@ final class AgeAtReleaseTests: XCTestCase {
               tags: actors.map { "actor:\($0)" }, releaseDate: release)
     }
 
-    private func profiles(_ entries: [(String, String?, Int?)]) -> [String: EntityProfile] {
-        var out: [String: EntityProfile] = [:]
-        for (name, birthDate, birthYear) in entries {
+    private func profiles(_ entries: [(String, String?, Int?)]) -> EntityProfileIndex {
+        EntityProfileIndex(entries.map { name, birthDate, birthYear in
             var profile = EntityProfile(id: "actor:\(name)")
             profile.birthDate = birthDate
             profile.birthYear = birthYear
-            out[profile.id] = profile
-        }
-        return out
+            return profile
+        })
     }
 
     func testAgesForEveryCreditedActor() {

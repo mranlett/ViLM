@@ -19,7 +19,7 @@ struct ActorGridView: View {
     // Loaded once at the ContentView level and shared across every screen
     // that needs actor profiles, instead of each screen independently
     // re-fetching the same data on its own `.onAppear`.
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     let profileImageFileNames: Set<String>
     let akaMap: [String: String]
     var onPullToRefresh: () async -> Void = {}
@@ -27,7 +27,7 @@ struct ActorGridView: View {
     // Filtered down to actor: profiles once per entityProfiles change
     // (see deriveActorProfiles()), rather than on every one of the many
     // dictionary lookups below.
-    @State private var actorProfiles: [String: EntityProfile] = [:]
+    @State private var actorProfiles: EntityProfileIndex = .empty
 
     // Video counts per actor, derived once per data change for the same reason
     // actorProfiles is: they are read from the sort comparator, from the
@@ -67,7 +67,7 @@ struct ActorGridView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
 
     var uniqueGenders: [String] {
-        let values = actorProfiles.values.compactMap { $0.gender }
+        let values = actorProfiles.all.compactMap { $0.gender }
             .flatMap { $0.components(separatedBy: ",") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -75,7 +75,7 @@ struct ActorGridView: View {
     }
     
     var uniqueHairColors: [String] {
-        let values = actorProfiles.values.compactMap { $0.hairColor }
+        let values = actorProfiles.all.compactMap { $0.hairColor }
             .flatMap { $0.components(separatedBy: ",") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -83,7 +83,7 @@ struct ActorGridView: View {
     }
     
     var uniqueCountries: [String] {
-        let values = actorProfiles.values.compactMap { $0.countryOfOrigin }
+        let values = actorProfiles.all.compactMap { $0.countryOfOrigin }
             .flatMap { $0.components(separatedBy: ",") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -112,22 +112,18 @@ struct ActorGridView: View {
         }
         
         // Include any actors that have saved profiles, even if they have 0 matched videos
-        for key in actorProfiles.keys {
-            if key.hasPrefix("actor:") {
-                let name = String(key.dropFirst(6))
-                if let mainName = akaMap[name] {
-                    unique.insert(mainName)
-                } else {
-                    unique.insert(name)
-                }
-            }
+        // ⭐ Already actor-only by construction, and the name comes from the
+        // column — the prefix test and `dropFirst` both stop working once an
+        // id is a uid, and this list is what puts an actor on the page at all.
+        for profile in actorProfiles.all {
+            unique.insert(akaMap[profile.name] ?? profile.name)
         }
         
         return Array(unique).sorted()
     }
     
     var allUniqueTags: [String] {
-        let values = actorProfiles.values.flatMap { $0.tags }
+        let values = actorProfiles.all.flatMap { $0.tags }
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return Array(Set(values)).sorted()
@@ -146,10 +142,19 @@ struct ActorGridView: View {
         
         if filterCriteria.showMissingPhotosOnly {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 if let _ = profile?.photoUrl { return false }
-                
-                let safeId = "actor:\(actor)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+
+                // 🚨 The filename comes from the profile's OWN id — photos on
+                // disk are named after the entity id, so a name-derived one
+                // matches nothing after the re-key and every actor would read
+                // as photo-less, putting the whole cast in this filter.
+                //
+                // ⚠️ Falls back to the name form for an actor with NO profile
+                // row, because `ProfileImageView` below does exactly that when
+                // it renders. Short-circuiting to "no photo" here instead would
+                // flag actors whose photo is visibly on screen.
+                let safeId = ProfileImageNaming.safeId(for: profile?.id ?? "actor:\(actor)")
                 if profileImageFileNames.contains("\(safeId).jpg") {
                     return false
                 }
@@ -159,16 +164,20 @@ struct ActorGridView: View {
         
         if filterCriteria.showMissingGenderOnly {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 return (profile?.gender ?? "").trimmingCharacters(in: .whitespaces).isEmpty
             }
         }
         
         if filterCriteria.showNeedingAttentionOnly {
             result = result.filter { actor in
-                let safeId = "actor:\(actor)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
-                let profile = actorProfiles["actor:\(actor)"]
-                let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg") || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
+                // 🚨 Named after the profile's own id, with the same
+                // no-profile fallback the renderer uses — see the photo filter
+                // above.
+                let profile = actorProfiles[actor: actor]
+                let safeId = ProfileImageNaming.safeId(for: profile?.id ?? "actor:\(actor)")
+                let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg")
+                    || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
                 let hasPhoto = hasLocalPhoto || profile?.photoUrl != nil
                 let hasBio = !(profile?.bio ?? "").trimmingCharacters(in: .whitespaces).isEmpty
                 let hasTags = !(profile?.tags ?? []).isEmpty
@@ -182,7 +191,7 @@ struct ActorGridView: View {
         // and the two must agree.
         if filterCriteria.enrichment != .any {
             result = result.filter { actor in
-                filterCriteria.enrichment.accepts(actorProfiles["actor:\(actor)"]?.enrichmentState)
+                filterCriteria.enrichment.accepts(actorProfiles[actor: actor]?.enrichmentState)
             }
         }
 
@@ -193,7 +202,7 @@ struct ActorGridView: View {
             // filter returns nothing. Mirrors the hair-color/country filters.
             let selectedGenders = Set(filterCriteria.selectedGenders.map { $0.lowercased() })
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 let values = profile?.gender?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
                 return !selectedGenders.isDisjoint(with: values)
             }
@@ -201,11 +210,11 @@ struct ActorGridView: View {
         
         if filterCriteria.matchEmptyHairColor {
             result = result.filter { actor in
-                (actorProfiles["actor:\(actor)"]?.hairColor ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                (actorProfiles[actor: actor]?.hairColor ?? "").trimmingCharacters(in: .whitespaces).isEmpty
             }
         } else if !filterCriteria.hairColor.isEmpty {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 let values = profile?.hairColor?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
                 return values.contains(filterCriteria.hairColor.lowercased())
             }
@@ -213,11 +222,11 @@ struct ActorGridView: View {
 
         if filterCriteria.matchEmptyCountry {
             result = result.filter { actor in
-                (actorProfiles["actor:\(actor)"]?.countryOfOrigin ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                (actorProfiles[actor: actor]?.countryOfOrigin ?? "").trimmingCharacters(in: .whitespaces).isEmpty
             }
         } else if !filterCriteria.country.isEmpty {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 let values = profile?.countryOfOrigin?.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
                 return values.contains(filterCriteria.country.lowercased())
             }
@@ -227,19 +236,19 @@ struct ActorGridView: View {
             // "No date of birth" — actors with no birth year set (including
             // those with no profile at all).
             result = result.filter { actor in
-                actorProfiles["actor:\(actor)"]?.birthYear == nil
+                actorProfiles[actor: actor]?.birthYear == nil
             }
         }
 
         if let minRating = filterCriteria.minRating {
             result = result.filter { actor in
-                (actorProfiles["actor:\(actor)"]?.rating ?? 0) >= minRating
+                (actorProfiles[actor: actor]?.rating ?? 0) >= minRating
             }
         }
         
         if !filterCriteria.selectedTags.isEmpty {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 let actorTags = Set(profile?.tags ?? [])
                 if filterCriteria.tagsLogic == .and {
                     return filterCriteria.selectedTags.isSubset(of: actorTags)
@@ -257,13 +266,13 @@ struct ActorGridView: View {
         }
         if let minAge = filterCriteria.minAge {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 return (profile?.age ?? 0) >= minAge
             }
         }
         if let maxAge = filterCriteria.maxAge {
             result = result.filter { actor in
-                let profile = actorProfiles["actor:\(actor)"]
+                let profile = actorProfiles[actor: actor]
                 if let age = profile?.age { return age <= maxAge }
                 return false
             }
@@ -275,8 +284,8 @@ struct ActorGridView: View {
             case .name:
                 return factor == 1 ? a < b : a > b
             case .age:
-                let ageA = actorProfiles["actor:\(a)"]?.age ?? 0
-                let ageB = actorProfiles["actor:\(b)"]?.age ?? 0
+                let ageA = actorProfiles[actor: a]?.age ?? 0
+                let ageB = actorProfiles[actor: b]?.age ?? 0
                 if ageA != ageB { return factor == 1 ? ageA < ageB : ageA > ageB }
                 return factor == 1 ? a < b : a > b
             case .videoCount:
@@ -285,13 +294,13 @@ struct ActorGridView: View {
                 if countA != countB { return factor == 1 ? countA < countB : countA > countB }
                 return factor == 1 ? a < b : a > b
             case .dateAdded:
-                let dateA = actorProfiles["actor:\(a)"]?.createdAt ?? Date.distantPast
-                let dateB = actorProfiles["actor:\(b)"]?.createdAt ?? Date.distantPast
+                let dateA = actorProfiles[actor: a]?.createdAt ?? Date.distantPast
+                let dateB = actorProfiles[actor: b]?.createdAt ?? Date.distantPast
                 if dateA != dateB { return factor == 1 ? dateA < dateB : dateA > dateB }
                 return factor == 1 ? a < b : a > b
             case .rating:
-                let ratingA = actorProfiles["actor:\(a)"]?.rating ?? 0
-                let ratingB = actorProfiles["actor:\(b)"]?.rating ?? 0
+                let ratingA = actorProfiles[actor: a]?.rating ?? 0
+                let ratingB = actorProfiles[actor: b]?.rating ?? 0
                 if ratingA != ratingB { return factor == 1 ? ratingA < ratingB : ratingA > ratingB }
                 return factor == 1 ? a < b : a > b
             }
@@ -568,7 +577,7 @@ struct ActorGridView: View {
             }) {
                 ActorGridItemView(
                     actor: actor,
-                    profile: actorProfiles["actor:\(actor)"],
+                    profile: actorProfiles[actor: actor],
                     assetsCount: assetsCount(for: actor),
                     isSelected: isSelected,
                     libraryURL: libraryURL
@@ -581,7 +590,7 @@ struct ActorGridView: View {
             }) {
                 ActorGridItemView(
                     actor: actor,
-                    profile: actorProfiles["actor:\(actor)"],
+                    profile: actorProfiles[actor: actor],
                     assetsCount: assetsCount(for: actor),
                     isSelected: isSelected,
                     libraryURL: libraryURL
@@ -592,7 +601,7 @@ struct ActorGridView: View {
             NavigationLink(value: AppRoute.entityProfile(category: "actor", name: actor)) {
                 ActorGridItemView(
                     actor: actor,
-                    profile: actorProfiles["actor:\(actor)"],
+                    profile: actorProfiles[actor: actor],
                     assetsCount: assetsCount(for: actor),
                     isSelected: isSelected,
                     libraryURL: libraryURL
@@ -610,7 +619,7 @@ struct ActorGridView: View {
         }) {
             ActorGridItemView(
                 actor: actor,
-                profile: actorProfiles["actor:\(actor)"],
+                profile: actorProfiles[actor: actor],
                 assetsCount: assetsCount(for: actor),
                 isSelected: isSelected,
                 libraryURL: libraryURL
@@ -627,7 +636,9 @@ struct ActorGridView: View {
     }
     
     private func deriveActorProfiles() {
-        actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
+        // ⭐ Grouped by the type COLUMN rather than by testing the id's
+        // prefix, which matches nothing once an id is a uid.
+        actorProfiles = EntityProfileIndex(entityProfiles.actors)
     }
 
     /// Rebuilds the counts. The computation itself lives in LibraryCore so it
@@ -649,7 +660,7 @@ struct ActorGridView: View {
         // emoji, so the export writes the country name and the import re-adds it.
         let csvString = ActorCSV.document(
             actors: allUniqueActors,
-            profileFor: { actorProfiles["actor:\($0)"] },
+            profileFor: { actorProfiles[actor: $0] },
             stripCountry: CountryFlagHelper.strippedOfFlag
         )
         csvDocument = CSVDocument(text: csvString)
@@ -780,7 +791,11 @@ struct ActorGridItemView: View {
     
     var body: some View {
         VStack {
-            ProfileImageView(libraryURL: libraryURL, entityId: "actor:\(actor)", photoUrl: profile?.photoUrl) { image in
+            // 🚨 The profile's OWN id — photo files are named after it. A
+            // name-form id finds no image once the ids are uids.
+            ProfileImageView(libraryURL: libraryURL,
+                             entityId: profile?.id ?? "actor:\(actor)",
+                             photoUrl: profile?.photoUrl) { image in
                 Color.clear
                     .overlay(
                         image

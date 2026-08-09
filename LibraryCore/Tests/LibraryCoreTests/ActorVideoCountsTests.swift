@@ -19,8 +19,8 @@ final class ActorVideoCountsTests: XCTestCase {
               tags: actors.map { "actor:\($0)" })
     }
 
-    private func profile(_ name: String, akas: [String]) -> (String, EntityProfile) {
-        ("actor:\(name)", EntityProfile(id: "actor:\(name)", akas: akas))
+    private func profile(_ name: String, akas: [String]) -> EntityProfile {
+        EntityProfile(id: "actor:\(name)", akas: akas)
     }
 
     // MARK: - T1, equivalence with the computation it replaced
@@ -29,7 +29,7 @@ final class ActorVideoCountsTests: XCTestCase {
         let assets = [asset(["Jane Doe"], "a"),
                       asset(["Janie D"], "b"),
                       asset(["Someone Else"], "c")]
-        let profiles = Dictionary(uniqueKeysWithValues: [profile("Jane Doe", akas: ["Janie D"])])
+        let profiles = EntityProfileIndex([profile("Jane Doe", akas: ["Janie D"])])
 
         let fast = ActorVideoCounts.build(assets: assets, profiles: profiles)
         for actor in ["Jane Doe", "Janie D", "Someone Else"] {
@@ -44,20 +44,20 @@ final class ActorVideoCountsTests: XCTestCase {
         // Deterministic pseudo-random shapes: overlapping aliases, shared names,
         // actors with no profile, assets with no actors.
         var assets: [Asset] = []
-        var profiles: [String: EntityProfile] = [:]
+        var profileList: [EntityProfile] = []
         let names = (0..<40).map { "Actor \($0)" }
 
         for (i, name) in names.enumerated() where i % 3 == 0 {
             // Every third actor lists the NEXT actor's name as an alias, which
             // is the case most likely to be miscounted.
-            let (k, v) = profile(name, akas: [names[(i + 1) % names.count]])
-            profiles[k] = v
+            profileList.append(profile(name, akas: [names[(i + 1) % names.count]]))
         }
         for i in 0..<120 {
             let cast = (0..<(i % 4)).map { names[(i * 7 + $0 * 11) % names.count] }
             assets.append(asset(cast, "v\(i)"))
         }
 
+        let profiles = EntityProfileIndex(profileList)
         let fast = ActorVideoCounts.build(assets: assets, profiles: profiles)
         for name in names {
             XCTAssertEqual(
@@ -73,7 +73,7 @@ final class ActorVideoCountsTests: XCTestCase {
         // This counts ASSETS, not name matches. Counting twice here would
         // inflate exactly the actors with the richest alias data.
         let assets = [asset(["Jane Doe", "Janie D"])]
-        let profiles = Dictionary(uniqueKeysWithValues: [profile("Jane Doe", akas: ["Janie D"])])
+        let profiles = EntityProfileIndex([profile("Jane Doe", akas: ["Janie D"])])
         XCTAssertEqual(ActorVideoCounts.build(assets: assets, profiles: profiles)["Jane Doe"], 1)
     }
 
@@ -81,13 +81,13 @@ final class ActorVideoCountsTests: XCTestCase {
         // Most actors have a profile, but not all — and the old code matched
         // them by name regardless.
         let assets = [asset(["Unknown Person"]), asset(["Unknown Person"])]
-        XCTAssertEqual(ActorVideoCounts.build(assets: assets, profiles: [:])["Unknown Person"], 2)
+        XCTAssertEqual(ActorVideoCounts.build(assets: assets, profiles: .empty)["Unknown Person"], 2)
     }
 
     func testSeveralActorsMayShareAnAlias() {
         // Both should be credited; taking a single owner would lose one.
         let assets = [asset(["Shared Alias"])]
-        let profiles = Dictionary(uniqueKeysWithValues: [
+        let profiles = EntityProfileIndex([
             profile("First Actor", akas: ["Shared Alias"]),
             profile("Second Actor", akas: ["Shared Alias"]),
         ])
@@ -99,7 +99,7 @@ final class ActorVideoCountsTests: XCTestCase {
     func testEmptyAliasesAreIgnored() {
         // A blank AKA would otherwise credit every asset with a blank actor name.
         let assets = [asset([""]), asset(["Jane Doe"])]
-        let profiles = Dictionary(uniqueKeysWithValues: [profile("Jane Doe", akas: [""])])
+        let profiles = EntityProfileIndex([profile("Jane Doe", akas: [""])])
         XCTAssertEqual(ActorVideoCounts.build(assets: assets, profiles: profiles)["Jane Doe"], 1)
     }
 
@@ -107,15 +107,15 @@ final class ActorVideoCountsTests: XCTestCase {
         // entityProfiles holds studios and tags too; their AKAs must not credit
         // an actor.
         let assets = [asset(["Some Studio"])]
-        let profiles = ["studio:Some Studio": EntityProfile(id: "studio:Some Studio",
-                                                            akas: ["Jane Doe"])]
+        let profiles = EntityProfileIndex([EntityProfile(id: "studio:Some Studio",
+                                                            akas: ["Jane Doe"])])
         XCTAssertNil(ActorVideoCounts.build(assets: assets, profiles: profiles)["Jane Doe"])
     }
 
     func testAnActorWithNoVideosIsAbsentRatherThanZero() {
         // Callers read `counts[actor] ?? 0`, so absent and zero are equivalent —
         // this pins that no phantom entries are produced.
-        let profiles = Dictionary(uniqueKeysWithValues: [profile("Ghost", akas: [])])
+        let profiles = EntityProfileIndex([profile("Ghost", akas: [])])
         XCTAssertTrue(ActorVideoCounts.build(assets: [], profiles: profiles).isEmpty)
     }
 
@@ -126,14 +126,17 @@ final class ActorVideoCountsTests: XCTestCase {
         // performed ~37 million asset inspections to sort this; one pass must
         // be trivial by comparison.
         let names = (0..<1335).map { "Actor \($0)" }
-        var profiles: [String: EntityProfile] = [:]
+        var profileList: [EntityProfile] = []
         for (i, n) in names.enumerated() where i % 5 == 0 {
-            let (k, v) = profile(n, akas: ["Alias \(i)"])
-            profiles[k] = v
+            profileList.append(profile(n, akas: ["Alias \(i)"]))
         }
         let assets = (0..<1346).map { i in
             asset([names[i % names.count], names[(i * 3) % names.count]], "v\(i)")
         }
+
+        // ⚠️ Built BEFORE the clock starts. This test measures one pass over
+        // the library, not the cost of indexing the profiles.
+        let profiles = EntityProfileIndex(profileList)
 
         let started = Date()
         let counts = ActorVideoCounts.build(assets: assets, profiles: profiles)

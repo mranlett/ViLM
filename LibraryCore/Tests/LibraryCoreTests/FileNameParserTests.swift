@@ -224,8 +224,7 @@ final class FileNameParserTests: XCTestCase {
     func testAMalformedProfileIdValidatesNothing() {
         let vocabulary = NameVocabulary(
             assets: [],
-            profiles: ["actor:": EntityProfile(id: "actor:", enrichmentState: .matched),
-                       "studio:": EntityProfile(id: "studio:", enrichmentState: .matched)])
+            profiles: EntityProfileIndex([EntityProfile(id: "actor:", enrichmentState: .matched), EntityProfile(id: "studio:", enrichmentState: .matched)]))
 
         XCTAssertTrue(vocabulary.validatedActors.isEmpty)
         XCTAssertTrue(vocabulary.validatedStudios.isEmpty)
@@ -235,12 +234,9 @@ final class FileNameParserTests: XCTestCase {
     func testValidatedNamesComeFromMatchedProfiles() {
         let asset = Asset(relativePath: "a.mp4", fileName: "a.mp4",
                           tags: ["actor:Alice Example", "studio:Example Studio"])
-        let profiles = [
-            "actor:Alice Example": EntityProfile(id: "actor:Alice Example",
-                                                 enrichmentState: .matched),
-            "studio:Example Studio": EntityProfile(id: "studio:Example Studio",
-                                                   enrichmentState: .noMatch)
-        ]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Alice Example",
+                                                 enrichmentState: .matched), EntityProfile(id: "studio:Example Studio",
+                                                   enrichmentState: .noMatch)])
 
         let vocabulary = NameVocabulary(assets: [asset], profiles: profiles)
 

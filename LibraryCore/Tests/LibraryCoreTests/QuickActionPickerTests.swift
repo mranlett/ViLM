@@ -36,7 +36,7 @@ final class QuickActionPickerTests: XCTestCase {
     }
 
     private func run(_ action: QuickAction, _ assets: [Asset],
-                     profiles: [String: EntityProfile] = [:], aka: [String: String] = [:],
+                     profiles: EntityProfileIndex = .empty, aka: [String: String] = [:],
                      seed: UInt64 = 42) -> QuickActionResult {
         var rng = SeededRNG(seed: seed)
         return picker.pick(action, assets: assets, entityProfiles: profiles, akaMap: aka, now: now, using: &rng)
@@ -120,7 +120,7 @@ final class QuickActionPickerTests: XCTestCase {
     // MARK: - Discover Mix
 
     func testDiscoverMixReturnsANonEmptyFilter() {
-        let profiles = ["actor:Jane": EntityProfile(id: "actor:Jane", tags: ["tag:Lead"])]
+        let profiles = EntityProfileIndex([EntityProfile(id: "actor:Jane", tags: ["tag:Lead"])])
         let a = asset("a", tags: ["tag:Action", "actor:Jane"])
         guard case let .openFilteredList(criteria) = run(.discoverMix, [a], profiles: profiles) else {
             return XCTFail("expected a filtered-list result")

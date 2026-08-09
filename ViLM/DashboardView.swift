@@ -20,7 +20,7 @@ struct DashboardView: View {
     // Loaded once at the ContentView level and shared across every screen
     // that needs actor profiles, instead of each screen independently
     // re-fetching the same data on its own `.onAppear`.
-    let entityProfiles: [String: EntityProfile]
+    let entityProfiles: EntityProfileIndex
     let profileImageFileNames: Set<String>
     let akaMap: [String: String]
 
@@ -42,9 +42,7 @@ struct DashboardView: View {
     /// Opens a playlist's detail page (pushed route, like shelf See All).
     let onOpenPlaylist: (String) -> Void
 
-    private var actorProfiles: [String: EntityProfile] {
-        entityProfiles.filter { $0.key.hasPrefix("actor:") }
-    }
+    private var actorProfiles: [EntityProfile] { entityProfiles.actors }
 
     @Environment(\.usesStackNavigation) private var usesStackNavigation
 
@@ -142,7 +140,7 @@ struct DashboardView: View {
 
     private nonisolated static func computeStats(
         assets: [Asset],
-        entityProfiles: [String: EntityProfile],
+        entityProfiles: EntityProfileIndex,
         profileImageFileNames: Set<String>,
         akaMap: [String: String],
         smartCollections: [SmartCollection],
@@ -150,7 +148,7 @@ struct DashboardView: View {
         playlistItems: [String: [String]]
     ) -> DashboardStats {
         var stats = DashboardStats()
-        let actorProfiles = entityProfiles.filter { $0.key.hasPrefix("actor:") }
+        let actorProfiles = entityProfiles.actors
 
         var actorNameSet = Set<String>()
         var tagSet = Set<String>()
@@ -172,8 +170,8 @@ struct DashboardView: View {
             }
         }
         // Actors with a saved profile but 0 matched videos still count.
-        for key in actorProfiles.keys {
-            actorNameSet.insert(String(key.dropFirst(6)))
+        for profile in actorProfiles {
+            actorNameSet.insert(profile.name)
         }
 
         stats.totalActors = actorNameSet.count
@@ -222,10 +220,10 @@ struct DashboardView: View {
                 memberIds.compactMap { assetsByID[$0] }.prefix(Self.shelfPreviewCount))
         }
 
-        let sortedProfiles = actorProfiles.values.sorted {
+        let sortedProfiles = actorProfiles.sorted {
             ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
         }
-        stats.recentlyAddedActors = Array(sortedProfiles.prefix(10)).map { String($0.id.dropFirst(6)) }
+        stats.recentlyAddedActors = Array(sortedProfiles.prefix(10)).map(\.name)
 
         // Every actor ever referenced, not just those with a saved profile —
         // an actor with no profile at all necessarily has no photo, so
@@ -233,8 +231,18 @@ struct DashboardView: View {
         // actors most in need of attention.
         var needsAttention: [String] = []
         for name in actorNameSet.sorted() {
-            let profile = actorProfiles["actor:\(name)"]
-            let safeId = "actor:\(name)".replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+            let profile = entityProfiles[actor: name]
+            // 🚨 The filename is derived from the profile's OWN id, not from a
+            // name-form id built here. Photos on disk are named after the
+            // entity id, so after the re-key a name-derived filename matches
+            // nothing and every actor would read as photo-less — putting the
+            // whole cast on this list at once.
+            //
+            // ⚠️ Falls back to the name form when there is no profile row,
+            // matching what `ActorCircleCard` does when it renders. Reporting
+            // "no photo" for an actor whose photo is on screen is worse than
+            // the stale lookup it replaces.
+            let safeId = ProfileImageNaming.safeId(for: profile?.id ?? "actor:\(name)")
             let hasLocalPhoto = profileImageFileNames.contains("\(safeId).jpg")
                 || profileImageFileNames.contains { $0.hasPrefix("\(safeId)_") }
             let hasPhoto = hasLocalPhoto || profile?.photoUrl != nil
@@ -358,7 +366,7 @@ struct DashboardView: View {
                         actorNavigationWrapper(for: actor) {
                             ActorCircleCard(
                                 actorName: actor,
-                                profile: actorProfiles["actor:\(actor)"],
+                                profile: entityProfiles[actor: actor],
                                 profileImageFileNames: profileImageFileNames,
                                 libraryURL: libraryURL)
                         }
@@ -405,7 +413,7 @@ struct DashboardView: View {
                         actorNavigationWrapper(for: actor) {
                             ActorAttentionRow(
                                 actorName: actor,
-                                profile: actorProfiles["actor:\(actor)"],
+                                profile: entityProfiles[actor: actor],
                                 profileImageFileNames: profileImageFileNames,
                                 libraryURL: libraryURL)
                         }
