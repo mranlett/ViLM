@@ -57,6 +57,7 @@ struct ActorGridView: View {
     }
     @State private var filterCriteria = ActorFilterCriteria()
     @State private var isShowingFilterBuilder = false
+    @State private var isShowingHeadToHead = false
     @State private var isSelectionMode = false
     @State private var isShowingHelp = false
     @State private var searchText = ""
@@ -357,6 +358,9 @@ struct ActorGridView: View {
         #if os(iOS)
         .refreshable { await onPullToRefresh() }
         #endif
+        .sheet(isPresented: $isShowingHeadToHead) {
+            HeadToHeadView(entityProfiles: entityProfiles, libraryURL: libraryURL)
+        }
         .sheet(isPresented: $isShowingFilterBuilder) {
             ActorFilterBuilderView(
                 allUniqueGenders: uniqueGenders,
@@ -438,6 +442,16 @@ struct ActorGridView: View {
                 }
             }
             
+            // ⭐ Here rather than in Settings. Head to Head is something the
+            // operator plays, not a repair tool — filed beside "Tag Case
+            // Cleanup" it would never be opened. This is where the contenders
+            // already are.
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { isShowingHeadToHead = true }) {
+                    Label("Head to Head", systemImage: "square.split.2x1")
+                }
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isShowingFilterBuilder = true }) {
                     Label("Filter", systemImage: filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")

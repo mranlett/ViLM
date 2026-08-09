@@ -30,7 +30,11 @@ public struct PreferenceContender: Equatable, Sendable {
     /// trusting every caller to filter first.
     public let hasImage: Bool
     /// D6's "neither" — retired from the game without being rated.
-    public let isRetired: Bool
+    ///
+    /// ⚠️ `var`, because a session mutates it in place when the operator
+    /// retires a pair: the pool has to stop offering them immediately, not on
+    /// the next reload.
+    public var isRetired: Bool
 
     public init(id: String, score: PreferenceScore = PreferenceScore(),
                 hasImage: Bool = true, isRetired: Bool = false) {
