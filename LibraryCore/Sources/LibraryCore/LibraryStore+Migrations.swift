@@ -744,6 +744,40 @@ extension LibraryStore {
             }
         }
 
+        // v37 — what the source says about a record we are matched to.
+        //
+        // 🚨 Stored, not merely observed. The flag rides along on fetches the
+        // app already makes, so it costs no request — but the audit that shows
+        // it is opened LATER, and a flag seen during a fetch and thrown away is
+        // a flag the audit never sees. That is the same shape as the scene
+        // description this project fetched and discarded for months.
+        //
+        // ⚠️ THREE columns per match table, and each earns its place:
+        //
+        //   deleted_at        when the source was seen to have removed it. A
+        //                     date rather than a boolean, because "deleted
+        //                     upstream" with no as-of cannot be aged and a
+        //                     stale flag is indistinguishable from a fresh one.
+        //   merged_into       the forwarding address. 🔴 A merged record is NOT
+        //                     gone; treating it as a deletion throws away a
+        //                     good identity and sends the operator to re-match
+        //                     by hand something the source already answered.
+        //   checked_at        when we last had a definite answer. Distinguishes
+        //                     "confirmed still there" from "never asked", which
+        //                     a null deleted_at alone cannot.
+        //
+        // ⚠️ Nullable and additive. Every existing row means "never asked",
+        // which is true.
+        migrator.registerMigration("v37") { db in
+            for table in ["video_match", "entity_match"] {
+                try db.alter(table: table) { t in
+                    t.add(column: "deleted_at", .datetime)
+                    t.add(column: "merged_into", .text)
+                    t.add(column: "checked_at", .datetime)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -117,15 +117,43 @@ public struct NodeMatch: Codable, Equatable, Sendable, Identifiable {
     public let method: MatchMethod
     public let matchedAt: Date
 
+    /// When the source was seen to have removed this record.
+    ///
+    /// ⚠️ A DATE, not a flag. "Deleted upstream" with no as-of cannot be aged,
+    /// and a finding from three months ago is indistinguishable from one found
+    /// this morning.
+    public var deletedAt: Date?
+
+    /// 🔴 Where the record went, when it was merged rather than removed.
+    ///
+    /// A merged record is NOT gone — it has a forwarding address. Treating a
+    /// merge as a deletion throws away a good identity and sends the operator
+    /// to re-match by hand something the source has already answered.
+    public var mergedInto: String?
+
+    /// When we last had a definite answer about this record.
+    ///
+    /// ⭐ Distinguishes "confirmed still there" from "never asked", which a
+    /// nil `deletedAt` alone cannot say.
+    public var checkedAt: Date?
+
+    /// Whether anything is wrong enough to report.
+    public var isStale: Bool { deletedAt != nil || mergedInto != nil }
+
     public var id: String { "\(nodeId)|\(source)" }
 
     public init(nodeId: String, source: String, sourceId: String,
-                method: MatchMethod, matchedAt: Date = Date()) {
+                method: MatchMethod, matchedAt: Date = Date(),
+                deletedAt: Date? = nil, mergedInto: String? = nil,
+                checkedAt: Date? = nil) {
         self.nodeId = nodeId
         self.source = source
         self.sourceId = sourceId
         self.method = method
         self.matchedAt = matchedAt
+        self.deletedAt = deletedAt
+        self.mergedInto = mergedInto
+        self.checkedAt = checkedAt
     }
 }
 

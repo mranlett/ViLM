@@ -213,7 +213,8 @@ extension LibraryStore {
     private func readMatches(table: String, column: String, node: String) throws -> [NodeMatch] {
         let rows: [NodeMatch] = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT \(column), source, source_id, method, matched_at
+                SELECT \(column), source, source_id, method, matched_at,
+                       deleted_at, merged_into, checked_at
                   FROM \(table) WHERE \(column) = ?
                 """, arguments: [node])
                 .compactMap { row in
@@ -224,7 +225,10 @@ extension LibraryStore {
                     guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
                     return NodeMatch(nodeId: row[column], source: row["source"],
                                      sourceId: row["source_id"], method: method,
-                                     matchedAt: row["matched_at"])
+                                     matchedAt: row["matched_at"],
+                                     deletedAt: row["deleted_at"],
+                                     mergedInto: row["merged_into"],
+                                     checkedAt: row["checked_at"])
                 }
         }
         return NodeMatchRanking.ordered(rows)

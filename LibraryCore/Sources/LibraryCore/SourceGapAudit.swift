@@ -200,3 +200,64 @@ public extension LibraryStore {
         }
     }
 }
+
+// MARK: - What the source says about a record we hold (#48)
+
+public extension LibraryStore {
+
+    /// Records what a fetch learned about a record's continued existence.
+    ///
+    /// 🚨 Called wherever a record is fetched — a re-match, a refresh, an
+    /// enrichment — because that is the whole economy of this feature: the flag
+    /// rides along on requests already being made, so knowing costs nothing.
+    ///
+    /// ⚠️ `checkedAt` is stamped on EVERY call, including the ordinary one
+    /// where nothing is wrong. Without it there is no way to tell "confirmed
+    /// still there this morning" from "never asked", and an audit that cannot
+    /// distinguish those is reporting its own ignorance as a clean bill.
+    ///
+    /// ⭐ And a flag can go AWAY. Upstream deletions are reversible — a
+    /// moderator restores a record, a merge is undone — so a fetch that finds
+    /// the record alive clears both marks. A flag that only accumulates leaves
+    /// permanent false findings, and an audit that cannot be cleared is one
+    /// people stop reading.
+    func recordSourceState(nodeId: String, source: String, isVideo: Bool,
+                           deletedAt: Date? = nil, mergedInto: String? = nil,
+                           at date: Date = Date()) throws {
+        let table = isVideo ? "video_match" : "entity_match"
+        let column = isVideo ? "video_id" : "entity_id"
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE \(table)
+                   SET deleted_at = ?, merged_into = ?, checked_at = ?
+                 WHERE \(column) = ? AND source = ?
+                """, arguments: [deletedAt, mergedInto, date, nodeId, source])
+        }
+    }
+
+    /// Every match this library holds that the source says is gone or moved.
+    ///
+    /// ⚠️ Reads only what was PERSISTED. It performs no network access, which
+    /// is the property that makes the audit openable at any time — and the
+    /// reason the flag has to be stored rather than merely seen.
+    func staleMatches(isVideo: Bool) throws -> [NodeMatch] {
+        let table = isVideo ? "video_match" : "entity_match"
+        let column = isVideo ? "video_id" : "entity_id"
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT \(column), source, source_id, method, matched_at,
+                       deleted_at, merged_into, checked_at
+                  FROM \(table)
+                 WHERE deleted_at IS NOT NULL OR merged_into IS NOT NULL
+                """).compactMap { row in
+                guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
+                return NodeMatch(nodeId: row[column], source: row["source"],
+                                 sourceId: row["source_id"], method: method,
+                                 matchedAt: row["matched_at"],
+                                 deletedAt: row["deleted_at"],
+                                 mergedInto: row["merged_into"],
+                                 checkedAt: row["checked_at"])
+            }
+        }
+    }
+}
