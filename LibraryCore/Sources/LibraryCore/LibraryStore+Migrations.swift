@@ -778,6 +778,25 @@ extension LibraryStore {
             }
         }
 
+        // v38 — what a stale match USED to point at, kept after it is gone.
+        //
+        // 🚨 Exists because clearing must be COMPLETE. A node left with an edge
+        // but no columns, or columns but no edge, claims an identity it cannot
+        // produce — the exact state `Missing Identities` reports and that no
+        // amount of re-matching fixes. So the profile clears entirely and the
+        // history lives here, which is also the only way to answer "what was
+        // this matched to, and when did it go" afterwards.
+        migrator.registerMigration("v38") { db in
+            try db.create(table: "resolved_stale_match") { t in
+                t.column("node_id", .text).notNull()
+                t.column("source", .text).notNull()
+                t.column("former_source_id", .text).notNull()
+                t.column("resolved_at", .datetime).notNull()
+                t.column("outcome", .text).notNull()
+                t.primaryKey(["node_id", "source"])
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }
