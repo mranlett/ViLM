@@ -208,6 +208,13 @@ extension LibraryStore {
         var written = 0
         for credit in credits {
             // ⭐ Resolved: a credit edge must point at the local node.
+            //
+            // ⚠️ Resolves, never mints — the same rule `connectEdges` follows.
+            // A newly matched video's cast HAS no node yet, and the fix for
+            // that belongs at the confirmation, which has the evidence: see
+            // `ensureActorProfile` and its call in `VideoEnrichmentModel`.
+            // Minting here instead would put node creation inside an
+            // edge writer, where a bulk re-connect would also trigger it.
             guard let performerId = resolver.localId(for: "actor:\(credit.name)")
             else { continue }
             try recordPerformerCredit(

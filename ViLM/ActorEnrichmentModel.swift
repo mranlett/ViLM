@@ -85,10 +85,25 @@ final class ActorEnrichmentModel: ObservableObject {
     private let entityId: String
     private let currentProfile: EntityProfile?
 
-    /// The name as the library currently stores it, from the `actor:Name` id.
+    /// The name as the library currently stores it.
+    ///
+    /// 🚨 From the COLUMNS, never parsed out of the id. This split the id on
+    /// ":" and returned the whole thing when there was none — so after the
+    /// re-key every uid-keyed actor reported its own uid as its name, and the
+    /// rename row offered to rename `94E48120-…` to the name it already had.
+    ///
+    /// ⚠️ Not merely cosmetic. `proposedName` compares the source's title to
+    /// this, so a uid never matched and a rename was offered on EVERY match
+    /// even when the spellings were identical — and `renameWouldBeNoOp` could
+    /// not recognise the no-op, so the rename actually fired, against a tag
+    /// that does not exist.
+    ///
+    /// Stored value first, then the name the caller opened us with, then the
+    /// id-derived one for a library that has not been re-keyed.
     var localName: String {
-        guard let colon = entityId.firstIndex(of: ":") else { return entityId }
-        return String(entityId[entityId.index(after: colon)...])
+        if let stored = currentProfile?.name, !stored.isEmpty { return stored }
+        if !entityName.isEmpty { return entityName }
+        return NodeIdentity.parse(entityId)?.displayName ?? entityId
     }
 
     /// The source's spelling, when it differs from ours.
@@ -109,8 +124,11 @@ final class ActorEnrichmentModel: ObservableObject {
     /// an action that silently does nothing.
     var renameWouldBeNoOp: Bool {
         guard let proposedName else { return true }
+        // ⚠️ Against the NAME, not the id. Normalising a uid as a tag compares
+        // the proposal to a meaningless string, so no rename ever looked like
+        // a no-op and the toggle stayed armed on every match.
         return TagNormalizer.normalize(fullTag: "actor:\(proposedName)")
-            == TagNormalizer.normalize(fullTag: entityId)
+            == TagNormalizer.normalize(fullTag: "actor:\(localName)")
     }
 
     /// The name to rename to, or nil when the user declined or there is nothing

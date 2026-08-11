@@ -694,6 +694,30 @@ final class VideoEnrichmentModel: ObservableObject {
                                                   accepting: accepted, acceptedTags: acceptedTags,
                                                   offeredTags: tagOptions.map(\.name))
 
+        // 🚨 Connect the video to the graph it just acquired.
+        //
+        // Confirming a match created the studio's node and the cast's, and
+        // wrote the credit edges — but nothing joined the VIDEO to its studio.
+        // `connectEdges` is the existing, tested function for "make this
+        // video's edges match its text", and it was only ever called on a
+        // MOVE. So a freshly matched video sat beside a studio node with no
+        // edge between them, and browsing the studio did not find it.
+        //
+        // ⚠️ After `updateAsset` below would be too late for the caller, which
+        // owns the asset write — so this runs against the merged text and is
+        // idempotent, which `connectEdges` already is.
+        if let url = LibrarySession.shared.url(for: asset.id),
+           let store = try? LibraryStore(at: url) {
+            try? store.updateAsset(merged)
+            // ⚠️ The cast needs NODES before edges can point at them, and
+            // `connectEdges` resolves rather than mints. A confirmed match is
+            // the evidence that justifies creating them — the same evidence
+            // `confirmStudio` acts on for the studio, which had a row while
+            // its cast did not.
+            for name in merged.actors { _ = try? store.ensureActorProfile(name) }
+            _ = try? store.connectEdges(forVideo: asset.id)
+        }
+
         // ⚠️ The credits go in here rather than beside the returned asset,
         // because they are edge data: the caller persists the ASSET, and
         // nothing it does would carry a `credited_as` with it.

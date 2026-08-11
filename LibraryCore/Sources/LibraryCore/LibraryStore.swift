@@ -460,6 +460,31 @@ public class LibraryStore {
         return true
     }
 
+    /// A node for a performer the library has only ever seen as a cast string.
+    ///
+    /// 🚨 The counterpart of `ensureStudioProfile`, and its absence was a real
+    /// hole. Confirming a video match created the STUDIO's row but not the
+    /// cast's, so `recordCredits` and `propagateIdentities` — both of which
+    /// resolve a name to a node and skip when there is none — silently wrote
+    /// nothing for every performer on a newly matched video. The scene record
+    /// hands over each performer's name, their source id, how they were
+    /// credited and their billing, and all four were discarded.
+    ///
+    /// ⚠️ Minting from a name is normally refused (`entityId(named:)` never
+    /// does it), and that rule is right: a name appearing somewhere is not
+    /// evidence a person exists. A CONFIRMED MATCH is different — the source
+    /// has told us this performer is in this scene, which is exactly the
+    /// evidence `confirmStudio` already acts on for the studio.
+    @discardableResult
+    public func ensureActorProfile(_ name: String) throws -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = try fetchEntityProfile(named: trimmed, type: "actor") { return existing.id }
+        let profile = try newEntityProfile(named: trimmed, type: "actor")
+        try saveEntityProfile(profile)
+        return profile.id
+    }
+
     /// Records that a studio came from an external source, and is therefore
     /// verified.
     ///
