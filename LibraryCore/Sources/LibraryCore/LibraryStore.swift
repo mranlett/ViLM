@@ -555,6 +555,29 @@ public class LibraryStore {
         }
     }
 
+    /// The profile for an id that may be a stored key OR a `type:Name` form.
+    ///
+    /// 🚨 The re-key left a class of caller stranded, and this is the fix for
+    /// all of them. `fetchEntityProfile(for:)` is a primary-key lookup with no
+    /// resolution, so a name-form id finds nothing once ids are uids — and a
+    /// screen that derives its id from a SELECTION rather than from a loaded
+    /// row has only the name form to offer.
+    ///
+    /// ⚠️ The failure was invisible and self-perpetuating. `ProfileGraphHeader`
+    /// used `entityProfile?.id ?? nameForm`: with no profile loaded it asked by
+    /// name form, got nothing, so no profile was ever loaded to supply the real
+    /// id. The page needed the profile in order to find the profile, and it
+    /// rendered blank for every performer on a re-keyed library — while the
+    /// grid, which reads a name-keyed index, looked perfectly healthy.
+    ///
+    /// ⭐ Key first, then name. A stored uid is unambiguous; the name form is
+    /// the fallback, so this never prefers a name match over an exact one.
+    public func fetchEntityProfileResolving(_ id: String) throws -> EntityProfile? {
+        if let direct = try fetchEntityProfile(for: id) { return direct }
+        guard let identity = NodeIdentity.parse(id) else { return nil }
+        return try fetchEntityProfile(named: identity.displayName, type: identity.type)
+    }
+
     /// The profile for a node of this type with this display name.
     ///
     /// 🚨 The lookup that survives the re-key. Callers overwhelmingly hold a

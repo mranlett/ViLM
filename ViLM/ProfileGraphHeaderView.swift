@@ -997,7 +997,13 @@ struct ProfileGraphHeaderView: View {
             // whose rating lives only in an attachment must still show it.
             var layers: [[String: EntityProfile]] = []
             for libURL in LibrarySession.shared.allURLs {
-                if let profile = try LibraryStore(at: libURL).fetchEntityProfile(for: id) {
+                // ⚠️ RESOLVING, because `id` here is `currentEntityId`, which
+                // falls back to the `actor:Name` form when no profile has been
+                // loaded yet. A plain key lookup finds nothing for that on a
+                // re-keyed library — so the page could never load the profile
+                // that would have supplied the real id, and rendered blank for
+                // every performer while the grid looked healthy.
+                if let profile = try LibraryStore(at: libURL).fetchEntityProfileResolving(id) {
                     layers.append([id: profile])
                 }
             }
@@ -1011,7 +1017,8 @@ struct ProfileGraphHeaderView: View {
     /// merged view to an editor: saving merged form state wholesale would
     /// copy other libraries' fields into the owner — an accidental merge.
     private func ownerRawProfile(for id: String) -> EntityProfile? {
-        (try? LibrarySession.shared.store(forProfile: id).fetchEntityProfile(for: id)) ?? nil
+        (try? LibrarySession.shared.store(forProfile: id)
+            .fetchEntityProfileResolving(id)) ?? nil
     }
 
     /// Records WHICH external record this profile is, as a graph edge.
