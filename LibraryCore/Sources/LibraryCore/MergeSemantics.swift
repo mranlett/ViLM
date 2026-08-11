@@ -82,6 +82,12 @@ public enum MergeSemantics {
             enrichmentState: newerChecked(higher, lower).enrichmentState,
             enrichmentSource: newerChecked(higher, lower).enrichmentSource,
             enrichmentCheckedAt: newerChecked(higher, lower).enrichmentCheckedAt,
+            // ⚠️ Carried like everything else. Dropping these would send a
+            // merged performer back onto the photo worklist — and because the
+            // galleries UNION here, the held count is exceeded anyway when
+            // there is genuinely more to fetch.
+            photoTopUpAt: higher.photoTopUpAt ?? lower.photoTopUpAt,
+            photoTopUpHeld: higher.photoTopUpHeld ?? lower.photoTopUpHeld,
             links: EntityLink.merged(higher.links, adding: lower.links)
         )
         merged.enrichmentSourceId = higher.enrichmentSourceId ?? lower.enrichmentSourceId

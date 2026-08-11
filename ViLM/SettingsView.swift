@@ -43,6 +43,11 @@ struct SettingsView: View {
     /// its own tool: unlike them it OFFERS actions, and folding it into a
     /// screen that promises none would break that screen's own footer.
     var onStaleMatches: (() -> Void)?
+
+    /// Two profiles claiming one record at the source — the duplicate check
+    /// that needs no heuristic, and the only one that can reach a profile with
+    /// no name.
+    var onSameIdentity: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
@@ -206,6 +211,9 @@ struct SettingsView: View {
                     // so it opens instantly and works offline.
                     toolButton("Gone at the Source",
                                icon: "questionmark.folder", action: onStaleMatches)
+                        .disabled(session.isFederated)
+                    toolButton("Same Person, Twice",
+                               icon: "person.2.crop.square.stack", action: onSameIdentity)
                         .disabled(session.isFederated)
                 }
 

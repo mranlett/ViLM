@@ -129,6 +129,7 @@ struct ContentView: View {
     @State private var isShowingStudioAudit = false
     @State private var isShowingGraphAudit = false
     @State private var isShowingStaleMatches = false
+    @State private var isShowingSameIdentity = false
     /// The video an audit finding asked to open, run once its sheet has closed.
     @State private var pendingAuditVideo: (() -> Void)?
     /// The repair a studio finding asked for, run once the audit sheet has
@@ -374,6 +375,14 @@ struct ContentView: View {
                         // bug — correct on a Mac, a no-op on a phone.
                         pendingAuditVideo = { openAsset(assetID) }
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingSameIdentity) {
+                if let url = selectedLibraryURL {
+                    SameIdentityView(libraryURL: url, onRefresh: {
+                        reloadUnionAssets()
+                        loadEntityProfiles(from: url)
+                    })
                 }
             }
             .sheet(isPresented: $isShowingStaleMatches) {
@@ -798,6 +807,7 @@ struct ContentView: View {
                 onStudioAudit: { isShowingStudioAudit = true },
                 onGraphAudit: { isShowingGraphAudit = true },
                 onStaleMatches: { isShowingStaleMatches = true },
+                onSameIdentity: { isShowingSameIdentity = true },
                 onConnectGraph: { isShowingGraphConnect = true },
                 onResetMatches: { isShowingMatchReset = true },
                 onMoveVideos: { isShowingLibraryTransfer = true },
