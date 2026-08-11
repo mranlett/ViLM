@@ -284,10 +284,15 @@ final class ActorBatchMatchModel: ObservableObject {
 
         // What the source said about the record still existing (#48).
         //
-        // ⭐ The highest-yield place in the app to learn it. This path fetches
-        // by an id the library ALREADY holds, in bulk — so one sweep re-checks
-        // every matched performer at no extra request cost, which is the whole
-        // economy of the feature.
+        // ⚠️ NOT a bulk re-check of the whole library, despite appearances.
+        // `ActorBatchPolicy.skipReason` skips anything already `matched`, so
+        // this fires only for performers being identified for the first time
+        // and for those whose identity was handed down by a video match and
+        // never looked up. Re-checking settled matches is `Check now` on
+        // *Gone at the Source*, and only that.
+        //
+        // ⭐ Still worth taking: these fetches are happening anyway, so the
+        // state costs nothing.
         if let store = try? LibrarySession.shared.store(forProfile: profile.id) {
             try? store.recordSourceState(proposal.recordState, nodeId: profile.id,
                                          source: provider.displayName,

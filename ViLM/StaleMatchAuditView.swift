@@ -268,67 +268,41 @@ struct StaleMatchAuditView: View {
                     return
                 }
 
-                var failed = 0
-                // 🚨 Counted SEPARATELY from an unreachable one, because they
-                // are not the same answer and the difference is the whole
-                // open question about this feature.
-                //
-                // A timeout means the source said nothing. `notFound` means it
-                // answered: "I have no record under that id." If the source
-                // returns deleted performers as null rather than as records
-                // flagged `deleted`, this is the ONLY signal we will ever get —
-                // and lumping it in with dropped connections made the feature
-                // look permanently, inexplicably empty.
-                //
-                // ⚠️ Counted, NOT flagged as a deletion. A missing id is still
-                // ambiguous between "removed" and "merged away under a new id",
-                // and U2's rule is that we do not record a conclusion we have
-                // not actually been given. Measure first.
-                var notFound = 0
-                for target in targets {
-                    if Task.isCancelled { break }
-                    let state: SourceRecordState?
-                    do {
-                        if target.isVideo, let provider = videoProvider {
-                            state = try await provider.fetch(videoId: target.sourceId).recordState
-                        } else if !target.isVideo, let provider = actorProvider {
-                            state = try await provider.fetch(actorId: target.sourceId).recordState
-                        } else {
-                            state = nil
+                // ⭐ The accounting lives in `SourceRecheck`, where it can be
+                // tested without a provider or a network. What is left here is
+                // the fetch itself and the progress reporting.
+                let summary = await SourceRecheck.run(
+                    targets: targets,
+                    ask: { target in
+                        do {
+                            if target.isVideo, let provider = videoProvider {
+                                return .state(try await provider
+                                    .fetch(videoId: target.sourceId).recordState)
+                            }
+                            if !target.isVideo, let provider = actorProvider {
+                                return .state(try await provider
+                                    .fetch(actorId: target.sourceId).recordState)
+                            }
+                            return .unreachable
+                        } catch let error as PluginError {
+                            if case .notFound = error { return .notFound }
+                            return .unreachable
+                        } catch {
+                            return .unreachable
                         }
-                    } catch let error as PluginError {
-                        // Concluded nothing either way — but WHICH nothing
-                        // matters, so the two are counted apart.
-                        if case .notFound = error { notFound += 1 } else { failed += 1 }
-                        state = nil
-                    } catch {
-                        failed += 1
-                        state = nil
-                    }
-                    if let state {
-                        try? store.recordSourceState(state, nodeId: target.nodeId,
-                                                     source: target.isVideo
-                                                        ? (videoProvider?.displayName ?? "")
-                                                        : (actorProvider?.displayName ?? ""),
-                                                     sourceId: target.sourceId,
-                                                     isVideo: target.isVideo)
-                    }
-                    checked += 1
-                }
-                // ⚠️ Says how many could not be reached. Without it a sweep
-                // that failed nine times in ten reads as a clean bill.
-                var parts = ["Checked \(checked) of \(toCheck)."]
-                if failed > 0 {
-                    parts.append("\(failed) could not be reached and were left as they were.")
-                }
-                if notFound > 0 {
-                    // ⭐ Said in full, because this is the number that decides
-                    // whether the feature can work at all. If the source
-                    // answers "no such record" for matches we hold, that is
-                    // where every upstream deletion is hiding.
-                    parts.append("\(notFound) returned no record at all under the id we hold — the source may report deletions this way rather than with a flag.")
-                }
-                checkNote = parts.joined(separator: " ")
+                    },
+                    record: { target, state in
+                        try? store.recordSourceState(
+                            state, nodeId: target.nodeId,
+                            source: target.isVideo
+                                ? (videoProvider?.displayName ?? "")
+                                : (actorProvider?.displayName ?? ""),
+                            sourceId: target.sourceId, isVideo: target.isVideo)
+                    },
+                    isCancelled: { Task.isCancelled },
+                    progress: { checked = $0 })
+
+                checkNote = summary.sentence(of: toCheck)
             } catch {
                 checkNote = "Couldn't re-check: \(error.localizedDescription)"
             }
