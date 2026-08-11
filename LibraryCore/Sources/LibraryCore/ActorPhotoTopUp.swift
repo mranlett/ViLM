@@ -45,11 +45,21 @@ public enum ActorPhotoTopUp {
     /// key the order among the hundreds of actors with exactly one photo would
     /// depend on how the profiles happened to be loaded, and the list would
     /// reshuffle every time it opened.
+    /// - Parameter includingExhausted: show performers the source already had
+    ///   nothing more for. Off by default, and offered rather than permanent —
+    ///   the source gains pictures over time, so "nothing more" is a fact about
+    ///   a moment, not forever.
     public static func worklist(_ profiles: [EntityProfile],
-                                threshold: Int = defaultThreshold) -> [Candidate] {
+                                threshold: Int = defaultThreshold,
+                                includingExhausted: Bool = false) -> [Candidate] {
         profiles.compactMap { profile -> Candidate? in
             let count = imageCount(profile)
             guard count < threshold else { return nil }
+            // 🚨 The convergence rule. Without it a performer the source has
+            // one picture of can never reach the threshold, so they sat on the
+            // list permanently and were re-fetched on every run, always for
+            // nothing — the list could not be worked to the end.
+            guard includingExhausted || !isExhausted(profile) else { return nil }
             return Candidate(profile: profile, photoCount: count,
                              canFetch: hasSourceIdentity(profile))
         }
@@ -70,6 +80,28 @@ public enum ActorPhotoTopUp {
         var urls = Set(profile.galleryUrls.filter { !$0.isEmpty })
         if let photo = profile.photoUrl, !photo.isEmpty { urls.insert(photo) }
         return urls.count
+    }
+
+    /// The source was asked and had nothing we do not already hold.
+    ///
+    /// ⭐ Compared against what we HELD at the time, so a picture arriving
+    /// later by any route makes them eligible again on its own. Nothing has to
+    /// remember to clear a flag.
+    public static func isExhausted(_ profile: EntityProfile) -> Bool {
+        guard profile.photoTopUpAt != nil, let held = profile.photoTopUpHeld else { return false }
+        return imageCount(profile) <= held
+    }
+
+    /// Records that the source had nothing more, for a profile as it stands.
+    ///
+    /// ⚠️ Pure — returns the profile to save. Deciding is separable from
+    /// writing, which is the rule the rest of this type follows.
+    public static func markingExhausted(_ profile: EntityProfile,
+                                        at date: Date = Date()) -> EntityProfile {
+        var marked = profile
+        marked.photoTopUpAt = date
+        marked.photoTopUpHeld = imageCount(profile)
+        return marked
     }
 
     static func hasSourceIdentity(_ profile: EntityProfile) -> Bool {

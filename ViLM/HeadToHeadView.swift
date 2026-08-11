@@ -25,6 +25,7 @@
 
 import SwiftUI
 import LibraryCore
+import ImageIO
 
 struct HeadToHeadView: View {
     let entityProfiles: EntityProfileIndex
@@ -40,6 +41,17 @@ struct HeadToHeadView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isShowingPool = false
     @State private var isShowingStandings = false
+
+    /// Which contenders have their videos revealed.
+    ///
+    /// ⚠️ Keyed by profile id and NOT cleared between pairs on purpose: an
+    /// operator who opened the strip is telling us they want to see it, and
+    /// re-collapsing it every round would make the affordance useless at the
+    /// pace this screen is played at.
+    @State private var expandedVideos: Set<String> = []
+
+    /// The still being shown full size.
+    @State private var enlarged: Asset?
 
     /// 🚨 The game's OWN pool, not the actor grid's saved default.
     ///
@@ -91,6 +103,12 @@ struct HeadToHeadView: View {
                     await model.load(profiles: entityProfiles, assets: assets,
                                      photoFileNames: profileImageFileNames,
                                      pool: pool, fallbackLibrary: libraryURL)
+                }
+                // ⭐ The still, at the size it is actually judged at. Tapping
+                // anywhere dismisses — this is a look, not a screen to
+                // navigate, and the game's pace depends on getting back fast.
+                .sheet(item: $enlarged) { asset in
+                    enlargedStill(asset)
                 }
                 .sheet(isPresented: $isShowingStandings) {
                     PreferenceLeaderboardView(entityProfiles: entityProfiles,
@@ -158,6 +176,73 @@ struct HeadToHeadView: View {
 
     // MARK: - One contender
 
+    /// The contender's videos from YOUR library, as stills.
+    ///
+    /// ⭐ Ids come from `knownFor`, which produced the count above them in the
+    /// same pass — so the strip can never disagree with the number the operator
+    /// just read. Filtering `assets` here by name would re-express the
+    /// AKA-crediting rule and drift from it.
+    @ViewBuilder
+    private func videoStrip(for side: HeadToHeadModel.Side) -> some View {
+        let byId = Dictionary(assets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let shown = side.knownFor.videos.prefix(stripLimit)
+
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(Array(shown), id: \.id) { ref in
+                    if let asset = byId[ref.id] {
+                        Button {
+                            enlarged = asset
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                VideoThumbnailView(asset: asset,
+                                                   libraryURL: LibrarySession.shared.url(for: asset.id))
+                                    .frame(width: 96, height: 54)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                Text(ref.title)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .frame(width: 96, alignment: .leading)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                // ⚠️ Whatever is cut is COUNTED and said out loud. A strip that
+                // quietly stops reads as a performer with fewer videos than the
+                // line above it just claimed.
+                if side.knownFor.videos.count > stripLimit {
+                    Text("+\(side.knownFor.videos.count - stripLimit)")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .frame(height: 54)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The still, full size, with every contact-sheet frame behind it.
+    ///
+    /// ⭐ Tap advances. A contact sheet is ONE composite image, so the frames
+    /// are sliced out of it with `ContactSheetLayout` — the inverse of the
+    /// geometry that composed it — rather than re-extracted from the video,
+    /// which would mean an AVFoundation pass per look.
+    ///
+    /// ⚠️ The poster frame comes FIRST. It is the image the operator tapped,
+    /// and opening onto a different one would read as the wrong video.
+    @ViewBuilder
+    private func enlargedStill(_ asset: Asset) -> some View {
+        StillBrowser(asset: asset) { enlarged = nil }
+    }
+
+    /// ⚠️ Bounded. A performer with two hundred videos would otherwise build
+    /// two hundred thumbnail views inside a card the operator scrolls past in
+    /// a second.
+    private var stripLimit: Int { 12 }
+
     private func contender(_ side: HeadToHeadModel.Side,
                            choosing outcome: PreferenceOutcome) -> some View {
         VStack(spacing: 8) {
@@ -211,12 +296,38 @@ struct HeadToHeadView: View {
                     // ⚠️ A popularity signal in a preference judgement, shown
                     // at the operator's explicit choice after being told. A
                     // DELIBERATE trade, not an oversight.
-                    Text(side.knownFor.videoCount == 1
-                         ? "1 video" : "\(side.knownFor.videoCount) videos")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    //
+                    // ⭐ Now a disclosure, matching "Known for" in the actor
+                    // disambiguation sheet — same chevron, same reveal, same
+                    // horizontal strip of stills. The difference is the source
+                    // of the evidence: there it is the provider's scenes, here
+                    // it is YOUR library.
+                    Button {
+                        if expandedVideos.contains(side.profile.id) {
+                            expandedVideos.remove(side.profile.id)
+                        } else {
+                            expandedVideos.insert(side.profile.id)
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: expandedVideos.contains(side.profile.id)
+                                  ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9))
+                            Text(side.knownFor.videoCount == 1
+                                 ? "1 video" : "\(side.knownFor.videoCount) videos")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+
+            if expandedVideos.contains(side.profile.id) {
+                videoStrip(for: side)
+            }
 
             Button {
                 model.choose(outcome)
@@ -335,5 +446,102 @@ private struct PoolPicker: View {
                                allUniqueTags: allUniqueTags,
                                criteria: $criteria)
             .onDisappear { onApply(criteria) }
+    }
+}
+
+/// The poster frame plus every contact-sheet frame, one at a time.
+///
+/// 🚨 Slices the sheet rather than re-extracting frames. A contact sheet is a
+/// single composite JPEG already on disk; pulling twelve frames out of the
+/// video again would mean an AVFoundation pass every time someone glanced at a
+/// contender, on a screen whose whole point is speed.
+///
+/// ⚠️ Loaded off the main actor and only when opened. Twelve full-size crops
+/// per contender, built eagerly for both sides of every pair, is exactly the
+/// kind of work that makes a game feel heavy.
+private struct StillBrowser: View {
+    let asset: Asset
+    let onClose: () -> Void
+
+    @State private var frames: [CGImage] = []
+    @State private var index = 0
+    @State private var isLoading = true
+
+    private var total: Int { frames.count }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView()
+                } else if frames.isEmpty {
+                    // ⚠️ Says why rather than showing an empty black screen.
+                    // A video with no contact sheet yet is the common case for
+                    // anything added recently.
+                    ContentUnavailableView("No stills yet",
+                                           systemImage: "photo.on.rectangle",
+                                           description: Text("This video has no contact sheet. Generate one from the video's own page and its frames will appear here."))
+                } else {
+                    Image(decorative: frames[index], scale: 1)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // ⭐ Tap anywhere advances, wrapping. This is a look,
+                        // not a screen to navigate — the game's pace depends
+                        // on getting through it without aiming at controls.
+                        .contentShape(Rectangle())
+                        .onTapGesture { index = (index + 1) % total }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.92))
+            .navigationTitle(total > 1 ? "\(index + 1) of \(total)" : "")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onClose)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text(ActorKnownFor.displayTitle(asset))
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal).padding(.bottom, 8)
+            }
+        }
+        .macSheet(minWidth: 720, minHeight: 480)
+        .task { await load() }
+    }
+
+    private func load() async {
+        let posterURL = LibrarySession.shared.thumbnailURL(for: asset.id)
+        let sheetURL = LibrarySession.shared.contactSheetURL(for: asset.id)
+
+        let loaded: [CGImage] = await Task.detached(priority: .userInitiated) {
+            var out: [CGImage] = []
+            // The poster first — it is the image that was tapped.
+            if let posterURL, let poster = Self.image(at: posterURL) { out.append(poster) }
+            if let sheetURL, let sheet = Self.image(at: sheetURL) {
+                let size = CGSize(width: sheet.width, height: sheet.height)
+                for rect in ContactSheetLayout.pixelCells(forSheetOfSize: size) {
+                    // ⚠️ `cropping` returns nil for a rect outside the image,
+                    // which is the correct answer for a sheet laid out
+                    // differently from today's constants — skip, never crash.
+                    if let cell = sheet.cropping(to: rect) { out.append(cell) }
+                }
+            }
+            return out
+        }.value
+
+        frames = loaded
+        isLoading = false
+    }
+
+    private static func image(at url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }

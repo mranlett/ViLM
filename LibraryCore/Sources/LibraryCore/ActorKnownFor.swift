@@ -18,15 +18,40 @@ import Foundation
 public enum ActorKnownFor {
 
     /// What to show beside a performer.
+    /// One of the performer's videos, for a caller that wants to SHOW it.
+    public struct VideoRef: Equatable, Sendable, Identifiable {
+        public let id: UUID
+        public let title: String
+
+        public init(id: UUID, title: String) {
+            self.id = id
+            self.title = title
+        }
+    }
+
     public struct Summary: Equatable, Sendable {
         /// A few titles, best-first. Empty when nothing has a usable name.
         public let titles: [String]
         /// Every video crediting them — NOT just the ones listed above.
         public let videoCount: Int
 
-        public init(titles: [String], videoCount: Int) {
+        /// Every crediting video, in the same order, for showing stills.
+        ///
+        /// 🚨 Produced by the SAME pass as `videoCount`, and deliberately not
+        /// deduped or limited: `videos.count == videoCount` always. A card
+        /// reading "9 videos" that expands to show 7 is the contradiction the
+        /// AKA-crediting rule already exists to prevent one layer up, and
+        /// filtering the assets again in the view is exactly how the two would
+        /// drift apart.
+        ///
+        /// ⚠️ Unlike `titles`, two files of one scene appear twice — because
+        /// they are two videos, and the count says so.
+        public let videos: [VideoRef]
+
+        public init(titles: [String], videoCount: Int, videos: [VideoRef] = []) {
             self.titles = titles
             self.videoCount = videoCount
+            self.videos = videos
         }
     }
 
@@ -62,7 +87,33 @@ public enum ActorKnownFor {
 
         return byActor.mapValues { videos in
             Summary(titles: bestTitles(from: videos, limit: limit),
-                    videoCount: videos.count)
+                    videoCount: videos.count,
+                    videos: refs(from: videos))
+        }
+    }
+
+    /// Every crediting video, newest first, by the same rule as `bestTitles`.
+    ///
+    /// ⚠️ Shares the ordering so the expanded stills appear in the order the
+    /// titles above them led the operator to expect. An untitled video is still
+    /// listed — it is one of the videos the count counted — under whatever
+    /// `displayTitle` can produce for it.
+    static func refs(from videos: [Asset]) -> [VideoRef] {
+        videos
+            .sorted { orderedBefore(($0.releaseDate, displayTitle($0)),
+                                    ($1.releaseDate, displayTitle($1))) }
+            .map { VideoRef(id: $0.id, title: displayTitle($0)) }
+    }
+
+    /// Newest first; nils last, because "no date" is not "oldest". Ties fall
+    /// back to the title so the order never depends on load order.
+    static func orderedBefore(_ a: (date: String?, title: String),
+                              _ b: (date: String?, title: String)) -> Bool {
+        switch (a.date, b.date) {
+        case let (x?, y?) where x != y: return x > y
+        case (nil, _?): return false
+        case (_?, nil): return true
+        default: return a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
     }
 
@@ -104,7 +155,11 @@ public enum ActorKnownFor {
     /// A file name is a poor title but a perfectly good reminder, and dropping
     /// those videos would leave the least-catalogued performers with nothing
     /// shown — which is the opposite of helpful.
-    static func displayTitle(_ asset: Asset) -> String {
+    ///
+    /// ⚠️ Public so a caller showing one of these videos labels it the SAME
+    /// way the summary did. A second expression of "what to call this video"
+    /// would drift, and the two are read side by side.
+    public static func displayTitle(_ asset: Asset) -> String {
         let block = asset.seriesTitleBlock.trimmingCharacters(in: .whitespaces)
         if !block.isEmpty { return block }
         return (asset.fileName as NSString).deletingPathExtension
