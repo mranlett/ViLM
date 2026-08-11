@@ -220,40 +220,23 @@ struct AliasSplitMergeView: View {
         }
     }
 
+    /// ⭐ The decision lives in `AliasMerge`, where it can be tested. Both
+    /// halves of it shipped broken inside this view: it passed profile ids to
+    /// a function that matches tag strings, and then discarded the result, so
+    /// a rename that matched nothing counted as a merge.
     private func merge(losing: String, surviving: String) async {
         pending = nil
         isMerging = true
-        do {
-            let url = libraryURL
-            let outcome = try await Task.detached(priority: .userInitiated) {
-                // The existing global rename already merges two profiles: the
-                // destination keeps its own values, the source fills gaps, and
-                // photos, AKAs and links are unioned rather than replaced. It
-                // also moves the graph edges and records a tombstone, so the
-                // losing name cannot come back on the next sync.
-                //
-                // ⚠️ The tag form, which is what the rename matches on — a
-                // profile id matches nothing. Assembled by `EntityProfile`
-                // rather than here, so this view cannot get the rule slightly
-                // different from everywhere else that needs it.
-                try LibraryStore(at: url).renameTagGlobally(
-                    oldTag: EntityProfile.actorTag(losing),
-                    newTag: EntityProfile.actorTag(surviving))
-            }.value
+        let url = libraryURL
+        let outcome = await Task.detached(priority: .userInitiated) {
+            AliasMerge.perform(losing: losing, surviving: surviving, in: url)
+        }.value
 
-            // 🚨 The result is CHECKED. It used to be discarded with `_ =`, so
-            // a rename that matched nothing counted as a successful merge —
-            // the row disappeared from the list and the two profiles were
-            // still there, which is exactly how this went unnoticed.
-            guard outcome.changedAnything else {
-                errorMessage = "Nothing changed — no video, profile or tag was found under “\(losing)”. The two profiles are unchanged."
-                isMerging = false
-                return
-            }
+        if let message = outcome.message {
+            errorMessage = message
+        } else {
             merged += 1
             await load()
-        } catch {
-            errorMessage = "Couldn't merge those: \(error.localizedDescription)"
         }
         isMerging = false
     }

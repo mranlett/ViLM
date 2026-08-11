@@ -155,6 +155,34 @@ final class VideoEnrichmentModel: ObservableObject {
 
     var hasAnythingToApply: Bool { !accepted.isEmpty || !acceptedTags.isEmpty }
 
+    /// Puts the model in the state a completed fetch leaves, for tests.
+    ///
+    /// ⚠️ A named seam rather than a registered fake provider. `provider` is
+    /// read from the global registry, so injecting one means installing it
+    /// process-wide — and what needs testing here is not the fetch, it is what
+    /// `apply()` WRITES: the studio, the cast nodes and the edges joining them
+    /// to the video. Those were silently absent for months.
+    /// The asset as the model holds it, so a test can build the same review
+    /// the sheet would show.
+    var subjectAssetForTesting: Asset { asset }
+
+    /// 🚨 Applies the SAME studio resolution `fetchAndReview` does, including
+    /// the studio the video already carries. Without it the seam leaves a
+    /// state the app never reaches — the raw proposal, before the settled
+    /// decision is honoured — and a test written against it would assert
+    /// behaviour that does not exist.
+    func prepareForTesting(proposal: VideoMetadataProposal, accepting: Set<String>) {
+        switch VideoEnrichmentReview.studioResolution(proposal: proposal,
+                                                      held: asset.studios,
+                                                      isVerified: isStudioVerified) {
+        case let .use(choice):
+            self.proposal = VideoEnrichmentReview.resolvingStudio(proposal, to: choice)
+        case .ask, .none:
+            self.proposal = proposal
+        }
+        self.accepted = accepting
+    }
+
     /// Whether there was ever more than one candidate to go back to. A picker
     /// of one was skipped, so offering to return to it would show a list with
     /// a single row and no alternative.
