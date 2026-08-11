@@ -24,6 +24,8 @@ final class EntityProfilePreservationTests: XCTestCase {
             homePage: "https://example.com",
             gender: "Female",
             hairColor: "Brown",
+            tattoos: "left forearm: anchor",
+            piercings: "septum",
             birthYear: 1990,
             countryOfOrigin: "US",
             rating: 4,
@@ -234,6 +236,110 @@ final class EntityProfilePreservationTests: XCTestCase {
         XCTAssertEqual(out.filter { $0.url == "https://a.example" }.count, 2,
                        "existing entries are preserved as-is")
         XCTAssertTrue(out.contains { $0.url == "https://b.example" })
+    }
+
+    // MARK: - 🚨 Generic: every copy path carries every field
+
+    /// Every stored property, by name.
+    ///
+    /// ⭐ Reflected rather than listed. The hand-written comparisons above go
+    /// stale the moment a column is added — nobody remembers to extend them,
+    /// so the new field is the one field not checked. This one covers a new
+    /// column the instant it exists.
+    private func fields(of profile: EntityProfile) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: Mirror(reflecting: profile).children.compactMap {
+            guard let label = $0.label else { return nil }
+            return (label, String(describing: $0.value))
+        })
+    }
+
+    /// Asserts a copy path preserved every field except those it is meant to change.
+    private func assertCarriesEveryField(
+        _ what: String, from original: EntityProfile, to copy: EntityProfile,
+        mayChange: Set<String> = [], file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let before = fields(of: original), after = fields(of: copy)
+        for (name, value) in before.sorted(by: { $0.key < $1.key })
+        where !mayChange.contains(name) {
+            XCTAssertEqual(after[name], value,
+                           "\(what) dropped or altered `\(name)`", file: file, line: line)
+        }
+    }
+
+    /// 🚨 The precondition everything else here depends on.
+    ///
+    /// A field left nil in the fixture cannot detect being dropped — nil
+    /// compares equal to nil. So the fixture must populate EVERY property, and
+    /// this fails when a new column is added without being given a value.
+    func testTheFixturePopulatesEveryFieldSoADropCanBeSeen() {
+        // ⚠️ A neutral id. `actor:Empty` would let `entityType` be derived from
+        // the id shape, making a populated field look like a default.
+        let empty = fields(of: EntityProfile(id: "x"))
+        for (name, value) in fields(of: fullyPopulated()).sorted(by: { $0.key < $1.key }) {
+            XCTAssertNotEqual(value, empty[name],
+                              "`\(name)` is at its default in the fixture, so no test here "
+                              + "can notice it being dropped")
+        }
+    }
+
+    /// ⚠️ `MergeSemantics` is the site that actually broke. It silently stopped
+    /// carrying the v39 photo-top-up columns, and the count-pinning test above
+    /// named it in the failure message without being able to detect it.
+    func testMergeSemanticsCarriesEveryField() {
+        let original = fullyPopulated()
+        let merged = MergeSemantics.mergedProfileView(
+            higher: original, lower: EntityProfile(id: original.id))
+
+        assertCarriesEveryField("MergeSemantics.mergedProfileView",
+                                from: original, to: merged)
+    }
+
+    /// Accepting nothing from a lookup must change nothing.
+    func testEnrichmentApplyCarriesEveryFieldWhenNothingIsAccepted() {
+        let original = fullyPopulated()
+        let merged = ActorEnrichment.apply(ActorMetadataProposal(), to: original,
+                                           entityId: original.id, accepting: [])
+
+        // ⚠️ The enrichment RESULT is the caller's to set — `apply` reports
+        // what the fields become, and `ActorEnrichmentModel` stamps the state,
+        // source and timestamp afterwards. Excluded with that reason stated,
+        // because an unexplained exclusion is how a real drop hides.
+        assertCarriesEveryField("ActorEnrichment.apply", from: original, to: merged,
+                                mayChange: ["enrichmentState", "enrichmentSource",
+                                            "enrichmentCheckedAt"])
+    }
+
+    func testRenameCarriesEveryFieldGenerically() {
+        let original = fullyPopulated()
+        let renamed = original.renamed(to: "actor:New Name")
+
+        // Renaming is precisely a change of id and name; everything else must
+        // survive it.
+        assertCarriesEveryField("EntityProfile.renamed(to:)", from: original, to: renamed,
+                                mayChange: ["id", "displayName"])
+    }
+
+    /// ⭐ The round trip through SQLite. A column added to the struct and not
+    /// to `encode(to:)`, `CodingKeys` or `init(from:)` is lost here — the
+    /// failure names which.
+    func testTheStoreRoundTripCarriesEveryField() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Preserve-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        defer {
+            LibraryStore.evictCachedConnections(keepingLibraryAt: nil)
+            try? FileManager.default.removeItem(at: url)
+        }
+        let store = try LibraryStore(at: url)
+
+        let original = fullyPopulated()
+        try store.saveEntityProfile(original)
+        let reloaded = try XCTUnwrap(try store.fetchEntityProfile(for: original.id))
+
+        // ⚠️ Tags are normalised on the way in — deliberate, and asserted
+        // elsewhere. Everything else must come back exactly as it went.
+        assertCarriesEveryField("save + fetch", from: original, to: reloaded,
+                                mayChange: ["tags"])
     }
 }
 

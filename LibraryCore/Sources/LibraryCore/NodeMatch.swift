@@ -137,15 +137,27 @@ public struct NodeMatch: Codable, Equatable, Sendable, Identifiable {
     /// nil `deletedAt` alone cannot say.
     public var checkedAt: Date?
 
+    /// 🚨 When the source answered that it has NO RECORD under this id.
+    ///
+    /// Distinct from `deletedAt`, which means the source told us the record
+    /// was removed. Measured on the device 2026-08-11: the source never says
+    /// that — it simply stops resolving the id, so this is the only signal
+    /// there is. Ambiguous between removed, merged-away and an id that was
+    /// wrong to begin with, which is why it is not recorded as a deletion.
+    public var unresolvedAt: Date?
+
     /// Whether anything is wrong enough to report.
-    public var isStale: Bool { deletedAt != nil || mergedInto != nil }
+    public var isStale: Bool {
+        deletedAt != nil || mergedInto != nil || unresolvedAt != nil
+    }
 
     public var id: String { "\(nodeId)|\(source)" }
 
     public init(nodeId: String, source: String, sourceId: String,
                 method: MatchMethod, matchedAt: Date = Date(),
                 deletedAt: Date? = nil, mergedInto: String? = nil,
-                checkedAt: Date? = nil) {
+                checkedAt: Date? = nil, unresolvedAt: Date? = nil) {
+        self.unresolvedAt = unresolvedAt
         self.nodeId = nodeId
         self.source = source
         self.sourceId = sourceId

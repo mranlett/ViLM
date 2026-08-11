@@ -418,14 +418,18 @@ struct ProfileGraphHeaderView: View {
                         // Country is the exception worth keeping: a studio has
                         // one, and it means the same thing.
                         let metadataStrings: [String] = (isStudio ? [
-                            profile.countryOfOrigin.map { "Country: \($0)" }
+                            profile.countryOfOrigin.map {
+                                "Country: \(CountryFlagHelper.withFlag($0))"
+                            }
                         ] : [
                             profile.gender.map { "Gender: \($0)" },
                             profile.hairColor.map { "Hair Color: \($0)" },
                             // resolvedBirthYear rather than birthYear: a record
                             // that carries only a full date still shows a year.
                             profile.resolvedBirthYear.map { "Birth Year: \($0)" },
-                            profile.countryOfOrigin.map { "Country: \($0)" }
+                            profile.countryOfOrigin.map {
+                                "Country: \(CountryFlagHelper.withFlag($0))"
+                            }
                         ]).compactMap { $0 }
 
                         if !metadataStrings.isEmpty {

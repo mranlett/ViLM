@@ -211,4 +211,69 @@ final class SourceStateTests: XCTestCase {
                                     isVideo: true, deletedAt: Date())
         XCTAssertTrue(try store.staleMatches(isVideo: true).isEmpty)
     }
+
+    // MARK: - 🚨 The third answer, measured on the device 2026-08-11
+
+    /// 301 matches checked, 21 returned no record at all, and ZERO carried a
+    /// `deleted` flag. The source does not tombstone a removed performer — it
+    /// stops resolving the id. Without this state the audit could never report
+    /// anything, however correct the rest of it was.
+    func testAnUnresolvedIdIsRecordedAndReported() throws {
+        let id = try matchedActor()
+        try store.recordSourceState(.unresolved, nodeId: id, source: "TheSource",
+                                    sourceId: "p-1", isVideo: false)
+
+        let match = try XCTUnwrap(try store.staleMatches(isVideo: false).first)
+        XCTAssertNotNil(match.unresolvedAt)
+        XCTAssertTrue(match.isStale)
+    }
+
+    /// 🚨 Not recorded as a deletion. The source said "no record under that
+    /// id", which is ambiguous between removed, merged away with the old id
+    /// retired, and an id that was wrong when we stored it.
+    func testAnUnresolvedIdIsNotADeletion() throws {
+        let id = try matchedActor()
+        try store.recordSourceState(.unresolved, nodeId: id, source: "TheSource",
+                                    sourceId: "p-1", isVideo: false)
+
+        let match = try XCTUnwrap(try store.staleMatches(isVideo: false).first)
+        XCTAssertNil(match.deletedAt, "we were not told it was deleted")
+        XCTAssertNil(match.mergedInto)
+
+        let finding = try XCTUnwrap(try store.staleMatchFindings().first)
+        XCTAssertEqual(finding.kind, .unresolved)
+    }
+
+    /// ⭐ And it clears like any other mark when the id resolves again — an id
+    /// can come back, and a flag that only accumulates leaves false findings.
+    func testAResolvingFetchClearsIt() throws {
+        let id = try matchedActor()
+        try store.recordSourceState(.unresolved, nodeId: id, source: "TheSource",
+                                    sourceId: "p-1", isVideo: false)
+        XCTAssertEqual(try store.staleMatches(isVideo: false).count, 1)
+
+        try store.recordSourceState(.present, nodeId: id, source: "TheSource",
+                                    sourceId: "p-1", isVideo: false)
+
+        XCTAssertTrue(try store.staleMatches(isVideo: false).isEmpty)
+    }
+
+    /// ⚠️ U2 still holds. An unreachable source is not an unresolved id — the
+    /// caller records nothing at all, and there is no value here to say
+    /// otherwise with.
+    func testAnUnreachableSourceStillRecordsNothing() throws {
+        _ = try matchedActor()
+        XCTAssertTrue(try store.staleMatches(isVideo: false).isEmpty)
+    }
+
+    /// The headline names it in the source's terms, not as a verdict.
+    func testTheHeadlineSaysItDoesNotResolve() throws {
+        let id = try matchedActor()
+        try store.recordSourceState(.unresolved, nodeId: id, source: "TheSource",
+                                    sourceId: "p-1", isVideo: false)
+
+        let line = StaleMatchAudit.headline(try store.staleMatchFindings())
+        XCTAssertTrue(line.contains("no longer resolve"), line)
+        XCTAssertFalse(line.contains("no longer exist"), "that is a different claim")
+    }
 }

@@ -45,7 +45,11 @@ enum SourceRecheck {
                 parts.append("\(unreachable) could not be reached and were left as they were.")
             }
             if notFound > 0 {
-                parts.append("\(notFound) returned no record at all under the id we hold — the source may report deletions this way rather than with a flag.")
+                // ⭐ Said as an observation, not a verdict. The id stopped
+                // resolving; whether that is a removal, a merge we cannot
+                // follow, or an id that was always wrong is the operator's to
+                // decide from the list.
+                parts.append("\(notFound) no longer resolve to any record at the source, and are now listed below.")
             }
             return parts.joined(separator: " ")
         }
@@ -76,6 +80,13 @@ enum SourceRecheck {
             case .unreachable:
                 summary.unreachable += 1
             case .notFound:
+                // 🚨 Recorded as of 2026-08-11. It used to be counted and
+                // dropped, on the reasoning that only a stated conclusion
+                // should be stored — but measuring the device showed the
+                // source NEVER states one: 21 of 301 returned no record and
+                // none carried a `deleted` flag. This is the answer, and
+                // discarding it left the audit permanently empty.
+                record(target, .unresolved)
                 summary.notFound += 1
             }
             summary.checked += 1

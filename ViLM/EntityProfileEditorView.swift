@@ -423,6 +423,11 @@ struct EntityProfileEditorView: View {
                         .submitLabel(.next)
                         .onSubmit { focusedField = .bio }
                         .onChange(of: countryOfOrigin) { _, newValue in
+                            // ⚠️ Decoration for the FIELD only. The store
+                            // canonicalises on save (`CountryName`), so what
+                            // lands in the database is the bare name however
+                            // this text box happens to render it — storing the
+                            // flag is what split every country into two values.
                             let flag = CountryFlagHelper.flagEmoji(for: newValue)
                             if !flag.isEmpty && !newValue.contains(flag) {
                                 countryOfOrigin = "\(newValue.trimmingCharacters(in: .whitespaces)) \(flag)"

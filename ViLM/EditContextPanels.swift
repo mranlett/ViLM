@@ -318,7 +318,9 @@ struct ActorContextPanel: View {
             rows.append(("Born", "\(year)"))
         }
         if let country = profile.countryOfOrigin, !country.isEmpty {
-            rows.append(("Country", country))
+            // ⭐ The flag is added HERE, not stored. Storing it split every
+            // country into two values — see `CountryName`.
+            rows.append(("Country", CountryFlagHelper.withFlag(country)))
         }
         if let hair = profile.hairColor, !hair.isEmpty { rows.append(("Hair", hair)) }
         if let career = profile.careerDisplay { rows.append(("Career", career)) }

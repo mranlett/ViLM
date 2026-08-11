@@ -811,6 +811,49 @@ extension LibraryStore {
             }
         }
 
+        // 🚨 One stored form per country. The editor appended a flag emoji on
+        // save and the plugin wrote a bare name, so the same country existed
+        // twice with different people under each: 94 stored values that were
+        // really 57, and 1,309 of 1,332 profiles on a split value.
+        //
+        // ⚠️ SQL rather than Swift, because a migration must not depend on the
+        // app's string handling — but the rule itself lives in `CountryName`,
+        // which every later write goes through. This is a one-time repair of
+        // what the old writers left, not a second expression of the rule.
+        migrator.registerMigration("v40") { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, country_of_origin FROM entity_profiles
+                 WHERE country_of_origin IS NOT NULL AND country_of_origin <> ''
+                """)
+            for row in rows {
+                let id: String = row["id"]
+                let raw: String = row["country_of_origin"]
+                let canonical = CountryName.canonical(raw)
+                guard canonical != raw else { continue }
+                try db.execute(sql: "UPDATE entity_profiles SET country_of_origin = ? WHERE id = ?",
+                               arguments: [canonical, id])
+            }
+        }
+
+        // 🚨 A third mark, because the source has no fourth answer.
+        //
+        // Measured on the device: 301 matches checked, 21 returned no record
+        // at all, ZERO carried a `deleted` flag. The source does not tombstone
+        // a removed performer, it stops resolving the id — so `deleted_at`
+        // could never be written and the audit could never report anything.
+        //
+        // ⚠️ Separate from `deleted_at` rather than reusing it. An id that
+        // stops resolving is ambiguous between removed, merged-away and simply
+        // wrong; recording it as a deletion would state a conclusion the
+        // source never gave.
+        migrator.registerMigration("v41") { db in
+            for table in ["video_match", "entity_match"] {
+                try db.alter(table: table) { t in
+                    t.add(column: "unresolved_at", .datetime)
+                }
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

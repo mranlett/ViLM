@@ -237,15 +237,17 @@ public extension LibraryStore {
     func recordSourceState(nodeId: String, source: String, sourceId: String,
                            isVideo: Bool,
                            deletedAt: Date? = nil, mergedInto: String? = nil,
+                           unresolvedAt: Date? = nil,
                            at date: Date = Date()) throws {
         let table = isVideo ? "video_match" : "entity_match"
         let column = isVideo ? "video_id" : "entity_id"
         try dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE \(table)
-                   SET deleted_at = ?, merged_into = ?, checked_at = ?
+                   SET deleted_at = ?, merged_into = ?, unresolved_at = ?, checked_at = ?
                  WHERE \(column) = ? AND source = ? AND source_id = ?
-                """, arguments: [deletedAt, mergedInto, date, nodeId, source, sourceId])
+                """, arguments: [deletedAt, mergedInto, unresolvedAt, date,
+                                 nodeId, source, sourceId])
         }
     }
 
@@ -260,9 +262,10 @@ public extension LibraryStore {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT \(column), source, source_id, method, matched_at,
-                       deleted_at, merged_into, checked_at
+                       deleted_at, merged_into, checked_at, unresolved_at
                   FROM \(table)
                  WHERE deleted_at IS NOT NULL OR merged_into IS NOT NULL
+                    OR unresolved_at IS NOT NULL
                 """).compactMap { row in
                 guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
                 return NodeMatch(nodeId: row[column], source: row["source"],
@@ -270,7 +273,8 @@ public extension LibraryStore {
                                  matchedAt: row["matched_at"],
                                  deletedAt: row["deleted_at"],
                                  mergedInto: row["merged_into"],
-                                 checkedAt: row["checked_at"])
+                                 checkedAt: row["checked_at"],
+                                 unresolvedAt: row["unresolved_at"])
             }
         }
     }

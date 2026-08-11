@@ -755,6 +755,11 @@ public class LibraryStore {
     }
 
     func saveEntityProfile(_ profile: EntityProfile, in db: Database) throws {
+        // ⚠️ Canonicalised on the way in, like tags. The country is the one
+        // field where the app stored presentation alongside the value — see
+        // `CountryName` — and doing it here means no writer has to know.
+        var profile = profile
+        profile.countryOfOrigin = CountryName.canonical(profile.countryOfOrigin)
         try profile.save(db)
     }
 

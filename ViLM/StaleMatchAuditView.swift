@@ -160,6 +160,18 @@ struct StaleMatchAuditView: View {
                     }
 
                     switch finding.kind {
+                    case .unresolved:
+                        // ⚠️ Offers CLEAR, not re-point — there is nowhere to
+                        // re-point to. And the wording says what was observed
+                        // rather than what it means, because an id that stops
+                        // resolving is ambiguous between removed, merged away
+                        // and wrong from the start.
+                        Button(role: .destructive) {
+                            pendingClear = finding
+                        } label: {
+                            Label("Clear the match", systemImage: "link.badge.plus")
+                                .symbolVariant(.slash)
+                        }
                     case let .merged(into):
                         Button {
                             act(.rePoint(to: into), on: finding)
@@ -177,13 +189,16 @@ struct StaleMatchAuditView: View {
                     }
                 } header: {
                     HStack {
-                        Image(systemName: finding.isMerge
-                              ? "arrow.triangle.branch" : "questionmark.folder")
+                        Image(systemName: finding.isMerge ? "arrow.triangle.branch"
+                              : (finding.kind == .unresolved
+                                 ? "questionmark.circle" : "questionmark.folder"))
                             // ⭐ A merge is not a problem — it is an answer.
                             // Dressing it in the same red as a deletion would
                             // teach the operator to dread the whole screen.
                             .foregroundStyle(finding.isMerge ? Color.accentColor : .orange)
-                        Text(finding.isMerge ? "Moved" : "No longer at the source")
+                        Text(finding.isMerge ? "Moved"
+                             : (finding.kind == .unresolved
+                                ? "No longer resolves" : "No longer at the source"))
                         Spacer()
                         Text(finding.source).font(.caption).foregroundStyle(.secondary)
                     }

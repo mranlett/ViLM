@@ -58,10 +58,15 @@ final class SourceRecheckTests: XCTestCase {
     // MARK: - 🚨 notFound is its own answer
 
     /// The distinction that cost a day. A timeout means the source said
-    /// nothing; `notFound` means it answered "no record under that id" — and
-    /// if the source returns deleted records as null, that is the only signal
-    /// there will ever be.
-    func testNotFoundIsCountedApartFromUnreachable() async {
+    /// nothing; `notFound` means it answered "no record under that id".
+    ///
+    /// 🚨 REVERSED 2026-08-11, and the earlier version of this test was wrong
+    /// about the product rather than about the code. It asserted that neither
+    /// is recorded, on the reasoning that only a stated conclusion should be
+    /// stored. Measuring the device settled it: 301 checked, 21 returned no
+    /// record, and ZERO carried a `deleted` flag. The source never states the
+    /// conclusion, so discarding this one left the audit permanently empty.
+    func testNotFoundIsRecordedButUnreachableIsNot() async {
         let recorder = Recorder()
 
         let summary = await SourceRecheck.run(
@@ -71,7 +76,22 @@ final class SourceRecheckTests: XCTestCase {
 
         XCTAssertEqual(summary.notFound, 2)
         XCTAssertEqual(summary.unreachable, 2)
-        XCTAssertTrue(recorder.written.isEmpty, "neither is a conclusion to record")
+        XCTAssertEqual(recorder.written.map(\.0), ["n-0", "n-1"],
+                       "the source answered about these two")
+        XCTAssertEqual(recorder.written.map(\.1), [.unresolved, .unresolved],
+                       "recorded as unresolved, NOT as deleted — we were not told that")
+    }
+
+    /// ⚠️ And the line the whole design turns on still holds: an unreachable
+    /// source produces no write at all, so a dropped connection can never mark
+    /// a library gone.
+    func testUnreachableStillRecordsNothingEvenNowThatNotFoundDoes() async {
+        let recorder = Recorder()
+
+        _ = await SourceRecheck.run(targets: targets(50), ask: { _ in .unreachable },
+                                    record: recorder.record)
+
+        XCTAssertTrue(recorder.written.isEmpty)
     }
 
     /// ⚠️ Counted, NOT flagged as a deletion. A missing id is still ambiguous
@@ -81,8 +101,8 @@ final class SourceRecheckTests: XCTestCase {
             targets: targets(3), ask: { _ in .notFound }, record: { _, _ in })
 
         let sentence = summary.sentence(of: 3)
-        XCTAssertTrue(sentence.contains("3 returned no record"), sentence)
-        XCTAssertTrue(sentence.contains("may report deletions this way"), sentence)
+        XCTAssertTrue(sentence.contains("3 no longer resolve"), sentence)
+        XCTAssertTrue(sentence.contains("listed below"), sentence)
     }
 
     // MARK: - What it does record

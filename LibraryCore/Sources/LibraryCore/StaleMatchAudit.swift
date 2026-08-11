@@ -33,12 +33,35 @@ public enum SourceRecordState: Equatable, Sendable {
     case deleted
     /// Fetched, and the source says it moved. NOT a deletion.
     case merged(into: String)
+
+    /// 🚨 Fetched, and the source has NO RECORD under that id.
+    ///
+    /// Added 2026-08-11 after measuring the device: 301 matches checked, 21
+    /// returned no record at all, and **zero** carried a `deleted` flag. The
+    /// source does not tombstone a removed performer — it simply stops
+    /// resolving the id, so this is the only signal that will ever arrive, and
+    /// the spec as written could never have reported anything.
+    ///
+    /// ⚠️ This does NOT break the rule that there is no `unknown` case. That
+    /// rule exists so a FAILED FETCH cannot be recorded as a conclusion. This
+    /// is not a failure to reach the source; it is a definite answer from it —
+    /// "I have no record under that id" — and the two are already counted
+    /// apart in `SourceRecheck`.
+    ///
+    /// ⭐ Reported as unresolved rather than deleted, because an id that stops
+    /// resolving is ambiguous between three things: removed upstream, merged
+    /// away with the old id retired, or an id that was wrong when we stored it.
+    /// All three want the operator to look; only one of them is a deletion.
+    case unresolved
 }
 
 /// One match worth telling the operator about.
 public struct StaleMatchFinding: Equatable, Sendable, Identifiable {
     public enum Kind: Equatable, Sendable {
         case deleted
+        /// The source has no record under the id we hold — see
+        /// `SourceRecordState.unresolved`.
+        case unresolved
         /// ⭐ Carries where it went, because the right action is to re-point
         /// rather than clear — and an audit that says "gone" when the source
         /// said "moved" gives advice that loses a good identity.
@@ -104,6 +127,10 @@ public enum StaleMatchAudit {
                 kind = .merged(into: into)
             } else if match.deletedAt != nil {
                 kind = .deleted
+            } else if match.unresolvedAt != nil {
+                // ⚠️ Ranked BELOW an explicit deletion. If the source ever does
+                // tell us a record was removed, that is the better answer.
+                kind = .unresolved
             } else {
                 // U5 — never matched, or matched and fine. Neither belongs
                 // here; an unmatched node is the identity-gap worklist's.
@@ -112,7 +139,8 @@ public enum StaleMatchAudit {
             return StaleMatchFinding(
                 nodeId: match.nodeId, source: match.source, sourceId: match.sourceId,
                 displayName: displayNames[match.nodeId] ?? match.nodeId,
-                kind: kind, seenAt: match.deletedAt ?? match.checkedAt)
+                kind: kind,
+                seenAt: match.deletedAt ?? match.unresolvedAt ?? match.checkedAt)
         }
         // Merges first: they are resolvable in one action, deletions need a
         // decision. Then by name, so the list does not reshuffle between runs.
@@ -130,13 +158,21 @@ public enum StaleMatchAudit {
             return "Every match still resolves to a record at its source."
         }
         let merged = findings.filter(\.isMerge).count
-        let deleted = findings.count - merged
+        let unresolved = findings.filter { $0.kind == .unresolved }.count
+        let deleted = findings.count - merged - unresolved
         var parts: [String] = []
         if merged > 0 {
             parts.append("\(merged) moved and can be re-pointed")
         }
         if deleted > 0 {
             parts.append("\(deleted) no longer exist\(deleted == 1 ? "s" : "") at the source")
+        }
+        // ⭐ Worded as the source's answer, not as a verdict. The id stopped
+        // resolving; whether that is a deletion, a merge we cannot follow, or
+        // an id that was always wrong is exactly what the operator decides.
+        if unresolved > 0 {
+            parts.append("\(unresolved) no longer resolve\(unresolved == 1 ? "s" : "") "
+                         + "to any record")
         }
         return parts.joined(separator: "; ") + "."
     }
@@ -169,6 +205,9 @@ public extension LibraryStore {
         case .merged(let into):
             try recordSourceState(nodeId: nodeId, source: source, sourceId: sourceId,
                                   isVideo: isVideo, mergedInto: into, at: date)
+        case .unresolved:
+            try recordSourceState(nodeId: nodeId, source: source, sourceId: sourceId,
+                                  isVideo: isVideo, unresolvedAt: date, at: date)
         }
     }
 
