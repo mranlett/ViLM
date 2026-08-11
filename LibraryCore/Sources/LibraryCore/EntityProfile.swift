@@ -608,6 +608,33 @@ extension EntityProfile {
         entityType ?? nodeIdentity?.type
     }
 
+    /// The `type:Name` string a video's tag array carries for this node.
+    ///
+    /// 🚨 This is what a GLOBAL RENAME matches on, and getting it from the id
+    /// is the bug that stopped *Duplicate Performers* working. Before the
+    /// re-key an id WAS this string, so passing `profile.id` happened to be
+    /// right; afterwards it is a uid, `renameTagGlobally` matched nothing, and
+    /// the merge silently did nothing while reporting success.
+    ///
+    /// ⭐ Built from the COLUMNS, so it is correct on both sides of the
+    /// re-key — and it exists here so no caller has to assemble
+    /// `"actor:\(name)"` by hand and get the rule slightly different.
+    ///
+    /// `nil` when the node has no usable identity: a row with no name has no
+    /// tag, and inventing one would rename something else.
+    public var tagString: String? {
+        guard let type, !type.isEmpty else { return nil }
+        guard let displayName, !displayName.isEmpty else { return nil }
+        return EntityProfile.tag(type: type, name: displayName)
+    }
+
+    /// The same rule, for a caller holding a name rather than a profile.
+    public static func tag(type: String, name: String) -> String { "\(type):\(name)" }
+
+    /// ⭐ The overwhelmingly common case, named so a caller cannot pass the
+    /// kind and the name the wrong way round.
+    public static func actorTag(_ name: String) -> String { tag(type: "actor", name: name) }
+
     /// The same profile under a different primary key.
     ///
     /// 🚨 Exists for ONE caller: the federation boundary, which must write an

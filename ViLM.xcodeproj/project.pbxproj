@@ -13,6 +13,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		AA1107BB22CC33DD44EE07 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E9D4694C2F3425C300D52C46 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E9D469532F3425C300D52C46;
+			remoteInfo = ViLM;
+		};
 		E95BEF492FF2C34B004B0156 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E9D4694C2F3425C300D52C46 /* Project object */;
@@ -23,6 +30,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		AA1100BB22CC33DD44EE00 /* ViLMTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViLMTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E95BEF432FF2C34B004B0156 /* ViLMUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViLMUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = LocalPlugins.xcconfig; sourceTree = "<group>"; };
 		E9B441E12F36CB4500687CCF /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
@@ -42,6 +50,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA1101BB22CC33DD44EE01 /* ViLMTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ViLMTests;
+			sourceTree = "<group>";
+		};
 		E95BEF442FF2C34B004B0156 /* ViLMUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = ViLMUITests;
@@ -58,6 +71,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		AA1104BB22CC33DD44EE04 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E95BEF402FF2C34B004B0156 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -91,6 +111,7 @@
 				E9D469562F3425C300D52C46 /* ViLM */,
 				E9B441FB2F36CDAA00687CCF /* LibraryCore */,
 				E95BEF442FF2C34B004B0156 /* ViLMUITests */,
+				AA1101BB22CC33DD44EE01 /* ViLMTests */,
 				E9D469552F3425C300D52C46 /* Products */,
 				E9905C202F350284006C5910 /* Frameworks */,
 				E96E5A1D301FD563005EA263 /* LocalPlugins.xcconfig */,
@@ -102,6 +123,7 @@
 			children = (
 				E9D469542F3425C300D52C46 /* ViLM.app */,
 				E95BEF432FF2C34B004B0156 /* ViLMUITests.xctest */,
+				AA1100BB22CC33DD44EE00 /* ViLMTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -109,6 +131,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		AA1102BB22CC33DD44EE02 /* ViLMTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA1108BB22CC33DD44EE08 /* Build configuration list for PBXNativeTarget "ViLMTests" */;
+			buildPhases = (
+				AA1103BB22CC33DD44EE03 /* Sources */,
+				AA1104BB22CC33DD44EE04 /* Frameworks */,
+				AA1105BB22CC33DD44EE05 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA1106BB22CC33DD44EE06 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA1101BB22CC33DD44EE01 /* ViLMTests */,
+			);
+			name = ViLMTests;
+			packageProductDependencies = (
+			);
+			productName = ViLMTests;
+			productReference = AA1100BB22CC33DD44EE00 /* ViLMTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E95BEF422FF2C34B004B0156 /* ViLMUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E95BEF4D2FF2C34B004B0156 /* Build configuration list for PBXNativeTarget "ViLMUITests" */;
@@ -173,6 +218,9 @@
 					E9D469532F3425C300D52C46 = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					AA1102BB22CC33DD44EE02 = {
+						TestTargetID = E9D469532F3425C300D52C46;
+					};
 				};
 			};
 			buildConfigurationList = E9D4694F2F3425C300D52C46 /* Build configuration list for PBXProject "ViLM" */;
@@ -194,11 +242,19 @@
 			targets = (
 				E9D469532F3425C300D52C46 /* ViLM */,
 				E95BEF422FF2C34B004B0156 /* ViLMUITests */,
+				AA1102BB22CC33DD44EE02 /* ViLMTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		AA1105BB22CC33DD44EE05 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E95BEF412FF2C34B004B0156 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -217,6 +273,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AA1103BB22CC33DD44EE03 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E95BEF3F2FF2C34B004B0156 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -234,6 +297,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		AA1106BB22CC33DD44EE06 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E9D469532F3425C300D52C46 /* ViLM */;
+			targetProxy = AA1107BB22CC33DD44EE07 /* PBXContainerItemProxy */;
+		};
 		E95BEF4A2FF2C34B004B0156 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E9D469532F3425C300D52C46 /* ViLM */;
@@ -242,6 +310,46 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		AA1109BB22CC33DD44EE09 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LBRYWPHY33;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mattranlett.ViLMTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ViLM.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ViLM";
+			};
+			name = Debug;
+		};
+		AA1110BB22CC33DD44EE10 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LBRYWPHY33;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mattranlett.ViLMTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ViLM.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ViLM";
+			};
+			name = Release;
+		};
 		E95BEF4B2FF2C34B004B0156 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -545,6 +653,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		AA1108BB22CC33DD44EE08 /* Build configuration list for PBXNativeTarget "ViLMTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA1109BB22CC33DD44EE09 /* Debug */,
+				AA1110BB22CC33DD44EE10 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E95BEF4D2FF2C34B004B0156 /* Build configuration list for PBXNativeTarget "ViLMUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

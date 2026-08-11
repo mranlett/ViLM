@@ -154,6 +154,15 @@ final class ActorEnrichmentModel: ObservableObject {
         self.currentProfile = currentProfile
     }
 
+    /// Sets the chosen candidate directly, for tests.
+    ///
+    /// ⚠️ A named seam rather than making `chosen` settable everywhere. The
+    /// rename comparison depends on it, and that comparison is what shipped
+    /// broken twice — it needs to be reachable without a network round trip.
+    func acceptCandidateForTesting(_ candidate: PluginCandidate) {
+        chosen = candidate
+    }
+
     // MARK: - Flow
 
     func search(name: String) async {

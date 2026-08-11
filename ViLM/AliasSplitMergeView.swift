@@ -232,10 +232,13 @@ struct AliasSplitMergeView: View {
                 // also moves the graph edges and records a tombstone, so the
                 // losing name cannot come back on the next sync.
                 //
-                // ⚠️ Tag strings, built from the NAMES. This is the form the
-                // rename matches on; a profile id matches nothing.
+                // ⚠️ The tag form, which is what the rename matches on — a
+                // profile id matches nothing. Assembled by `EntityProfile`
+                // rather than here, so this view cannot get the rule slightly
+                // different from everywhere else that needs it.
                 try LibraryStore(at: url).renameTagGlobally(
-                    oldTag: "actor:\(losing)", newTag: "actor:\(surviving)")
+                    oldTag: EntityProfile.actorTag(losing),
+                    newTag: EntityProfile.actorTag(surviving))
             }.value
 
             // 🚨 The result is CHECKED. It used to be discarded with `_ =`, so
