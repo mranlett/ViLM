@@ -797,6 +797,20 @@ extension LibraryStore {
             }
         }
 
+        // ⭐ Lets the photo worklist converge. "Fewer than N photos" is a
+        // question about OUR holdings, so a performer the source only has one
+        // picture of never left the list and was re-fetched on every run.
+        //
+        // ⚠️ Two columns, not a flag. Storing what we HELD when the source
+        // came up empty means any later photo — from any route — re-qualifies
+        // them automatically, with no other write path needing to reset a flag.
+        migrator.registerMigration("v39") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "photo_top_up_at", .datetime)
+                t.add(column: "photo_top_up_held", .integer)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

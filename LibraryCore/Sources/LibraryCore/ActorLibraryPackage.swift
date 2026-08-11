@@ -541,6 +541,12 @@ extension LibraryStore {
                 enrichmentSource: newerEnrichment.enrichmentSource,
                 enrichmentSourceId: newerEnrichment.enrichmentSourceId ?? existing?.enrichmentSourceId,
                 enrichmentCheckedAt: newerEnrichment.enrichmentCheckedAt,
+                // 🚨 The LOCAL value, never the sender's. This records what
+                // THIS library asked and what IT held at the time; another
+                // library's answer is about its own holdings and would suppress
+                // a performer here who genuinely has room for more.
+                photoTopUpAt: existing?.photoTopUpAt,
+                photoTopUpHeld: existing?.photoTopUpHeld,
                 links: EntityLink.merged(existing?.links ?? [], adding: imported.links)
             )
             try saveEntityProfile(merged, in: db)

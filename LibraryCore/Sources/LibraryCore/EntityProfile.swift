@@ -169,6 +169,23 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     /// like a failure.
     public var enrichmentCheckedAt: Date?
 
+    /// When the photo top-up last asked the source and it had nothing more
+    /// (schema v39), and how many images the library held at that moment.
+    ///
+    /// 🚨 The pair is what lets the worklist CONVERGE. Listing "actors with
+    /// fewer than three photos" is a question about our holdings, so a
+    /// performer the source only has one picture of stayed on the list
+    /// permanently — re-fetched on every run, always for nothing.
+    ///
+    /// ⭐ `photoTopUpHeld` rather than a flag to clear. Eligibility is
+    /// `imageCount > photoTopUpHeld`, so a photo arriving by ANY route — this
+    /// tool, an enrichment, a hand edit — re-qualifies the performer without a
+    /// single other write path having to remember to reset anything.
+    ///
+    /// ⚠️ `nil` means never asked, which is not the same as asked-and-empty.
+    public var photoTopUpAt: Date?
+    public var photoTopUpHeld: Int?
+
     /// Labelled external references (schema v19).
     ///
     /// Generalises the single `homePage` field: an entity may sit on several
@@ -279,12 +296,14 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public init(id: String,
                 entityType: String? = nil,
                 displayName: String? = nil,
-                bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, links: [EntityLink] = []) {
+                bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, photoTopUpAt: Date? = nil, photoTopUpHeld: Int? = nil, links: [EntityLink] = []) {
         self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
         self.enrichmentSourceId = enrichmentSourceId
         self.enrichmentCheckedAt = enrichmentCheckedAt
+        self.photoTopUpAt = photoTopUpAt
+        self.photoTopUpHeld = photoTopUpHeld
         self.birthDate = birthDate
         self.careerSpanRaw = careerSpanRaw
         self.careerStartYear = careerStartYear
@@ -374,6 +393,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
             enrichmentSource: enrichmentSource,
             enrichmentSourceId: enrichmentSourceId,
             enrichmentCheckedAt: enrichmentCheckedAt,
+            photoTopUpAt: photoTopUpAt,
+            photoTopUpHeld: photoTopUpHeld,
             links: links
         )
     }
@@ -405,6 +426,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case enrichmentSource = "enrichment_source"
         case enrichmentSourceId = "enrichment_source_id"
         case enrichmentCheckedAt = "enrichment_checked_at"
+        case photoTopUpAt = "photo_top_up_at"
+        case photoTopUpHeld = "photo_top_up_held"
         case links
     }
     
@@ -438,6 +461,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
         self.enrichmentSourceId = try container.decodeIfPresent(String.self, forKey: .enrichmentSourceId)
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
+        self.photoTopUpAt = try container.decodeIfPresent(Date.self, forKey: .photoTopUpAt)
+        self.photoTopUpHeld = try container.decodeIfPresent(Int.self, forKey: .photoTopUpHeld)
         // Stored as a JSON string in SQLite, like tags/akas — accept either
         // shape so an archive and a live row both decode.
         if let array = try? container.decode([EntityLink].self, forKey: .links) {
@@ -535,6 +560,8 @@ extension EntityProfile {
         container["enrichment_source"] = enrichmentSource
         container["enrichment_source_id"] = enrichmentSourceId
         container["enrichment_checked_at"] = enrichmentCheckedAt
+        container["photo_top_up_at"] = photoTopUpAt
+        container["photo_top_up_held"] = photoTopUpHeld
         if let data = try? JSONEncoder().encode(links),
            let string = String(data: data, encoding: .utf8) {
             container["links"] = string
