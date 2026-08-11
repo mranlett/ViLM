@@ -98,11 +98,15 @@ public enum ActorEnrichment {
         public static let ageAtCareerStart = "ageAtCareerStart"
         // Schema v19.
         public static let links = "links"
+        // Schema v42 — Performer Detail's first cut.
+        public static let deathDate = "deathDate"
+        public static let sceneCount = "sceneCount"
 
         public static let all = [bio, gender, hairColor, tattoos, piercings, countryOfOrigin,
                                  birthYear, photoUrl, akas, tags,
                                  birthDate, careerSpanRaw, careerStartYear,
-                                 careerEndYear, ageAtCareerStart, links]
+                                 careerEndYear, ageAtCareerStart, links,
+                                 deathDate, sceneCount]
     }
 
     /// Builds the diff. Pure: no store, no network, no view.
@@ -159,6 +163,9 @@ public enum ActorEnrichment {
             scalar(Field.photoUrl, "Photo", current: profile?.photoUrl, proposed: proposal.photoURL)
         }
         scalar(Field.birthDate, "Birth Date", current: profile?.birthDate, proposed: proposal.birthDate)
+        scalar(Field.deathDate, "Died", current: profile?.deathDate, proposed: proposal.deathDate)
+        scalar(Field.sceneCount, "Scenes at the source",
+               current: profile?.sceneCount.map(String.init), proposed: proposal.sceneCount)
         scalar(Field.careerSpanRaw, "Career Span (source text)",
                current: profile?.careerSpanRaw, proposed: proposal.careerSpanRaw)
         scalar(Field.careerStartYear, "Career Start",
@@ -273,6 +280,12 @@ public enum ActorEnrichment {
             // the held count is exceeded and they re-qualify on their own.
             photoTopUpAt: profile.photoTopUpAt,
             photoTopUpHeld: profile.photoTopUpHeld,
+            // ⚠️ P2/P4 — a field the source omits leaves the existing value
+            // alone. `take` returns the existing value unless the field was
+            // both offered AND ticked, so an operator-entered death date
+            // survives a lookup that says nothing about it.
+            deathDate: take(Field.deathDate, proposal.deathDate, profile.deathDate),
+            sceneCount: take(Field.sceneCount, proposal.sceneCount, profile.sceneCount),
             links: accepting.contains(Field.links)
                 ? EntityLink.merged(profile.links ?? [], adding: proposal.externalLinks.value ?? [])
                 : (profile.links ?? [])

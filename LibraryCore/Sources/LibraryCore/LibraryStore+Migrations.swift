@@ -854,6 +854,15 @@ extension LibraryStore {
             }
         }
 
+        // Performer Detail's first cut (D5, D1): a definitive career end, and
+        // the strongest disambiguator on the list.
+        migrator.registerMigration("v42") { db in
+            try db.alter(table: "entity_profiles") { t in
+                t.add(column: "death_date", .text)
+                t.add(column: "scene_count", .integer)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

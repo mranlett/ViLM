@@ -220,10 +220,15 @@ public enum GraphAudit {
                         detail: "released \(releaseYear), career recorded from \(start)"))
                 }
 
-                // ⚠️ Only when an end is RECORDED. `careerEndYear == nil` means
-                // the span is open — "still performing" — not "unknown", so a
-                // recent release against a nil end is correct, not a finding.
-                if let end = profile.careerEndYear, releaseYear > end {
+                // ⚠️ Only when an end is KNOWN. A nil end means the span is
+                // open — "still performing" — not "unknown", so a recent
+                // release against it is correct rather than a finding.
+                //
+                // ⭐ `effectiveCareerEndYear`, so a death date ends the career
+                // even when no end year was recorded (D5). Without it this
+                // audit goes on accepting releases dated after a performer
+                // died, which is exactly the silent wrongness it exists for.
+                if let end = profile.effectiveCareerEndYear, releaseYear > end {
                     out.append(GraphFinding(
                         kind: .afterCareerEnd, assetId: asset.id,
                         videoLabel: asset.fileName, performer: name,

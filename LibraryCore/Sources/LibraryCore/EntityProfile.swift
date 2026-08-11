@@ -186,6 +186,27 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public var photoTopUpAt: Date?
     public var photoTopUpHeld: Int?
 
+    /// When the performer died (schema v42).
+    ///
+    /// ⭐ D5: *Impossible Data* treats a missing career end as "still
+    /// working". For someone who has died that is not merely absent, it is
+    /// WRONG — and it is the kind of wrong nothing would ever surface.
+    ///
+    /// A fixed fact, so unlike `sceneCount` it needs no as-of.
+    public var deathDate: String?
+
+    /// How many scenes the source credits them with (schema v42).
+    ///
+    /// ⭐ D1: the strongest disambiguator on the list. "400 scenes" against
+    /// "3" separates two performers of one name faster than a birth year, and
+    /// telling two of a name apart is this project's recurring difficulty.
+    ///
+    /// ⚠️ TIME-VARYING, so it is a snapshot and must read as one — it is
+    /// paired with `enrichmentCheckedAt` exactly as `marksAsOf` pairs the
+    /// identifying marks. A count presented as a current fact goes stale
+    /// silently, which D2 rules out.
+    public var sceneCount: Int?
+
     /// Labelled external references (schema v19).
     ///
     /// Generalises the single `homePage` field: an entity may sit on several
@@ -263,6 +284,23 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     ///
     /// `nil` when there is no start year, because a span with no beginning says
     /// nothing worth showing.
+    /// The career end to reason with: the recorded one, or the year they died.
+    ///
+    /// 🚨 D5. `careerEndYear == nil` means "still performing", which for
+    /// someone who has died is not merely absent, it is WRONG — and it is the
+    /// kind of wrong nothing would ever surface. *Impossible Data* would go on
+    /// accepting releases dated after their death without comment.
+    ///
+    /// ⭐ DERIVED, never written back. P4: nothing here may overwrite an
+    /// operator-entered value, and a recorded end always wins — someone may
+    /// have retired years before they died, and that is the truer end.
+    public var effectiveCareerEndYear: Int? {
+        if let recorded = careerEndYear { return recorded }
+        guard let deathDate, deathDate.count >= 4,
+              let year = Int(deathDate.prefix(4)) else { return nil }
+        return year
+    }
+
     public var careerDisplay: String? { careerDisplay(asOf: Date()) }
 
     public func careerDisplay(asOf now: Date) -> String? {
@@ -296,7 +334,7 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
     public init(id: String,
                 entityType: String? = nil,
                 displayName: String? = nil,
-                bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, photoTopUpAt: Date? = nil, photoTopUpHeld: Int? = nil, links: [EntityLink] = []) {
+                bio: String? = nil, photoUrl: String? = nil, homePage: String? = nil, gender: String? = nil, hairColor: String? = nil, tattoos: String? = nil, piercings: String? = nil, birthYear: Int? = nil, countryOfOrigin: String? = nil, rating: Int? = nil, tags: [String] = [], galleryUrls: [String] = [], akas: [String] = [], createdAt: Date? = Date(), birthDate: String? = nil, careerSpanRaw: String? = nil, careerStartYear: Int? = nil, careerEndYear: Int? = nil, ageAtCareerStart: Int? = nil, enrichmentState: EnrichmentState? = nil, enrichmentSource: String? = nil, enrichmentSourceId: String? = nil, enrichmentCheckedAt: Date? = nil, photoTopUpAt: Date? = nil, photoTopUpHeld: Int? = nil, deathDate: String? = nil, sceneCount: Int? = nil, links: [EntityLink] = []) {
         self.links = links
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
@@ -304,6 +342,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.enrichmentCheckedAt = enrichmentCheckedAt
         self.photoTopUpAt = photoTopUpAt
         self.photoTopUpHeld = photoTopUpHeld
+        self.deathDate = deathDate
+        self.sceneCount = sceneCount
         self.birthDate = birthDate
         self.careerSpanRaw = careerSpanRaw
         self.careerStartYear = careerStartYear
@@ -395,6 +435,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
             enrichmentCheckedAt: enrichmentCheckedAt,
             photoTopUpAt: photoTopUpAt,
             photoTopUpHeld: photoTopUpHeld,
+            deathDate: deathDate,
+            sceneCount: sceneCount,
             links: links
         )
     }
@@ -428,6 +470,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         case enrichmentCheckedAt = "enrichment_checked_at"
         case photoTopUpAt = "photo_top_up_at"
         case photoTopUpHeld = "photo_top_up_held"
+        case deathDate = "death_date"
+        case sceneCount = "scene_count"
         case links
     }
     
@@ -463,6 +507,8 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         self.photoTopUpAt = try container.decodeIfPresent(Date.self, forKey: .photoTopUpAt)
         self.photoTopUpHeld = try container.decodeIfPresent(Int.self, forKey: .photoTopUpHeld)
+        self.deathDate = try container.decodeIfPresent(String.self, forKey: .deathDate)
+        self.sceneCount = try container.decodeIfPresent(Int.self, forKey: .sceneCount)
         // Stored as a JSON string in SQLite, like tags/akas — accept either
         // shape so an archive and a live row both decode.
         if let array = try? container.decode([EntityLink].self, forKey: .links) {
@@ -562,6 +608,8 @@ extension EntityProfile {
         container["enrichment_checked_at"] = enrichmentCheckedAt
         container["photo_top_up_at"] = photoTopUpAt
         container["photo_top_up_held"] = photoTopUpHeld
+        container["death_date"] = deathDate
+        container["scene_count"] = sceneCount
         if let data = try? JSONEncoder().encode(links),
            let string = String(data: data, encoding: .utf8) {
             container["links"] = string

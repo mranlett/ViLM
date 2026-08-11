@@ -44,6 +44,8 @@ final class EntityProfilePreservationTests: XCTestCase {
             enrichmentCheckedAt: Date(timeIntervalSince1970: 1_700_000_000),
             photoTopUpAt: Date(timeIntervalSince1970: 1_750_000_000),
             photoTopUpHeld: 2,
+            deathDate: "2020-03-01",
+            sceneCount: 412,
             links: [EntityLink(url: "https://example.com/profile", label: "Example")]
         )
     }
@@ -57,7 +59,7 @@ final class EntityProfilePreservationTests: XCTestCase {
     /// and look at the copy sites listed below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 29, """
+        XCTAssertEqual(count, 31, """
             EntityProfile gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds a profile.

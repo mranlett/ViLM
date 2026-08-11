@@ -305,6 +305,10 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     public var birthDate: ProposedField<String> = .absent
     public var careerStartYear: ProposedField<Int> = .absent
     public var careerEndYear: ProposedField<Int> = .absent
+    /// A definitive career end (Performer Detail, D5).
+    public var deathDate: ProposedField<String> = .absent
+    /// ⚠️ Time-varying: a snapshot, paired with `enrichmentCheckedAt` (D2).
+    public var sceneCount: ProposedField<Int> = .absent
     /// Only when a source STATES it. Core derives one otherwise, so a plugin
     /// that computes this itself would be inventing provenance.
     public var ageAtCareerStart: ProposedField<Int> = .absent

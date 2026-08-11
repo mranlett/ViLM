@@ -88,6 +88,8 @@ public enum MergeSemantics {
             // there is genuinely more to fetch.
             photoTopUpAt: higher.photoTopUpAt ?? lower.photoTopUpAt,
             photoTopUpHeld: higher.photoTopUpHeld ?? lower.photoTopUpHeld,
+            deathDate: coalesce(higher.deathDate, lower.deathDate),
+            sceneCount: higher.sceneCount ?? lower.sceneCount,
             links: EntityLink.merged(higher.links, adding: lower.links)
         )
         merged.enrichmentSourceId = higher.enrichmentSourceId ?? lower.enrichmentSourceId
