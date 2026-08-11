@@ -221,7 +221,21 @@ public extension LibraryStore {
     /// the record alive clears both marks. A flag that only accumulates leaves
     /// permanent false findings, and an audit that cannot be cleared is one
     /// people stop reading.
-    func recordSourceState(nodeId: String, source: String, isVideo: Bool,
+    /// 🚨 `sourceId` is the record that was actually FETCHED, and the update
+    /// applies only if the node is still matched to it.
+    ///
+    /// Without that scope this is a live trap. Re-matching a video means
+    /// fetching several candidates from the same source to compare them; each
+    /// carries its own state. Keyed on `(node, source)` alone, fetching a
+    /// candidate the source had deleted would stamp "deleted" onto the node's
+    /// existing and perfectly healthy match to a DIFFERENT record — an entirely
+    /// fabricated finding, produced by looking at something else.
+    ///
+    /// ⚠️ Required rather than defaulted, because every caller knows it: you
+    /// cannot fetch a record without naming which one. A default would only
+    /// serve callers who had stopped thinking about it.
+    func recordSourceState(nodeId: String, source: String, sourceId: String,
+                           isVideo: Bool,
                            deletedAt: Date? = nil, mergedInto: String? = nil,
                            at date: Date = Date()) throws {
         let table = isVideo ? "video_match" : "entity_match"
@@ -230,8 +244,8 @@ public extension LibraryStore {
             try db.execute(sql: """
                 UPDATE \(table)
                    SET deleted_at = ?, merged_into = ?, checked_at = ?
-                 WHERE \(column) = ? AND source = ?
-                """, arguments: [deletedAt, mergedInto, date, nodeId, source])
+                 WHERE \(column) = ? AND source = ? AND source_id = ?
+                """, arguments: [deletedAt, mergedInto, date, nodeId, source, sourceId])
         }
     }
 

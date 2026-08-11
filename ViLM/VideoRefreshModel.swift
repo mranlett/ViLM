@@ -148,6 +148,19 @@ final class VideoRefreshModel: ObservableObject {
                                          sourceId: sourceId, method: .backfill)
         }
 
+        // What the source said about the record still existing (#48).
+        //
+        // ⭐ AFTER the backfill above, so a match this pass just created is
+        // stamped too — otherwise the first refresh of an unmatched video would
+        // throw away the one answer it went to the network for.
+        //
+        // ⚠️ Recorded on every refresh, not only when something is wrong: the
+        // `checkedAt` it stamps is what separates "confirmed there this
+        // morning" from "never asked".
+        try? store.recordSourceState(proposal.recordState, nodeId: asset.id.uuidString,
+                                     source: provider.displayName, sourceId: sourceId,
+                                     isVideo: true)
+
         // ⚠️ knownTags empty and tags never applied — see `refreshesTags`.
         let changes = VideoEnrichmentReview.changes(for: asset, proposal: proposal)
         let fills = VideoRefreshPolicy.autoApplicable(changes)

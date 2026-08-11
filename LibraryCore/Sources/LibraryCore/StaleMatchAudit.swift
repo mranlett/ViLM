@@ -54,7 +54,33 @@ public struct StaleMatchFinding: Equatable, Sendable, Identifiable {
     /// When the source was seen to have changed it.
     public let seenAt: Date?
 
+    /// Which table the match lives in — videos and entities are separate.
+    ///
+    /// 🚨 Carried rather than inferred. Both node kinds are identified by UUID
+    /// strings, so there is nothing about `nodeId` to tell them apart: a caller
+    /// that guesses would send every actor's finding to the video table, where
+    /// it would silently match nothing and report success.
+    ///
+    /// Set by `staleMatchFindings()`, which queried the two tables separately
+    /// and is the only thing that actually knows.
+    public internal(set) var isVideo: Bool = false
+
     public var id: String { "\(nodeId)|\(source)" }
+}
+
+/// One match worth asking the source about again.
+public struct RecheckTarget: Equatable, Sendable {
+    public let nodeId: String
+    /// The record to fetch — and the id the result is recorded against, so a
+    /// re-check can never flag a match to something else.
+    public let sourceId: String
+    public let isVideo: Bool
+
+    public init(nodeId: String, sourceId: String, isVideo: Bool) {
+        self.nodeId = nodeId
+        self.sourceId = sourceId
+        self.isVideo = isVideo
+    }
 }
 
 public enum StaleMatchAudit {
@@ -126,17 +152,50 @@ public extension LibraryStore {
     ///
     /// ⭐ Takes a CONCLUSION rather than raw flags, so "I could not reach the
     /// source" has no way to be expressed as "the source deleted it".
+    /// - Parameter sourceId: the record that was fetched. The update applies
+    ///   only if the node is still matched to it — see the underlying
+    ///   `recordSourceState` for why fetching a candidate must not be able to
+    ///   flag a match to something else.
     func recordSourceState(_ state: SourceRecordState, nodeId: String,
-                           source: String, isVideo: Bool, at date: Date = Date()) throws {
+                           source: String, sourceId: String, isVideo: Bool,
+                           at date: Date = Date()) throws {
         switch state {
         case .present:
-            try recordSourceState(nodeId: nodeId, source: source, isVideo: isVideo, at: date)
+            try recordSourceState(nodeId: nodeId, source: source, sourceId: sourceId,
+                                  isVideo: isVideo, at: date)
         case .deleted:
-            try recordSourceState(nodeId: nodeId, source: source, isVideo: isVideo,
-                                  deletedAt: date, at: date)
+            try recordSourceState(nodeId: nodeId, source: source, sourceId: sourceId,
+                                  isVideo: isVideo, deletedAt: date, at: date)
         case .merged(let into):
-            try recordSourceState(nodeId: nodeId, source: source, isVideo: isVideo,
-                                  mergedInto: into, at: date)
+            try recordSourceState(nodeId: nodeId, source: source, sourceId: sourceId,
+                                  isVideo: isVideo, mergedInto: into, at: date)
+        }
+    }
+
+    /// Every match this library holds against one source, for re-checking.
+    ///
+    /// 🚨 The audit is otherwise PASSIVE — it reads flags earlier fetches
+    /// happened to persist, which is the economy D4 chose. But on a library
+    /// where no fetch has run since the feature shipped, that means the screen
+    /// reports "nothing missing" forever and never can report anything else.
+    /// A feature that cannot demonstrate itself is one nobody trusts.
+    ///
+    /// ⚠️ Only nodes WITH a match edge. The flag lives on the edge, so a node
+    /// marked `matched` with no edge — what `Missing Identities` lists — cannot
+    /// carry one and is not worth spending a request on.
+    func matchesToRecheck(source: String) throws -> [RecheckTarget] {
+        try dbQueue.read { db in
+            let videos = try Row.fetchAll(db, sql: """
+                SELECT video_id AS n, source_id AS s FROM video_match WHERE source = ?
+                """, arguments: [source])
+                .map { RecheckTarget(nodeId: $0["n"], sourceId: $0["s"], isVideo: true) }
+            let entities = try Row.fetchAll(db, sql: """
+                SELECT entity_id AS n, source_id AS s FROM entity_match WHERE source = ?
+                """, arguments: [source])
+                .map { RecheckTarget(nodeId: $0["n"], sourceId: $0["s"], isVideo: false) }
+            // Entities first: performers are the only type the source forwards,
+            // so they are the only ones that can yield a re-pointable finding.
+            return entities + videos
         }
     }
 
@@ -147,8 +206,15 @@ public extension LibraryStore {
         for asset in try fetchAllAssets() {
             names[asset.id.uuidString] = ActorKnownFor.displayTitle(asset)
         }
-        let matches = try staleMatches(isVideo: true) + staleMatches(isVideo: false)
-        return StaleMatchAudit.findings(from: matches, displayNames: names)
+        let videos = try staleMatches(isVideo: true)
+        let entities = try staleMatches(isVideo: false)
+        let videoIds = Set(videos.map(\.nodeId))
+        return StaleMatchAudit.findings(from: videos + entities, displayNames: names)
+            .map { finding in
+                var finding = finding
+                finding.isVideo = videoIds.contains(finding.nodeId)
+                return finding
+            }
     }
 }
 

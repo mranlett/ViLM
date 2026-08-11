@@ -264,6 +264,9 @@ struct SingleInspectorView: View {
 
                 browseNotesSection
 
+                // The operator's own writing comes first; the source's follows.
+                browseSourceDescriptionSection
+
                 Color.clear.frame(height: 40)
             }
             .padding()
@@ -860,6 +863,47 @@ struct SingleInspectorView: View {
         dismiss()
     }
     #endif
+
+    /// The source's own synopsis, shown only when there is one.
+    ///
+    /// 🚨 Deliberately NOT tappable. `browseNotesSection` opens the editor
+    /// because notes are the operator's to write; this text is not theirs and
+    /// there is nothing here to edit. Making it look editable would invite
+    /// exactly the confusion between the two that S1 exists to prevent.
+    ///
+    /// ⚠️ And no empty state. Notes offer "tap to add some" because the
+    /// operator can act on it; a description arrives from a match or not at
+    /// all, so a placeholder would report an absence nobody can do anything
+    /// about.
+    @ViewBuilder
+    private var browseSourceDescriptionSection: some View {
+        if let description = asset.sourceDescription, !description.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Description").font(.subheadline).fontWeight(.bold)
+                Text(description)
+                    .font(.callout)
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // ⭐ Attribution travels with the VALUE. `sourceDescriptionFrom`
+                // is whoever supplied THIS text, which is not necessarily the
+                // record's current `enrichmentSource` — a later match from a
+                // different source that offered no description leaves the text
+                // in place, and crediting it to that source would be a silent
+                // lie. Showing the pair is what makes the drift visible.
+                if let from = asset.sourceDescriptionFrom, !from.isEmpty {
+                    Text(sourceDescriptionCredit(from: from, at: asset.sourceDescriptionAt))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private func sourceDescriptionCredit(from: String, at: Date?) -> String {
+        guard let at else { return "from \(from)" }
+        return "from \(from), \(at.formatted(date: .abbreviated, time: .omitted))"
+    }
 
     /// Read-only notes; tapping opens the Edit sheet.
     private var browseNotesSection: some View {

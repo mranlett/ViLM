@@ -517,11 +517,22 @@ final class VideoEnrichmentModel: ObservableObject {
         do {
             let fetched = try await provider.fetch(videoId: sourceId)
 
+            // What the source said about the record still existing (#48).
+            //
+            // ⚠️ Scoped to the id actually fetched, so browsing candidates in
+            // the picker cannot flag a healthy match to a different record —
+            // this is the path where that would otherwise happen most.
+            if let url = LibrarySession.shared.url(for: asset.id) {
+                try? LibraryStore(at: url).recordSourceState(
+                    fetched.recordState, nodeId: asset.id.uuidString,
+                    source: provider.displayName, sourceId: sourceId, isVideo: true)
+            }
+
             // The source names an imprint and the network above it. Which one
             // this video carries is settled BEFORE the review is built, so
             // every row, the merge and the confirmation all read one answer.
             let outcome = VideoEnrichmentReview.studioResolution(
-                proposal: fetched, isVerified: isStudioVerified)
+                proposal: fetched, held: asset.studios, isVerified: isStudioVerified)
             // Held either way: the hierarchy is a fact about the studios, not
             // about which name won, so it is recorded even when the imprint is
             // chosen and the network never appears on the video.

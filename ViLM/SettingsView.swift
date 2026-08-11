@@ -38,6 +38,11 @@ struct SettingsView: View {
     var onStudioConflicts: (() -> Void)?
     var onStudioAudit: (() -> Void)?
     var onGraphAudit: (() -> Void)?
+
+    /// Matches the source says are gone or moved. Beside the other audits, but
+    /// its own tool: unlike them it OFFERS actions, and folding it into a
+    /// screen that promises none would break that screen's own footer.
+    var onStaleMatches: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
@@ -196,6 +201,11 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Impossible Data",
                                icon: "exclamationmark.magnifyingglass", action: onGraphAudit)
+                        .disabled(session.isFederated)
+                    // Reads only what previous fetches recorded — no network,
+                    // so it opens instantly and works offline.
+                    toolButton("Gone at the Source",
+                               icon: "questionmark.folder", action: onStaleMatches)
                         .disabled(session.isFederated)
                 }
 

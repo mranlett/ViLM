@@ -53,7 +53,7 @@ final class ResolveStaleMatchTests: XCTestCase {
     func testU9AcceptingAMergeRePointsTheMatch() throws {
         let id = try matchedActor()
         try store.recordSourceState(.merged(into: "p-new"), nodeId: id,
-                                    source: "TheSource", isVideo: false)
+                                    source: "TheSource", sourceId: "p-old", isVideo: false)
 
         try store.rePointMatch(nodeId: id, source: "TheSource", isVideo: false, to: "p-new")
 
@@ -68,7 +68,7 @@ final class ResolveStaleMatchTests: XCTestCase {
     func testRePointingKeepsTheNodeMatched() throws {
         let id = try matchedActor()
         try store.recordSourceState(.merged(into: "p-new"), nodeId: id,
-                                    source: "TheSource", isVideo: false)
+                                    source: "TheSource", sourceId: "p-old", isVideo: false)
         try store.rePointMatch(nodeId: id, source: "TheSource", isVideo: false, to: "p-new")
 
         XCTAssertEqual(try store.fetchEntityProfile(for: id)?.enrichmentState, .matched)
@@ -80,7 +80,7 @@ final class ResolveStaleMatchTests: XCTestCase {
     func testU10RefusingLeavesTheFindingAndTheMatchAlone() throws {
         let id = try matchedActor()
         try store.recordSourceState(.merged(into: "p-new"), nodeId: id,
-                                    source: "TheSource", isVideo: false)
+                                    source: "TheSource", sourceId: "p-old", isVideo: false)
 
         // The operator refuses: nothing is called.
         XCTAssertEqual(try store.staleMatchFindings().count, 1)
@@ -91,7 +91,7 @@ final class ResolveStaleMatchTests: XCTestCase {
 
     func testU11ClearingRemovesTheEdgeAndTheColumnsTogether() throws {
         let id = try matchedActor()
-        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", isVideo: false)
+        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", sourceId: "p-old", isVideo: false)
 
         try store.clearStaleMatch(nodeId: id, source: "TheSource", isVideo: false)
 
@@ -107,7 +107,7 @@ final class ResolveStaleMatchTests: XCTestCase {
     /// with no id and no edge is exactly that.
     func testU11bAClearedNodeIsNotLeftClaimingAMatchItCannotProduce() throws {
         let id = try matchedActor()
-        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", isVideo: false)
+        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", sourceId: "p-old", isVideo: false)
         try store.clearStaleMatch(nodeId: id, source: "TheSource", isVideo: false)
 
         let stillClaiming = try store.fetchAllEntityProfiles().filter {
@@ -123,7 +123,7 @@ final class ResolveStaleMatchTests: XCTestCase {
     /// it go", which is exactly the question someone will ask.
     func testU12TheAuditStillKnowsWhatItUsedToBe() throws {
         let id = try matchedActor(sourceId: "p-gone")
-        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", isVideo: false)
+        try store.recordSourceState(.deleted, nodeId: id, source: "TheSource", sourceId: "p-gone", isVideo: false)
         try store.clearStaleMatch(nodeId: id, source: "TheSource", isVideo: false)
 
         let record = try XCTUnwrap(try store.resolvedStaleMatches().first)
@@ -135,12 +135,36 @@ final class ResolveStaleMatchTests: XCTestCase {
     func testARePointIsRecordedWithWhatItLeft() throws {
         let id = try matchedActor(sourceId: "p-old")
         try store.recordSourceState(.merged(into: "p-new"), nodeId: id,
-                                    source: "TheSource", isVideo: false)
+                                    source: "TheSource", sourceId: "p-old", isVideo: false)
         try store.rePointMatch(nodeId: id, source: "TheSource", isVideo: false, to: "p-new")
 
         let record = try XCTUnwrap(try store.resolvedStaleMatches().first)
         XCTAssertEqual(record.formerSourceId, "p-old")
         XCTAssertEqual(record.outcome, .rePointed)
+    }
+
+    // MARK: - 🚨 A finding says which table it came from
+
+    /// Both asset ids and profile ids are UUID strings, so a caller that
+    /// inferred the kind from the id would route every actor's finding to the
+    /// video table — where it matches nothing, changes nothing, and reports
+    /// success. The finding has to carry it.
+    func testAFindingKnowsWhetherItIsAVideoOrAnEntity() throws {
+        let actorId = try matchedActor()
+        try store.recordSourceState(.deleted, nodeId: actorId, source: "TheSource",
+                                    sourceId: "p-old", isVideo: false)
+
+        let asset = Asset(relativePath: "\(UUID()).mp4", fileName: "v.mp4", tags: [])
+        try store.insertAsset(asset)
+        try store.recordMatch(NodeMatch(nodeId: asset.id.uuidString, source: "TheSource",
+                                        sourceId: "v-1", method: .title), isVideo: true)
+        try store.recordSourceState(.deleted, nodeId: asset.id.uuidString,
+                                    source: "TheSource", sourceId: "v-1", isVideo: true)
+
+        let found = try store.staleMatchFindings()
+        XCTAssertEqual(found.count, 2)
+        XCTAssertEqual(found.first { $0.nodeId == actorId }?.isVideo, false)
+        XCTAssertEqual(found.first { $0.nodeId == asset.id.uuidString }?.isVideo, true)
     }
 
     // MARK: - Scoping and safety

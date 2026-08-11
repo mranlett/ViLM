@@ -1177,8 +1177,9 @@ struct AssetsGridView: View {
     // MARK: - Search
 
     /// Every asset must match all whitespace-separated search terms; each term
-    /// may match any searchable field (filename, series/episode, notes,
-    /// actors, tags, studios, and each actor's bio and AKAs).
+    /// may match any searchable field (filename, series/episode, notes, the
+    /// source's description, actors, tags, studios, and each actor's bio and
+    /// AKAs).
     private func matchesSearch(_ asset: Asset, query: String) -> Bool {
         let terms = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard !terms.isEmpty else { return true }
@@ -1193,6 +1194,11 @@ struct AssetsGridView: View {
         if let videoName = asset.videoName { strings.append(videoName) }
         if let episode = asset.episode { strings.append(episode) }
         if let notes = asset.notes { strings.append(notes) }
+        // Long source-supplied free text, searched on the same footing as an
+        // actor's bio below — which is the same kind of thing from the same
+        // place. Leaving it out would make the one field that actually
+        // describes what happens in a video the one field search cannot see.
+        if let description = asset.sourceDescription { strings.append(description) }
         strings.append(contentsOf: asset.actors)
         strings.append(contentsOf: asset.actions)
         strings.append(contentsOf: asset.studios)

@@ -269,6 +269,29 @@ public struct ActorMetadataProposal: Equatable, Sendable {
     /// name is not an identity — two people share one often enough that
     /// re-searching later picks the wrong one and fails silently.
     public var sourceId: ProposedField<String> = .absent
+
+    /// What the source says about this record still EXISTING (#48).
+    ///
+    /// ⭐ Rides along on a fetch the app already makes, which is what makes the
+    /// whole feature nearly free — but the caller must PERSIST it. A flag seen
+    /// during a fetch and thrown away is a flag the audit never sees, and the
+    /// audit is opened later, offline.
+    ///
+    /// 🚨 Not a `ProposedField`. The others are things the operator may accept
+    /// or decline; this is not an offer about the record's contents, it is what
+    /// the source reported about the record's existence. Making it declinable
+    /// would imply the library can disagree about whether a remote record is
+    /// there.
+    ///
+    /// ⚠️ Defaults to `.present`, which is safe rather than a claim: state is
+    /// scoped per source, so a provider that never reports deletions also never
+    /// sets a flag, and clearing one it never set is a no-op.
+    ///
+    /// 🔴 A provider whose fetch FAILED must not reach here at all — there is
+    /// no case to express "I could not tell", by design. See
+    /// `SourceRecordState`.
+    public var recordState: SourceRecordState = .present
+
     public var bio: ProposedField<String> = .absent
     public var gender: ProposedField<String> = .absent
     public var hairColor: ProposedField<String> = .absent
@@ -319,6 +342,16 @@ public struct StudioMetadataProposal: Equatable, Sendable {
     /// name, and an imprint can be renamed — so carrying the id is what lets a
     /// studio hold a confirmed match rather than a spelling.
     public var sourceId: ProposedField<String> = .absent
+
+    /// What the source says about this record still existing — see
+    /// `ActorMetadataProposal.recordState` for why it is not a `ProposedField`.
+    ///
+    /// ⚠️ In practice only ever `.present` or `.deleted`. The source exposes a
+    /// forwarding pointer on performers ONLY, so a studio the source merged
+    /// reads as a plain deletion and the operator has to find where it went.
+    /// That is a limit of the source, not of `SourceRecordState`.
+    public var recordState: SourceRecordState = .present
+
     /// The source's canonical spelling.
     public var name: ProposedField<String> = .absent
     public var bio: ProposedField<String> = .absent
@@ -394,6 +427,14 @@ public struct ProposedCredit: Equatable, Sendable, ExpressibleByStringLiteral {
 }
 
 public struct VideoMetadataProposal: Equatable, Sendable {
+
+    /// What the source says about this record still existing — see
+    /// `ActorMetadataProposal.recordState` for why it is not a `ProposedField`.
+    ///
+    /// ⚠️ Only ever `.present` or `.deleted`: the source has no forwarding
+    /// pointer on scenes, so a scene it merged reads as a deletion.
+    public var recordState: SourceRecordState = .present
+
     public var title: ProposedField<String> = .absent
     public var releaseYear: ProposedField<Int> = .absent
     /// The full publication day as `yyyy-MM-dd`.

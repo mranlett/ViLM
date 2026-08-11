@@ -51,7 +51,7 @@ final class SourceStateTests: XCTestCase {
 
     func testU7AFlagPersistsAndIsReadableWithoutTheNetwork() throws {
         let id = try matchedVideo()
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: Date())
 
         // Reopen, as the audit would on a later launch.
@@ -71,7 +71,7 @@ final class SourceStateTests: XCTestCase {
     func testU8TheFlagCarriesWhenItWasSeen() throws {
         let id = try matchedVideo()
         let seen = Date(timeIntervalSince1970: 1_700_000_000)
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: seen)
 
         let match = try XCTUnwrap(try store.staleMatches(isVideo: true).first)
@@ -85,7 +85,7 @@ final class SourceStateTests: XCTestCase {
     /// that cannot distinguish those reports its own ignorance as a clean bill.
     func testAnOrdinaryCheckIsRecordedEvenWhenTheRecordIsFine() throws {
         let id = try matchedVideo()
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", isVideo: true)
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1", isVideo: true)
 
         XCTAssertTrue(try store.staleMatches(isVideo: true).isEmpty, "nothing to report")
         let match = try XCTUnwrap(try store.matches(forVideo: id).first)
@@ -100,22 +100,22 @@ final class SourceStateTests: XCTestCase {
     /// findings, and an audit that cannot be cleared is one people stop reading.
     func testU13AValidFetchClearsAnExistingFlag() throws {
         let id = try matchedVideo()
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: Date())
         XCTAssertEqual(try store.staleMatches(isVideo: true).count, 1)
 
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", isVideo: true)
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1", isVideo: true)
 
         XCTAssertTrue(try store.staleMatches(isVideo: true).isEmpty)
     }
 
     func testAMergeMarkAlsoClears() throws {
         let id = try matchedActor()
-        try store.recordSourceState(nodeId: id, source: "TheSource",
+        try store.recordSourceState(nodeId: id, source: "TheSource", sourceId: "p-1",
                                     isVideo: false, mergedInto: "p-99")
         XCTAssertEqual(try store.staleMatches(isVideo: false).count, 1)
 
-        try store.recordSourceState(nodeId: id, source: "TheSource", isVideo: false)
+        try store.recordSourceState(nodeId: id, source: "TheSource", sourceId: "p-1", isVideo: false)
         XCTAssertTrue(try store.staleMatches(isVideo: false).isEmpty)
     }
 
@@ -123,7 +123,7 @@ final class SourceStateTests: XCTestCase {
 
     func testAMergedRecordCarriesWhereItWentAndIsNotMarkedDeleted() throws {
         let id = try matchedActor()
-        try store.recordSourceState(nodeId: id, source: "TheSource",
+        try store.recordSourceState(nodeId: id, source: "TheSource", sourceId: "p-1",
                                     isVideo: false, mergedInto: "p-99")
 
         let match = try XCTUnwrap(try store.staleMatches(isVideo: false).first)
@@ -137,9 +137,9 @@ final class SourceStateTests: XCTestCase {
     func testU6BothMatchTablesCarryTheState() throws {
         let video = try matchedVideo()
         let actor = try matchedActor()
-        try store.recordSourceState(nodeId: video.uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: video.uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: Date())
-        try store.recordSourceState(nodeId: actor, source: "TheSource",
+        try store.recordSourceState(nodeId: actor, source: "TheSource", sourceId: "p-1",
                                     isVideo: false, deletedAt: Date())
 
         XCTAssertEqual(try store.staleMatches(isVideo: true).count, 1)
@@ -154,11 +154,46 @@ final class SourceStateTests: XCTestCase {
         try store.recordMatch(NodeMatch(nodeId: id.uuidString, source: "Elsewhere",
                                         sourceId: "x-1", method: .title), isVideo: true)
 
-        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: id.uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: Date())
 
         let stale = try store.staleMatches(isVideo: true)
         XCTAssertEqual(stale.map(\.source), ["TheSource"])
+    }
+
+    // MARK: - 🚨 Scoped to the record that was actually fetched
+
+    /// The trap the `sourceId` parameter exists to close.
+    ///
+    /// Re-matching means fetching several candidates from the same source to
+    /// compare them, and each carries its own state. Keyed on `(node, source)`
+    /// alone, looking at a candidate the source had deleted would stamp
+    /// "deleted" onto this node's existing, healthy match to a DIFFERENT
+    /// record — a finding fabricated entirely by looking at something else.
+    func testFetchingADifferentRecordCannotFlagThisNodesMatch() throws {
+        _ = try matchedVideo("s-1")
+        let id = try matchedVideo("s-KEEP")
+
+        // The operator opens the re-match picker and a candidate is fetched.
+        // The source says THAT record is gone. It is not the one we hold.
+        try store.recordSourceState(.deleted, nodeId: id.uuidString, source: "TheSource",
+                                    sourceId: "s-SOMETHING-ELSE", isVideo: true)
+
+        XCTAssertTrue(try store.staleMatches(isVideo: true).isEmpty,
+                      "a deleted candidate says nothing about the record we matched")
+        let match = try XCTUnwrap(try store.matches(forVideo: id).first)
+        XCTAssertNil(match.deletedAt)
+        XCTAssertNil(match.checkedAt, "and it is not even evidence of a check")
+    }
+
+    /// ⚠️ The other half: the SAME record still flags normally. A scope that
+    /// rejected everything would pass the test above and break the feature.
+    func testFetchingTheMatchedRecordStillFlagsIt() throws {
+        let id = try matchedVideo("s-KEEP")
+        try store.recordSourceState(.deleted, nodeId: id.uuidString, source: "TheSource",
+                                    sourceId: "s-KEEP", isVideo: true)
+
+        XCTAssertEqual(try store.staleMatches(isVideo: true).count, 1)
     }
 
     // MARK: - Nothing is reported without evidence
@@ -172,7 +207,7 @@ final class SourceStateTests: XCTestCase {
     /// 🚨 Recording state must not invent a match. A node the library never
     /// matched cannot become stale.
     func testMarkingAnUnmatchedNodeCreatesNothing() throws {
-        try store.recordSourceState(nodeId: UUID().uuidString, source: "TheSource",
+        try store.recordSourceState(nodeId: UUID().uuidString, source: "TheSource", sourceId: "s-1",
                                     isVideo: true, deletedAt: Date())
         XCTAssertTrue(try store.staleMatches(isVideo: true).isEmpty)
     }

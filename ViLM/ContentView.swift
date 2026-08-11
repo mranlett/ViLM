@@ -128,6 +128,7 @@ struct ContentView: View {
     @State private var isShowingStudioSpelling = false
     @State private var isShowingStudioAudit = false
     @State private var isShowingGraphAudit = false
+    @State private var isShowingStaleMatches = false
     /// The video an audit finding asked to open, run once its sheet has closed.
     @State private var pendingAuditVideo: (() -> Void)?
     /// The repair a studio finding asked for, run once the audit sheet has
@@ -375,6 +376,11 @@ struct ContentView: View {
                     }
                 }
             }
+            .sheet(isPresented: $isShowingStaleMatches) {
+                if let url = selectedLibraryURL {
+                    StaleMatchAuditView(libraryURL: url)
+                }
+            }
             .sheet(isPresented: $isShowingStudioAudit, onDismiss: {
                 pendingStudioFix?()
                 pendingStudioFix = nil
@@ -460,7 +466,8 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isShowingPhotoTopUp) {
                 if let url = selectedLibraryURL {
-                    ActorPhotoTopUpView(libraryURL: url)
+                    ActorPhotoTopUpView(libraryURL: url, assets: assets,
+                                        profileImageFileNames: profileImageFileNames)
                 }
             }
             .sheet(isPresented: $isShowingTagCleanup) {
@@ -790,6 +797,7 @@ struct ContentView: View {
                 onStudioConflicts: { isShowingStudioConflicts = true },
                 onStudioAudit: { isShowingStudioAudit = true },
                 onGraphAudit: { isShowingGraphAudit = true },
+                onStaleMatches: { isShowingStaleMatches = true },
                 onConnectGraph: { isShowingGraphConnect = true },
                 onResetMatches: { isShowingMatchReset = true },
                 onMoveVideos: { isShowingLibraryTransfer = true },

@@ -282,6 +282,18 @@ final class ActorBatchMatchModel: ObservableObject {
             return .failed(friendly(error))
         }
 
+        // What the source said about the record still existing (#48).
+        //
+        // ⭐ The highest-yield place in the app to learn it. This path fetches
+        // by an id the library ALREADY holds, in bulk — so one sweep re-checks
+        // every matched performer at no extra request cost, which is the whole
+        // economy of the feature.
+        if let store = try? LibrarySession.shared.store(forProfile: profile.id) {
+            try? store.recordSourceState(proposal.recordState, nodeId: profile.id,
+                                         source: provider.displayName,
+                                         sourceId: resolvedId, isVideo: false)
+        }
+
         let review = ActorEnrichment.review(profile: profile, proposal: proposal,
                                             sourceName: provider.displayName)
         let fields = ActorBatchPolicy.autoApplicableFields(review.changes)
