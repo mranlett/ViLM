@@ -98,7 +98,8 @@ struct ActorEnrichmentSheet: View {
          libraryURL: URL? = nil,
          onApply: @escaping (EntityProfile, String?) -> Void) {
         _model = StateObject(wrappedValue: ActorEnrichmentModel(
-            provider: provider, entityId: entityId, currentProfile: currentProfile))
+            provider: provider, entityId: entityId, entityName: actorName,
+            currentProfile: currentProfile))
         self.entityId = entityId
         self.currentProfile = currentProfile
         self.libraryURL = libraryURL

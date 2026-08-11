@@ -120,11 +120,19 @@ final class ActorEnrichmentModel: ObservableObject {
         return proposedName
     }
 
+    /// ⚠️ `entityName` is required even though `currentProfile` may be nil.
+    /// It is what a stand-in is built from when the library holds no row yet —
+    /// without it, applying produced a profile with an id and no identity,
+    /// which rendered as its own uid and could not be found by name again.
+    private let entityName: String
+
     init(provider: any ActorMetadataProvider,
          entityId: String,
+         entityName: String,
          currentProfile: EntityProfile?) {
         self.provider = provider
         self.entityId = entityId
+        self.entityName = entityName
         self.currentProfile = currentProfile
     }
 
@@ -180,6 +188,18 @@ final class ActorEnrichmentModel: ObservableObject {
         do {
             let proposal = try await provider.fetch(actorId: candidate.id)
             self.proposal = proposal
+
+            // What the source said about the record still existing (#48).
+            //
+            // ⚠️ Scoped to `candidate.id`, so choosing a DIFFERENT candidate to
+            // look at cannot flag the profile's existing match. It applies only
+            // when the operator re-opens the record already matched.
+            if let profileId = currentProfile?.id,
+               let store = try? LibrarySession.shared.store(forProfile: profileId) {
+                try? store.recordSourceState(proposal.recordState, nodeId: profileId,
+                                             source: provider.displayName,
+                                             sourceId: candidate.id, isVideo: false)
+            }
             let review = ActorEnrichment.review(profile: currentProfile,
                                                 proposal: proposal,
                                                 sourceName: provider.displayName)
@@ -242,8 +262,13 @@ final class ActorEnrichmentModel: ObservableObject {
     /// fields, and the user presses Save. Nothing reaches disk from here.
     func apply() -> EntityProfile? {
         guard let proposal else { return nil }
+        // 🚨 A stand-in when the library has no row, never nil. Enrichment
+        // fills a node in; it must not be the thing that brings one into
+        // existence, because it has no name to give it.
+        let subject = currentProfile
+            ?? EntityProfile(id: entityId, entityType: "actor", displayName: entityName)
         var merged = ActorEnrichment.apply(proposal,
-                                     to: currentProfile,
+                                     to: subject,
                                      entityId: entityId,
                                      accepting: accepted,
                                      acceptingGalleryURLs: galleryCandidates

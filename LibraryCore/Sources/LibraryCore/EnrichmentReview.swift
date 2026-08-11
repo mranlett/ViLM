@@ -194,9 +194,19 @@ public enum ActorEnrichment {
     ///   they are not a field that is either on or off. An empty array adds no
     ///   photos, which is the correct default — importing images nobody asked
     ///   for costs bandwidth and storage per actor.
+    /// - Parameter profile: the node being enriched. 🚨 NOT optional, and that
+    ///   is the fix for a real defect. When it was, a caller with no row passed
+    ///   nil and the result carried `entityType: nil, displayName: nil` — a row
+    ///   with an id and no identity, which renders as its own uid, cannot be
+    ///   found by name, and is dropped by the audit meant to catch it.
+    ///
+    ///   Enrichment FILLS IN a node; it does not bring one into existence. A
+    ///   caller that has only a name asks `entityIdForWriting` (or
+    ///   `newEntityProfile`) for the node first — that is where creation
+    ///   belongs, and it is now the only place identity can be established.
     public static func apply(
         _ proposal: ActorMetadataProposal,
-        to profile: EntityProfile?,
+        to profile: EntityProfile,
         entityId: String,
         accepting: Set<String>,
         acceptingGalleryURLs: [String] = [],
@@ -227,40 +237,45 @@ public enum ActorEnrichment {
             // ⚠️ Kept from the existing record. Accepting a lookup fills fields
             // in; it does not rename the node, and a source's spelling must not
             // silently replace the operator's.
-            entityType: profile?.entityType,
-            displayName: profile?.displayName,
-            bio: take(Field.bio, proposal.bio, profile?.bio),
-            photoUrl: take(Field.photoUrl, proposal.photoURL.mapString(), profile?.photoUrl),
-            homePage: profile?.homePage,          // not proposable today
-            gender: take(Field.gender, proposal.gender, profile?.gender),
-            hairColor: take(Field.hairColor, proposal.hairColor, profile?.hairColor),
-            tattoos: take(Field.tattoos, proposal.tattoos, profile?.tattoos),
-            piercings: take(Field.piercings, proposal.piercings, profile?.piercings),
-            birthYear: take(Field.birthYear, proposal.birthYear, profile?.birthYear),
-            countryOfOrigin: take(Field.countryOfOrigin, proposal.countryOfOrigin, profile?.countryOfOrigin),
-            rating: profile?.rating,              // user-authored, never proposable
-            tags: merged(Field.tags, proposal.tags, profile?.tags ?? []),
+            entityType: profile.entityType,
+            displayName: profile.displayName,
+            bio: take(Field.bio, proposal.bio, profile.bio),
+            photoUrl: take(Field.photoUrl, proposal.photoURL.mapString(), profile.photoUrl),
+            homePage: profile.homePage,          // not proposable today
+            gender: take(Field.gender, proposal.gender, profile.gender),
+            hairColor: take(Field.hairColor, proposal.hairColor, profile.hairColor),
+            tattoos: take(Field.tattoos, proposal.tattoos, profile.tattoos),
+            piercings: take(Field.piercings, proposal.piercings, profile.piercings),
+            birthYear: take(Field.birthYear, proposal.birthYear, profile.birthYear),
+            countryOfOrigin: take(Field.countryOfOrigin, proposal.countryOfOrigin, profile.countryOfOrigin),
+            rating: profile.rating,              // user-authored, never proposable
+            tags: merged(Field.tags, proposal.tags, profile.tags ?? []),
             // Union, like tags and AKAs: enrichment can add photos but never
             // remove one the user curated.
-            galleryUrls: unionGallery(profile?.galleryUrls ?? [], adding: acceptingGalleryURLs),
-            akas: merged(Field.akas, proposal.akas, profile?.akas ?? []),
-            createdAt: profile?.createdAt ?? now,
-            birthDate: take(Field.birthDate, proposal.birthDate, profile?.birthDate),
-            careerSpanRaw: take(Field.careerSpanRaw, proposal.careerSpanRaw, profile?.careerSpanRaw),
-            careerStartYear: take(Field.careerStartYear, proposal.careerStartYear, profile?.careerStartYear),
-            careerEndYear: take(Field.careerEndYear, proposal.careerEndYear, profile?.careerEndYear),
-            ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile?.ageAtCareerStart),
+            galleryUrls: unionGallery(profile.galleryUrls ?? [], adding: acceptingGalleryURLs),
+            akas: merged(Field.akas, proposal.akas, profile.akas ?? []),
+            createdAt: profile.createdAt,
+            birthDate: take(Field.birthDate, proposal.birthDate, profile.birthDate),
+            careerSpanRaw: take(Field.careerSpanRaw, proposal.careerSpanRaw, profile.careerSpanRaw),
+            careerStartYear: take(Field.careerStartYear, proposal.careerStartYear, profile.careerStartYear),
+            careerEndYear: take(Field.careerEndYear, proposal.careerEndYear, profile.careerEndYear),
+            ageAtCareerStart: take(Field.ageAtCareerStart, proposal.ageAtCareerStart, profile.ageAtCareerStart),
             // Recorded whenever the source supplies one, without needing to be
             // ticked: it is not a value the operator reviews, it is the link
             // back to the record they just confirmed. Without it, the next
             // lookup re-searches by name and may pick a different person of
             // that name entirely.
-            enrichmentSourceId: proposal.sourceId.value ?? profile?.enrichmentSourceId,
+            enrichmentSourceId: proposal.sourceId.value ?? profile.enrichmentSourceId,
             // Union, like tags and AKAs: enrichment may add a link but never
             // removes one the operator curated.
+            // ⚠️ Carried. Accepting a lookup must not reset the photo
+            // top-up's bookkeeping — and if the lookup DID add gallery photos,
+            // the held count is exceeded and they re-qualify on their own.
+            photoTopUpAt: profile.photoTopUpAt,
+            photoTopUpHeld: profile.photoTopUpHeld,
             links: accepting.contains(Field.links)
-                ? EntityLink.merged(profile?.links ?? [], adding: proposal.externalLinks.value ?? [])
-                : (profile?.links ?? [])
+                ? EntityLink.merged(profile.links ?? [], adding: proposal.externalLinks.value ?? [])
+                : (profile.links ?? [])
         )
     }
 

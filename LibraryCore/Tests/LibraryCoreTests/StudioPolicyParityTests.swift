@@ -57,6 +57,7 @@ final class StudioPolicyParityTests: XCTestCase {
     func testNothingConfirmedIsAQuestionNotADefault() throws {
         let outcome = VideoEnrichmentReview.studioResolution(
             proposal: proposal(studio: "Example Studio", parent: "Example Network"),
+            held: [],
             isVerified: isVerified)
 
         guard case .ask = outcome else {
@@ -69,6 +70,7 @@ final class StudioPolicyParityTests: XCTestCase {
 
         let outcome = VideoEnrichmentReview.studioResolution(
             proposal: proposal(studio: "Example Studio", parent: "Example Network"),
+            held: [],
             isVerified: isVerified)
 
         guard case let .use(choice) = outcome else { return XCTFail("expected .use") }

@@ -151,7 +151,13 @@ final class EnrichmentReviewTests: XCTestCase {
         let r = review(nil, p)
         XCTAssertEqual(r.fills.count, 2, "everything is a fill when there is no profile")
 
-        let merged = ActorEnrichment.apply(p, to: nil, entityId: "actor:Jane",
+        // ⚠️ A stand-in, not nil. Enrichment fills a node in; creating one is
+        // `entityIdForWriting`'s job, and passing nil here is what produced
+        // rows with an id and no identity.
+        let standIn = EntityProfile(id: "actor:Jane", entityType: "actor",
+                                    displayName: "Jane",
+                                    createdAt: Date(timeIntervalSince1970: 500))
+        let merged = ActorEnrichment.apply(p, to: standIn, entityId: "actor:Jane",
                                            accepting: r.defaultAccepted,
                                            now: Date(timeIntervalSince1970: 500))
         XCTAssertEqual(merged.bio, "a bio")
@@ -235,8 +241,9 @@ final class EnrichmentReviewTests: XCTestCase {
         XCTAssertEqual(change(r, ActorEnrichment.Field.photoUrl)?.proposed,
                        "https://example.test/p.jpg")
 
-        let merged = ActorEnrichment.apply(p, to: nil, entityId: "actor:Jane",
-                                           accepting: [ActorEnrichment.Field.photoUrl])
+        let merged = ActorEnrichment.apply(
+            p, to: EntityProfile(id: "actor:Jane", entityType: "actor", displayName: "Jane"),
+            entityId: "actor:Jane", accepting: [ActorEnrichment.Field.photoUrl])
         XCTAssertEqual(merged.photoUrl, "https://example.test/p.jpg")
     }
 

@@ -29,6 +29,11 @@ struct AliasSplitMergeView: View {
     @State private var merged = 0
     @State private var errorMessage: String?
     /// The merge awaiting confirmation: which profile goes, which survives.
+    /// 🚨 NAMES, not ids. The merge is performed by `renameTagGlobally`, which
+    /// matches `actor:Name` strings in `Asset.tags` — so handing it profile
+    /// ids silently matched nothing. Before the re-key an id WAS `actor:Name`
+    /// and this worked; afterwards it became a uid and the merge quietly
+    /// stopped doing anything, while the dialog showed the uid to the operator.
     @State private var pending: (losing: String, surviving: String)?
     /// Candidates the operator has explicitly set aside this session.
     @State private var dismissed: Set<String> = []
@@ -139,7 +144,8 @@ struct AliasSplitMergeView: View {
 
                 HStack {
                     Button("Keep \(claimant.displayName)") {
-                        pending = (losing: candidate.alias.id, surviving: claimant.id)
+                        pending = (losing: candidate.alias.displayName,
+                                   surviving: claimant.displayName)
                     }
                     .disabled(isMerging)
                     Spacer()
@@ -147,7 +153,8 @@ struct AliasSplitMergeView: View {
                     // usually the fuller record, but not always — the operator
                     // may have enriched the other one by hand.
                     Button("Keep \(candidate.alias.displayName)") {
-                        pending = (losing: claimant.id, surviving: candidate.alias.id)
+                        pending = (losing: claimant.displayName,
+                                   surviving: candidate.alias.displayName)
                     }
                     .disabled(isMerging)
                 }
@@ -218,14 +225,28 @@ struct AliasSplitMergeView: View {
         isMerging = true
         do {
             let url = libraryURL
-            try await Task.detached(priority: .userInitiated) {
+            let outcome = try await Task.detached(priority: .userInitiated) {
                 // The existing global rename already merges two profiles: the
                 // destination keeps its own values, the source fills gaps, and
                 // photos, AKAs and links are unioned rather than replaced. It
                 // also moves the graph edges and records a tombstone, so the
                 // losing name cannot come back on the next sync.
-                _ = try LibraryStore(at: url).renameTagGlobally(oldTag: losing, newTag: surviving)
+                //
+                // ⚠️ Tag strings, built from the NAMES. This is the form the
+                // rename matches on; a profile id matches nothing.
+                try LibraryStore(at: url).renameTagGlobally(
+                    oldTag: "actor:\(losing)", newTag: "actor:\(surviving)")
             }.value
+
+            // 🚨 The result is CHECKED. It used to be discarded with `_ =`, so
+            // a rename that matched nothing counted as a successful merge —
+            // the row disappeared from the list and the two profiles were
+            // still there, which is exactly how this went unnoticed.
+            guard outcome.changedAnything else {
+                errorMessage = "Nothing changed — no video, profile or tag was found under “\(losing)”. The two profiles are unchanged."
+                isMerging = false
+                return
+            }
             merged += 1
             await load()
         } catch {

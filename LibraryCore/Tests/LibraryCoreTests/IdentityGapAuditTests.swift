@@ -142,13 +142,24 @@ final class IdentityGapAuditTests: XCTestCase {
         XCTAssertEqual(report.gaps.map(\.displayName), ["alice", "Bob", "Zoe"])
     }
 
-    /// G3 — a uid-keyed row with no columns still has no knowable kind and is
-    /// still skipped, exactly as an unrecognised id always was.
-    func testAUidWithNoColumnsIsStillSkipped() {
+    /// 🚨 REVERSED 2026-08-10, and the old behaviour was the bug.
+    ///
+    /// G3 originally skipped a uid-keyed row with no columns, reasoning that it
+    /// had no knowable kind. But a UUID is what THIS BUILD mints, so such a row
+    /// is ours and unfinished — and skipping it meant the one screen that
+    /// should have caught `entityIdForWriting` handing back an id with no row
+    /// behind it instead reported the library clean.
+    ///
+    /// ⚠️ Still narrow: only the UUID shape. See `testAnUnrecognisedIdIsIgnored`
+    /// — a `tag:` node is not ours to report and is still skipped.
+    func testAUidWithNoColumnsIsReportedAsDamaged() {
+        let uid = UUID().uuidString
         let report = IdentityGapAudit.report(.init(
-            missing: [ProfileRef(id: UUID().uuidString)],
+            missing: [ProfileRef(id: uid)],
             videosByNode: [:], matchedVideosByNode: [:]))
 
-        XCTAssertTrue(report.isEmpty)
+        XCTAssertEqual(report.gaps.count, 1)
+        XCTAssertTrue(report.gaps.first?.isDamaged ?? false)
+        XCTAssertEqual(report.gaps.first?.displayName, uid)
     }
 }

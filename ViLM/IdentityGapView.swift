@@ -47,6 +47,9 @@ struct IdentityGapView: View {
     /// ⭐ A worklist has to let you work the list.
     @State private var matching: IdentityGap?
 
+    /// What the last repair did, shown until the next one.
+    @State private var repairMessage: String?
+
     /// Names solved during this sitting, so the row goes even before a reload.
     @State private var solved: Set<String> = []
 
@@ -127,6 +130,9 @@ struct IdentityGapView: View {
                         Text("\(solved.count) solved just now")
                             .font(.caption).foregroundStyle(.green)
                     }
+                    if let repairMessage {
+                        Text(repairMessage).font(.caption).foregroundStyle(.secondary)
+                    }
                 } footer: {
                     Text("These records say a lookup matched them, but nothing recorded WHICH record it matched. Every matching tool skips them, because they are already marked matched — so they cannot be repaired by running one again.")
                 }
@@ -165,11 +171,18 @@ struct IdentityGapView: View {
         Section {
             ForEach(gaps.filter { !solved.contains($0.nodeId) }.prefix(Self.examplesShown)) { gap in
                 Button {
+                    // 🚨 A DAMAGED row is not matchable. Its display name is
+                    // its own uid, so searching the source for it finds
+                    // nothing, and applying a match writes another anonymous
+                    // row. It offers Repair instead — see `repairDamaged`.
+                    if gap.isDamaged {
+                        repairDamaged()
+                    }
                     // ⭐ An ACTOR is matched right here, in a sheet over this
                     // one. Only a studio still navigates away, because there is
                     // no equivalent in-place matcher for one yet — and sending
                     // a studio to an actor page finds nothing.
-                    if gap.kind == .actor, provider != nil {
+                    else if gap.kind == .actor, provider != nil {
                         matching = gap
                     } else {
                         onExplore?(gap.kind == .actor
@@ -179,10 +192,15 @@ struct IdentityGapView: View {
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: gap.kind == .actor ? "person" : "building.2")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                        Image(systemName: gap.isDamaged ? "exclamationmark.triangle.fill"
+                              : (gap.kind == .actor ? "person" : "building.2"))
+                            .font(.caption2)
+                            .foregroundStyle(gap.isDamaged ? AnyShapeStyle(Color.orange)
+                                             : AnyShapeStyle(.tertiary))
                             .frame(width: 14)
-                        Text(gap.displayName).font(.callout)
+                        Text(gap.displayName)
+                            .font(.callout)
+                            .lineLimit(1).truncationMode(.middle)
                         Spacer()
                         // ⚠️ Both numbers, because their RATIO is the point: "in 9
                         // videos, 2 matched" says a refresh will reach them and the
@@ -191,7 +209,13 @@ struct IdentityGapView: View {
                              ? "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s") · \(gap.matchedVideoCount) matched"
                              : "\(gap.videoCount) video\(gap.videoCount == 1 ? "" : "s")")
                             .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                        if matchedWithoutAnId.contains(gap.nodeId) {
+                        if gap.isDamaged {
+                            // ⚠️ Says what it is. Left unexplained this reads
+                            // as a performer with a bizarre name, and the
+                            // operator re-matches it forever.
+                            Text("no name — tap to repair")
+                                .font(.caption2).foregroundStyle(.orange)
+                        } else if matchedWithoutAnId.contains(gap.nodeId) {
                             // ⚠️ Said on the row. Without this it looks
                             // identical to the defect where a match simply
                             // failed to record — and the operator would keep
@@ -255,6 +279,36 @@ struct IdentityGapView: View {
                 name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch {
             errorMessage = "Couldn't record the match: \(error.localizedDescription)"
+        }
+    }
+
+    /// Restores identity to rows minted without one.
+    ///
+    /// ⭐ Repairs every damaged row it can name, not just the tapped one. They
+    /// arrive in batches — one video's cast at a time — and asking the operator
+    /// to tap eleven identical rows in turn is busywork the library can do for
+    /// itself.
+    ///
+    /// ⚠️ Repairs only what it can recover from a crediting video's cast. A row
+    /// with no edge, or whose videos disagree, stays listed and stays untouched;
+    /// guessing an identity is what caused this in the first place.
+    private func repairDamaged() {
+        let url = libraryURL
+        Task {
+            let outcome: Result<Int, Error> = await Task.detached(priority: .userInitiated) {
+                do { return .success(try LibraryStore(at: url).repairNamelessNodes()) }
+                catch { return .failure(error) }
+            }.value
+
+            switch outcome {
+            case let .success(count):
+                repairMessage = count == 0
+                    ? "Nothing could be repaired automatically — these rows have no video crediting them by a name that isn't already taken."
+                    : "Recovered \(count) name\(count == 1 ? "" : "s") from the videos crediting them."
+            case let .failure(error):
+                repairMessage = "Couldn't repair: \(error.localizedDescription)"
+            }
+            await load()
         }
     }
 

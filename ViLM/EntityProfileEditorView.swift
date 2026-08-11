@@ -679,6 +679,13 @@ struct EntityProfileEditorView: View {
                         )
 
                         profile.enrichmentSourceId = enrichmentSourceId
+                        // ⚠️ Assigned rather than passed. This initialiser is
+                        // already at the SwiftUI type-checker's budget — two
+                        // more arguments tip it into "unable to type-check in
+                        // reasonable time". Same reason `enrichmentSourceId`
+                        // above is set here.
+                        profile.photoTopUpAt = initialProfile?.photoTopUpAt
+                        profile.photoTopUpHeld = initialProfile?.photoTopUpHeld
 
                         // An unresolved lookup verdict is only as good as the
                         // data it was based on. If the operator supplied an
@@ -857,6 +864,8 @@ struct EntityProfileEditorView: View {
             links: links
         )
         profile.enrichmentSourceId = enrichmentSourceId
+        profile.photoTopUpAt = initialProfile?.photoTopUpAt
+        profile.photoTopUpHeld = initialProfile?.photoTopUpHeld
         return profile
     }
 

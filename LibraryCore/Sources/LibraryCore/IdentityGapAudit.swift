@@ -21,7 +21,11 @@ import Foundation
 /// One node claiming a match it cannot prove.
 public struct IdentityGap: Equatable, Sendable, Identifiable {
     public let nodeId: String
-    public let kind: GraphNodeKind
+    /// 🚨 Optional, because a row whose `entity_type` was never written has no
+    /// kind — and those are exactly the rows worth reporting. This used to be
+    /// non-optional, so the audit DROPPED them and told the operator the
+    /// library was clean while holding broken records.
+    public let kind: GraphNodeKind?
     /// Videos crediting this node, across both representations.
     public let videoCount: Int
     /// ...of which are themselves matched, and so could hand an identity down.
@@ -42,14 +46,23 @@ public struct IdentityGap: Equatable, Sendable, Identifiable {
     /// follow.
     public var isRecoverableByRefresh: Bool { matchedVideoCount > 0 }
 
-    public init(nodeId: String, kind: GraphNodeKind,
+    /// ⚠️ The node has no kind and no name of its own — it renders as its own
+    /// uid. Not a missing identity in the ordinary sense: the record itself is
+    /// damaged, and matching it again just repeats the cycle.
+    public var isDamaged: Bool { kind == nil }
+
+    public init(nodeId: String, kind: GraphNodeKind?,
                 videoCount: Int, matchedVideoCount: Int,
                 displayName: String? = nil) {
         self.nodeId = nodeId
         self.kind = kind
+        // ⚠️ Falls back to the id rather than to nothing. A damaged row has no
+        // name to show, and a blank line is one nobody can act on.
         self.displayName = displayName
-            ?? (nodeId.hasPrefix(kind.prefix) ? String(nodeId.dropFirst(kind.prefix.count))
-                                              : nodeId)
+            ?? kind.flatMap { k in
+                nodeId.hasPrefix(k.prefix) ? String(nodeId.dropFirst(k.prefix.count)) : nil
+            }
+            ?? nodeId
         self.videoCount = videoCount
         self.matchedVideoCount = matchedVideoCount
     }
@@ -114,14 +127,27 @@ public enum IdentityGapAudit {
     /// those needing a person, the ones appearing in most videos matter most.
     public static func report(_ input: Input) -> IdentityGapReport {
         let gaps = input.missing.compactMap { ref -> IdentityGap? in
-            guard let kind = ref.kind else { return nil }
+            // 🚨 A uid-keyed row with no columns is DAMAGED, and reported.
+            // It used to be skipped alongside genuinely foreign ids, so the
+            // audit stayed silent about the most broken thing it could find.
+            //
+            // ⚠️ Narrowly: only a UUID-shaped id qualifies. That is precisely
+            // what this build mints, so a row carrying one and no columns is
+            // ours and unfinished. `tag:blonde` or any other shape this build
+            // does not manage is still skipped rather than guessed at — the
+            // property `testAnUnrecognisedIdIsIgnored` protects.
+            guard ref.kind != nil || UUID(uuidString: ref.id) != nil else { return nil }
             let id = ref.id
-            return IdentityGap(nodeId: id, kind: kind,
+            return IdentityGap(nodeId: id, kind: ref.kind,
                                videoCount: input.videosByNode[id] ?? 0,
                                matchedVideoCount: input.matchedVideosByNode[id] ?? 0,
                                displayName: ref.name ?? id)
         }
         .sorted {
+            // Damaged first: an ordinary gap is fixed by matching, this one is
+            // not, and burying it under a hundred routine rows is how it stays
+            // unfixed.
+            if $0.isDamaged != $1.isDamaged { return $0.isDamaged }
             if $0.isRecoverableByRefresh != $1.isRecoverableByRefresh {
                 return $0.isRecoverableByRefresh
             }

@@ -23,7 +23,8 @@ final class StudioResolutionWiringTests: XCTestCase {
 
     func testAnImprintAloneIsUsed() {
         let outcome = VideoEnrichmentReview.studioResolution(
-            proposal: proposal(studio: "Example Studio"), isVerified: verified())
+            proposal: proposal(studio: "Example Studio"), held: [],
+            isVerified: verified())
 
         guard case let .use(c) = outcome else { return XCTFail("expected .use, got \(outcome)") }
         XCTAssertEqual(c.name, "Example Studio")
@@ -34,6 +35,7 @@ final class StudioResolutionWiringTests: XCTestCase {
     func testTheVerifiedOneWinsWhicheverLevelItIsOn() {
         let outcome = VideoEnrichmentReview.studioResolution(
             proposal: proposal(studio: "Example Studio", parent: "Example Network"),
+            held: [],
             isVerified: verified("Example Network"))
 
         guard case let .use(c) = outcome else { return XCTFail("expected .use, got \(outcome)") }
@@ -46,6 +48,7 @@ final class StudioResolutionWiringTests: XCTestCase {
     func testTwoUnverifiedStudiosAsk() {
         let outcome = VideoEnrichmentReview.studioResolution(
             proposal: proposal(studio: "Example Studio", parent: "Example Network"),
+            held: [],
             isVerified: verified())
 
         guard case let .ask(i, p) = outcome else { return XCTFail("expected .ask, got \(outcome)") }
@@ -56,6 +59,7 @@ final class StudioResolutionWiringTests: XCTestCase {
     func testNoStudioAtAll() {
         XCTAssertEqual(
             VideoEnrichmentReview.studioResolution(proposal: proposal(studio: nil),
+                                                   held: [],
                                                    isVerified: verified()),
             .none)
     }
@@ -64,6 +68,7 @@ final class StudioResolutionWiringTests: XCTestCase {
     func testABlankStudioIsNotOffered() {
         XCTAssertEqual(
             VideoEnrichmentReview.studioResolution(proposal: proposal(studio: "   "),
+                                                   held: [],
                                                    isVerified: verified()),
             .none)
     }

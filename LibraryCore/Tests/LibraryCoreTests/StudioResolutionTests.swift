@@ -125,4 +125,80 @@ final class StudioResolutionTests: XCTestCase {
                                                       proposed: proposed),
                        "nothing to accept")
     }
+
+    // MARK: - 🚨 A settled decision is not re-opened
+
+    /// The operator already answered this question for this video. Re-matching
+    /// is a refresh — it picks up new data, it does not re-litigate.
+    ///
+    /// ⚠️ This outranks verification deliberately. Both names being verified is
+    /// the COMMON case on a curated library — accepting a studio is what
+    /// verifies it — so without this rule the question came back more often the
+    /// more of the library the operator had settled.
+    func testTheStudioTheVideoAlreadyCarriesIsKeptWithoutAsking() {
+        let i = StudioResolution.Candidate(name: "Example Studio", sourceId: "i",
+                                           level: .imprint, isVerified: true)
+        let p = StudioResolution.Candidate(name: "Example Network", sourceId: "p",
+                                           level: .parent, isVerified: true)
+
+        XCTAssertEqual(
+            StudioResolution.resolve(imprint: i, parent: p, held: ["Example Network"]),
+            .use(p), "both verified would otherwise ask")
+        XCTAssertEqual(
+            StudioResolution.resolve(imprint: i, parent: p, held: ["Example Studio"]),
+            .use(i))
+    }
+
+    /// And it beats verification pointing the other way — the stored answer is
+    /// about THIS video, which the verified set is not.
+    func testTheHeldStudioBeatsAVerifiedAlternative() {
+        let i = StudioResolution.Candidate(name: "Example Studio", sourceId: "i",
+                                           level: .imprint, isVerified: false)
+        let p = StudioResolution.Candidate(name: "Example Network", sourceId: "p",
+                                           level: .parent, isVerified: true)
+
+        XCTAssertEqual(
+            StudioResolution.resolve(imprint: i, parent: p, held: ["Example Studio"]),
+            .use(i), "the network is verified, but this video already answered")
+    }
+
+    /// ⭐ Spelling differences do not defeat it, using the same folding the rest
+    /// of this type uses — otherwise "SilverRiver" on the video and
+    /// "Silver River" from the source would read as an unanswered question.
+    func testAHeldStudioMatchesOnTheSameFoldingAsEverythingElse() {
+        let i = StudioResolution.Candidate(name: "Silver River", sourceId: "i",
+                                           level: .imprint, isVerified: false)
+        let p = StudioResolution.Candidate(name: "Example Network", sourceId: "p",
+                                           level: .parent, isVerified: false)
+
+        XCTAssertEqual(StudioResolution.resolve(imprint: i, parent: p, held: ["silverriver"]),
+                       .use(i))
+    }
+
+    /// 🚨 The limit. If the source has started naming two DIFFERENT studios,
+    /// the old answer is not an answer to the new question, and it still asks.
+    /// A rule that always kept the held value would silently freeze the studio
+    /// against genuinely new upstream data.
+    func testAHeldStudioThatIsNeitherCandidateStillAsks() {
+        let i = StudioResolution.Candidate(name: "Example Studio", sourceId: "i",
+                                           level: .imprint, isVerified: false)
+        let p = StudioResolution.Candidate(name: "Example Network", sourceId: "p",
+                                           level: .parent, isVerified: false)
+
+        guard case .ask = StudioResolution.resolve(imprint: i, parent: p,
+                                                   held: ["Something Else Entirely"])
+        else { return XCTFail("a stale answer to a different question is not an answer") }
+    }
+
+    /// ⚠️ An empty held list changes nothing — the pre-existing behaviour is
+    /// intact for a video that has no studio yet.
+    func testAVideoWithNoStudioIsUnaffected() {
+        let i = StudioResolution.Candidate(name: "Example Studio", sourceId: "i",
+                                           level: .imprint, isVerified: false)
+        let p = StudioResolution.Candidate(name: "Example Network", sourceId: "p",
+                                           level: .parent, isVerified: false)
+
+        guard case .ask = StudioResolution.resolve(imprint: i, parent: p, held: [])
+        else { return XCTFail("expected the unchanged behaviour") }
+    }
 }

@@ -316,6 +316,11 @@ final class VideoBatchMatchModel: ObservableObject {
             let proposal: VideoMetadataProposal
             switch VideoEnrichmentReview.studioResolution(
                 proposal: fetched,
+                // A studio this video already carries is a decision already
+                // made about it — the batch run must respect it exactly as the
+                // interactive path does, or the two disagree about the same
+                // video depending on which route reached it.
+                held: asset.studios,
                 isVerified: { (try? store.fetchEntityProfile(named: $0, type: "studio"))?
                     .enrichmentState == .matched }
             ) {

@@ -397,7 +397,11 @@ public enum VideoEnrichmentReview {
     ///
     /// `isVerified` answers whether a studio NAME has already been confirmed —
     /// in practice `enrichmentState == .matched` on its profile.
+    /// - Parameter held: the studio names the video already carries. ⚠️ NOT
+    ///   defaulted — every caller has the asset, and a caller that quietly
+    ///   passed nothing would re-open a decision the operator already made.
     public static func studioResolution(proposal: VideoMetadataProposal,
+                                        held: [String],
                                         isVerified: (String) -> Bool)
     -> StudioResolution.Outcome {
         func candidate(_ name: String?, _ sourceId: String?,
@@ -409,7 +413,8 @@ public enum VideoEnrichmentReview {
         return StudioResolution.resolve(
             imprint: candidate(proposal.studio.value, proposal.studioSourceId.value, .imprint),
             parent: candidate(proposal.studioParent.value,
-                              proposal.studioParentSourceId.value, .parent))
+                              proposal.studioParentSourceId.value, .parent),
+            held: held)
     }
 
     /// A copy of the proposal whose studio field carries the decided studio.

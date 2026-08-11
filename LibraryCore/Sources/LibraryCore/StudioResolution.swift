@@ -61,7 +61,27 @@ public enum StudioResolution {
     ///   leave the video with no studio at all rather than an unconfirmed one.
     /// - both offered, exactly one verified → the verified one.
     /// - both offered, neither or both verified → ask.
-    public static func resolve(imprint: Candidate?, parent: Candidate?) -> Outcome {
+    /// - Parameter held: the studio names the video ALREADY carries.
+    ///
+    /// 🚨 A settled decision is evidence, and outranks verification.
+    ///
+    /// Without this the choice is made purely from whether each name is a
+    /// verified studio somewhere in the library — so the operator was asked the
+    /// same imprint-versus-network question about the same video every time it
+    /// was re-matched. Worse, it got MORE frequent with use: accepting a studio
+    /// is what verifies it, so settling one of these put both names in the
+    /// verified set and pushed the next pairing into the `(true, true)` branch,
+    /// which asks.
+    ///
+    /// ⭐ Re-matching is a REFRESH. It exists to pick up new data, not to
+    /// re-open a question the operator already answered for this video. To
+    /// change that answer, edit the video's studio.
+    ///
+    /// ⚠️ Only when the held studio is one of the two ON OFFER. If the source
+    /// has started naming two genuinely different studios, the old answer is
+    /// not an answer to the new question, and it still asks.
+    public static func resolve(imprint: Candidate?, parent: Candidate?,
+                               held: [String] = []) -> Outcome {
         switch (imprint, parent) {
         case (nil, nil):
             return .none
@@ -78,6 +98,21 @@ public enum StudioResolution {
             // A source that names the same studio at both levels has not
             // actually offered a choice.
             guard !isSameStudio(i.name, p.name) else { return .use(i) }
+
+            // 🚨 The settled decision wins, before verification is consulted.
+            // The video already carries one of these two, which means this
+            // exact question was already answered for this exact video.
+            //
+            // ⚠️ Imprint is tested first only to be deterministic. A video
+            // carrying BOTH is malformed — a scene has one releasing studio —
+            // and either answer is harmless there: the review compares the
+            // result against what is held, so a studio already present
+            // produces no row and changes nothing.
+            if let settled = [i, p].first(where: { candidate in
+                held.contains { isSameStudio($0, candidate.name) }
+            }) {
+                return .use(settled)
+            }
 
             switch (i.isVerified, p.isVerified) {
             case (true, false): return .use(i)

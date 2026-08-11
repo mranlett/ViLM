@@ -659,7 +659,22 @@ public class LibraryStore {
     /// save; minting and persisting stay separate.
     public func entityIdForWriting(named name: String, type: String) throws -> String {
         if let existing = try entityId(named: name, type: type) { return existing }
-        return try newEntityProfile(named: name, type: type).id
+        // 🚨 SAVED, not merely minted. `newEntityProfile` is a pure factory —
+        // it builds the row and stores nothing — so returning `.id` off it
+        // handed back a uid that named nothing.
+        //
+        // Everything downstream then keyed edges and columns to an identifier
+        // with no row behind it: the actor rendered as its own uid (the `name`
+        // fallback is `displayName ?? parsed-id ?? id`, and a uid parses as
+        // neither), `fetchEntityProfile(named:type:)` could not find it, and
+        // `Missing Identities` dropped it for having no kind. One discarded
+        // value, three symptoms.
+        //
+        // ⚠️ The name says "for writing". A caller asking for an id to write
+        // against is entitled to assume the thing it identifies exists.
+        let profile = try newEntityProfile(named: name, type: type)
+        try saveEntityProfile(profile)
+        return profile.id
     }
 
     /// The LOCAL id for a node named this, or nil when the library has none.
