@@ -3,7 +3,7 @@
 
 ---
 spec: "Upstream Deletions — tell me when a match has gone stale"
-status: Approved
+status: Implemented
 kind: Enhancement
 priority: P2
 notion: https://app.notion.com/p/Upstream-Deletions-tell-me-when-a-match-has-gone-stale-3b7adccaf428815baa0ae719b0e920e9
@@ -37,6 +37,7 @@ An audit, because that is the established shape for "here is something wrong tha
 ⚠️ The source also records `merged_into_id` (report 1.4). A record that was MERGED is not gone — it has a forwarding address, and the right action is to re-point the match rather than clear it.
 🔴 Treating a merge as a plain deletion would throw away a perfectly good identity and send the operator to re-match by hand something the source has already told us the answer to. **If the flag is adopted, the forwarding pointer should be adopted with it or the audit will give bad advice.**
 ❓ **Open:** does that fold 1.4 into this spec, or stay separate? Recommend folding the *pointer* here (it changes what this audit recommends) and leaving 1.4's duplicate-merge tooling separate, since that feeds a different existing tool.
+  1. ✅ **Decision - **I agree with folding the pointer here and leaving 1.4’s duplicate merging tool separate
 ## D4 — When it is checked
 ⚠️ Not on a schedule, and not in the background — the no-background-network posture holds. The flag rides along on records already being fetched, and a deliberate sweep is an operator action like every other batch tool.
 ⭐ So most of the value arrives free: any re-match, refresh or enrichment already fetches the record, and the flag comes with it at no extra request.
@@ -68,3 +69,17 @@ The Human Operator accepted the recommendations as written.
 1. **D3 — adopt the forwarding pointer WITH the flag.** Shipping `deleted` alone would give the audit bad advice: it would send the operator to re-match by hand something the source has already answered. The pointer changes what this audit *recommends*, so it belongs here. ⚠️ The duplicate-merge TOOLING of report 1.4 stays separate — it feeds a different existing tool and has its own decisions.
 2. **D4 — ride along on existing fetches to start.** Any re-match, refresh or enrichment already fetches the record and the flag comes free. A deliberate sweep can follow once there is evidence stale identities exist in numbers worth a batch run.
 3. **Keep the old source id after a confirmed deletion.** Discarding it makes the deletion unauditable — there would be no way to answer "what was this matched to, and when did it go?", which is exactly the question someone will ask.
+---
+## Implementation state — 2026-08-11
+Built end to end and shipped. `#48`, `#49`, `#50` closed.
+**One correction to this spec, from the live schema.** Four types expose `deleted`, so U6's count is right — but **only Performer forwards** (`merged_into_id`). A merged scene or studio therefore arrives indistinguishable from a deleted one, and "moved, can be re-pointed" will only ever appear for actors. The spec implied otherwise.
+**A trap found while wiring it.** `recordSourceState` keyed on `(node, source)` alone, so browsing candidates during a re-match could stamp a deleted candidate's state onto the node's healthy match to a *different* record. It is now scoped to the record actually fetched.
+**The audit is passive, so ****`Check now`**** was added.** It reads flags earlier fetches persisted; on a library where none had run it reported "nothing missing" permanently, indistinguishable from good news. ⚠️ And it is the **only** bulk re-check — `Match Actors` skips anything already `matched`, so a settled match is never revisited by it.
+### 🚨 ANSWERED 2026-08-11 — the signal is not there
+Sweep on the device: **301 checked, 21 returned no record at all, zero carried a ****`deleted`**** flag.**
+The source does not report a removed performer as a record flagged `deleted`. It returns nothing, `findPerformer` throws `notFound`, and D1's flag is never populated. 7% of the sample.
+So this spec is implemented exactly as written and **cannot report anything**. U6 needs `notFound` treated as the signal — see #48 for the proposed fourth `SourceRecordState` case. ⚠️ An unresolvable id is ambiguous between deleted, merged-away and simply wrong, so the finding should say "the source no longer has this record" rather than "deleted".
+### The original question, kept for the record
+A full sweep on the device has found **nothing**. That is either good news or a design finding, and we cannot yet tell which.
+If the source returns deleted performers as **null** rather than as records flagged `deleted`, `findPerformer` throws `notFound` and the flag never arrives — in which case `notFound` is the only signal that will ever exist. The sweep now counts and reports it separately for exactly this reason.
+**Next run should be read for the third figure**: how many returned *no record at all* under the id we hold. Non-zero means U6 needs to treat `notFound` as the signal.

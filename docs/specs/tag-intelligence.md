@@ -3,7 +3,7 @@
 
 ---
 spec: "Tag Intelligence — classification, aliases and descriptions from the source"
-status: Draft
+status: Archived
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Tag-Intelligence-classification-aliases-and-descriptions-from-the-source-3b7adccaf428815aa2f1d91ac7c4b07f
@@ -11,6 +11,15 @@ notion: https://app.notion.com/p/Tag-Intelligence-classification-aliases-and-des
 
 # Tag Intelligence — classification, aliases and descriptions from the source
 
+> 🗄️ **Status: Archived 2026-08-12.** Moved out of Approved so it stops reading as ready work — the parked note below is unchanged and remains the substance.
+> 
+> ⚠️ **Archived is not rejected.** The analysis holds; there is simply nothing for it to do. All 72 tags are classified and nothing is pending, so the manual work this was ranked first to remove does not exist.
+> 
+> ⭐ **What revives it:** importing a provider vocabulary — the "ten thousand long" case the tag-card design already anticipates. Arriving pre-classified is what would make this valuable rather than merely available. Reopen then, and re-run the audit findings from 2026-08-09, which were deliberately left unaddressed for whoever picks it up.
+> 
+> ⚠️ **Before reviving, do the cheap thing first:** sample `queryTagCategories`. One call, no arguments, returns the whole taxonomy — enough to check whether the PEOPLE / SCENE / ACTION mapping holds against our 72 at all. The ecosystem survey found nobody requesting `category { group }`, so its population rate is unestablished, and **if the mapping does not hold this spec is wrong rather than merely early.**
+> 
+> The Human Operator noted on approval that the source system does not appear to classify tags in the way a pre-classified import would need — which is a second reason the sample comes before the build.
 > ⏸️ **PARKED 2026-08-09, by the Human Operator.** Not rejected — correct and not yet worth building.
 > 
 > All 72 tags are classified and nothing is pending, so the manual work this was ranked first to remove does not exist. Its value is entirely prospective.
@@ -57,4 +66,6 @@ The cleanup tool works only from what the library contains, so it can find `Scub
 - **G5** — A tag description never overwrites operator text.
 ## ❓ Open — Human Operator
 1. Given zero unclassified tags, is this worth building now, or parked until the vocabulary grows? **Recommend: park, and sample the taxonomy meanwhile** — the sample is one call and it is what tells us whether the mapping holds at all.
+  1. ✅ **Decision - **Park
 2. Should an imported provider vocabulary (the "ten thousand long" case the tag-card design already anticipates) arrive pre-classified? That is what would make this valuable, and it is a different feature.
+  1. ✅ **Decision - **It should arrive pre-classified but our source system doesn’t seem to classify tags in this manner

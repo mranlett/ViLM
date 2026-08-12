@@ -3,7 +3,7 @@
 
 ---
 spec: "Performer Detail — the fields we do not ask for"
-status: In Review
+status: Approved
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Performer-Detail-the-fields-we-do-not-ask-for-3b7adccaf42881a79789f24355115758
@@ -45,4 +45,6 @@ It might collapse `knownWorks` — built for the disambiguation picker, now also
 - **P5** — A structured value is stored structured, not pre-rendered.
 ## ❓ Open — Human Operator
 1. Which of these do you actually want? 🔴 Recommend a first cut of **`death_date`**** + ****`scene_count`** — one fixes a wrongness, the other helps the disambiguation problem that keeps recurring — and leave the physical attributes until something needs them.
+  1. ✅ **Decision - **both are interesting data points
 2. Sample `scene_count`, `studios` and `scenes` for population before committing to any of the three?
+  1. ✅ **Decision - **Skip scenes as not providing value but I like the others. Studios - we need to clearly identify in the UI if we retrieve studios that we don’t have videos for as part of the “what you’re missing” type of information

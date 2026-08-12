@@ -3,7 +3,7 @@
 
 ---
 spec: "Upstream Merges — the duplicate the source already resolved"
-status: In Review
+status: Implemented
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Upstream-Merges-the-duplicate-the-source-already-resolved-3b7adccaf42881bcbc69c22a3e81c375
@@ -11,6 +11,17 @@ notion: https://app.notion.com/p/Upstream-Merges-the-duplicate-the-source-alread
 
 # Upstream Merges — the duplicate the source already resolved
 
+> ✅ **Status: Implemented 2026-08-12** — `9e93238`. M1–M5 covered by `UpstreamMergeAuditTests` and the new cases in `AliasSplitAuditTests`.
+> 
+> **⭐ One correction to the spec.** D3 argues at length about `merged_ids` versus `merged_into_id` and the risk of confusing them. In the event `merged_ids` was **not needed at all** — the losing side already names its destination, so a pair falls straight out of `entity_match.merged_into`, which the *Upstream Deletions* work already writes. No new query, no schema change, no plugin change.
+> 
+> **⚠️ The trap that nearly made this a no-op.** `LibraryStore.allEntityMatches()` exists for sync and selects five columns; `merged_into` is not among them, so every row it returns reports `nil`. Calling it here would have compiled, run, and found no merges ever. Hence `allEntityMatchesWithState()`, named so the distinction is not something a future reader has to notice.
+> 
+> **How D2 is delivered.** A candidate now carries its evidence — alias overlap, upstream merge, or both — and the list sorts on that before anything else. An upstream merge also resolves the ambiguity the alias heuristic cannot: it names WHICH claimant survived, so such a pair is no longer ambiguous however many profiles claim the name, and the source-named survivor wins even where local evidence (matched, larger filmography) points elsewhere. Returning the better-evidenced claimant instead would merge backwards — M4.
+> 
+> **A case the spec did not anticipate:** the alias reading and the source can disagree about *direction*. Both rows are now shown rather than one silently reconciled, because the candidate model puts the folded profile in the `alias` slot and cannot express the reverse. The operator sees the conflict and the source-backed row sorts first.
+> 
+> **Verified while implementing:** merging already handles match rows correctly. The merge deletes the losing profile and `entity_match.entity_id` cascades on delete, so the loser's stale match disappears and the survivor keeps its own — 0 orphaned rows across 2,910 in the live library. The open question's routing decision therefore needs no extra code: after a merge, *Upstream Deletions* stops reporting the pair by itself.
 > ⚠️ **Status: In Review — awaiting Human Operator approval** (Constitution Art. II).
 > 
 > Report item **1.4**. ⚠️ The forwarding POINTER (`merged_into_id`) is claimed by *Upstream Deletions*, because it changes what that audit recommends. This spec owns the duplicate-detection use, which feeds a different tool and has its own decisions.
@@ -33,3 +44,4 @@ The existing tool proposes candidates from alias overlap, which produces false p
 - **M5** — A merge involving a performer this library does not hold produces nothing.
 ## ❓ Open — Human Operator
 1. If the source merged two records and the library holds only ONE of them, is that interesting? It means the local match may point at the losing record — arguably a staleness finding rather than a duplicate one. Recommend: route it to *Upstream Deletions* and keep this spec strictly about pairs.
+  1. ✅ **Decision - **I agree with your recommendation to route to upstream deletions.

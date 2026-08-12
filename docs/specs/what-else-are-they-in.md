@@ -3,7 +3,7 @@
 
 ---
 spec: "What Else Are They In — the gap against the source"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/What-Else-Are-They-In-the-gap-against-the-source-3b7adccaf42881c6b8d7ebb93b225753

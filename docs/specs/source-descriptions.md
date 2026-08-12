@@ -3,7 +3,7 @@
 
 ---
 spec: "Source Descriptions — keep the text we already fetch"
-status: Approved
+status: Implemented
 kind: Enhancement
 priority: P2
 notion: https://app.notion.com/p/Source-Descriptions-keep-the-text-we-already-fetch-3b7adccaf42881f7ba3edff9d43ca0ba

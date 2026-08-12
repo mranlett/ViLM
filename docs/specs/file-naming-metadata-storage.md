@@ -3,7 +3,7 @@
 
 ---
 spec: "File Naming & Metadata Storage Strategy"
-status: Draft
+status: Approved
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf42881d6a344ebf970d6d0b0
@@ -11,6 +11,75 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 
 # File Naming & Metadata Storage Strategy
 
+> ⭐ **CONSOLIDATED 2026-08-12.** A second spec, *Kodi-Compliant Library Naming*, was written against GitHub #17 without checking this database first. It substantially duplicated this page and contradicted it in one place. **That page is archived; this one is authoritative**, and everything it contributed is folded in below. #17 points here.
+> 
+> This page keeps its parent link to *The Library Graph*, so building it closes the epic's T18, T18b, T23 and T24 as well as this spec's own F-criteria.
+## ✅ Decisions — 2026-08-12
+| # | Decision | Consequence |
+| --- | --- | --- |
+| 1 | Rename IN PLACE. No copy into a parallel tree | Disk space is the constraint — see the mover note below |
+| 2 | Write NFO sidecars, standard Kodi fields only, no custom elements | Sets a hard ceiling on what can be exported |
+| 3 | Scenes keep the ViLM grammar — `Studio/Studio - Performers - Date` | Confirmed against the Kodi-movie alternative. Standards where they exist, ViLM grammar where none does |
+| 4 | Actor detail beyond name and photo is not exported | ViLM stays the source of truth for people |
+| 5 | Source description becomes `plot`; operator Notes are not exported | Private notes stay private |
+| 6 | Videos with no series and no title are renamed from their existing filename stem | Lossless, and converts the library in one pass |
+## 🚨 What has changed since this draft was written
+**`contentKind`**** EXISTS.** N4 below says it does not. It shipped 2026-08-12 as **v43** — not v24 as planned. v24 shipped its match-key columns and silently omitted this one, which is why the privacy boundary specified in two epics had nothing to read and went unbuilt for weeks (#59).
+Declaration surfaces now exist: bulk in the batch inspector, per-video in the inspector. Neither pre-selects a kind, per N4. Bulk declaration is all-or-nothing and refuses a selection containing anything already declared — re-declaring in bulk is how a video marked `personal` would quietly become `scene`.
+**Re-measured 2026-08-12** on the drive library. The 2026-08-03 filename-length figures below still stand.
+|  | Count | Share |
+| --- | --- | --- |
+| Total videos | 2,077 |  |
+| Has a series | 574 | 28% |
+| Has an episode title | 1,280 | 62% |
+| Has an episode number | 173 | 8% |
+| Has a release date | 1,372 | 66% |
+| Has a studio | 1,831 | 88% |
+| Has at least one performer | 1,820 | 88% |
+| Neither series nor title | 549 | 26% |
+⚠️ Those 574 videos carry **472 distinct series values** — even among the ones that have a series, almost every series has exactly one member. This is why the Episodic grammar applies to a small minority, and why #51 mattered.
+## 🚨 The mover: an atomic rename, not a copy
+Decision 1 changes what does the moving. The obvious reuse is `VideoTransferService.moveVideo`, which copies, hash-verifies and only then deletes — correct for crossing volumes, and wrong here. It needs free space equal to the largest file, and disk space is the entire reason for renaming in place.
+- **Same volume: ****`FileManager.moveItem`****.** An atomic rename. No copy, no extra space, no window in which two copies exist.
+- **Different volume: fall back to copy-verify-remove.** Should not arise, but the tool must not silently do the expensive thing if it does.
+⚠️ Worth asserting that a same-volume run performs NO copy, because the failure is silent and only shows up as a full disk.
+## The NFO contract
+→ **Moved to **[**Metadata Sidecars**](https://app.notion.com/p/3baadccaf42881c19cc8f7d112c571e5)**.** Retained here in summary because the naming work has to know two things about it: the sidecar is written by whatever performs the rename, and the filename's three-performer cap **must not leak into it** — a path has a length limit, an XML document does not.
+Standard Kodi elements only, per decision 2.
+| ViLM | NFO element | Note |
+| --- | --- | --- |
+| Episode title, else series, else filename stem | title |  |
+| Series, when a real grouping | set / name | Kodi's standard grouping for movies |
+| Episode number | sorttitle, as `Series NNN` | Orders a set; a movie layout has nowhere else for it |
+| Release date | premiered, and year | Full date preserved in premiered |
+| Source description | plot | Operator Notes deliberately omitted (decision 5) |
+| Rating, 1 to 5 | userrating, doubled | Kodi's scale is 0 to 10 |
+| Tags | tag | Not genre — genre is a browse axis, these are free labels |
+| Studio | studio |  |
+| Performers | actor: name, order, thumb | Thumb from the stored photo URL |
+| Play count, last played | playcount, lastplayed |  |
+| Source record id | uniqueid, source named in its type attribute |  |
+### ⭐ This resolves the open question about representing a scene in `.nfo` — now owned by the sidecar spec
+The question further down asks which Kodi type fits a scene and concludes none does. **The type does not have to fit, because the filename does not have to scrape.** Kodi's *local information only* scraper reads the NFO directly and ignores the filename entirely — so a scene named by the ViLM grammar still populates in Kodi with title, studio and cast from its sidecar.
+That is what makes decision 3 free: the filename carries the operator's data, the NFO carries Kodi's. Use `<movie>` as the container; Kodi ignores elements it does not know.
+### 🚨 What Kodi cannot carry, stated plainly
+Kodi's `actor` element supports only name, role, order and thumb. Everything else ViLM knows about a performer has no standard home: biography, gender, hair colour, tattoos, piercings, birth year, birth date, death date, country of origin, aliases, career span, scene count, links, their own rating.
+By decision 4 this is accepted rather than worked around. **ViLM remains the source of truth for people; Kodi is a player.**
+⚠️ Recorded so nobody later reads a Kodi library as a backup of ViLM. It is not one, and a rebuild from NFO alone would lose every profile. This reinforces D10 below: the sidecar is portability, not recovery.
+### ⚠️ An episode NFO carries no studio and no tags
+Those live on the show-level file, not per episode. So a video filed under the **Episodic** grammar loses the two best-populated fields in the library — studio at 88%, tags widely used — unless a `tvshow.nfo` is written alongside. Worth deciding when the Episodic grammar is built; it affects at most the 173 videos carrying an episode number.
+## Answers to this page's open questions
+**Sidecar placement — BESIDE the video.** Decided. D4's stated intent was that a file disconnected from its management system still stands on its own, and only beside-the-video delivers that. The contradicting `.catalog/` answer is withdrawn.
+**Scene ****`.nfo`**** representation — resolved above.** `<movie>`, read via local-information-only.
+**How many performers in a scene filename — DECIDED 2026-08-12.** Three; female and non-binary before male; alphabetical within a rank; the name generated once at match and regenerated only on request. See the section at the foot of this page for the measurements and why alphabetical won.
+## The 549 with no series and no title
+Renamed from their existing filename stem, per decision 6. This was originally going to be "report, do not rename", on the grounds that an invented name destroys the last evidence attached to the file. Deriving from the existing stem is not inventing — it carries that evidence forward as the title.
+- The stem is used verbatim, minus extension, with illegal path characters folded per N3.
+- It is written to `title` in the NFO as well.
+- ⚠️ It is NOT written back to `asset.episode`. A filename is not a verified title, and copying it into the record would launder a filename into data — precisely the mistake #51 was.
+- They are still reported as a list. That list is the enrichment work queue whether or not they have been renamed.
+## ⚠️ One guard the parsing side needs
+Once a file carries a generated name, the filename-parse review would read it under the old `Actors - Series - Tags - Studio` convention and record nonsense. Renamed assets must be excluded from that review by a **recorded flag**, not by inspecting the shape of the name — guessing which scheme a name follows is the same class of mistake as #51.
 > ⚠️ **Status: Draft — rewritten 2026-08-05 as a spec DERIVED from *****The Library Graph*****, and awaiting re-approval** (Constitution Art. II). The previous version was Approved; it made model decisions locally that now belong to the Epic. Superseded reasoning is preserved under *History* rather than deleted.
 **Parent:** *The Library Graph* (Epic, P0). That spec owns nodes, edges, tag kinds, match durability, provenance and lexicons. **This spec owns exactly one question: what a file is called and where it sits on disk.**
 ## What did not change, and is not re-litigated
@@ -98,7 +167,8 @@ Per D10, the sidecar is for **portability, not recovery** — `LibraryBackupServ
 💡 **It has no consumer today, so it is sequenced last** and blocks nothing.
 ❓ **Open — sidecar placement contradicts itself and must be settled before it ships.** D4's prose decided *"if the user chooses to disconnect a file from their metadata management system, the file must still stand on its own"* — which means **beside the video**. The numbered answer below it says **inside ****`.catalog/`**, which does not travel with a copied file. These are opposite. **Recommended: beside the video**, since that is the stated intent and the only placement that delivers portability. Needs a decision.
 ❓ **Open — how is a scene represented in ****`.nfo`****?** Kodi defines `<movie>`, `<tvshow>`, `<episodedetails>`, `<musicvideo>`; a scene is performer-and-studio-led and frequently has no title, so none fits. Kodi ignores unknown elements, which is the escape hatch. **Does not block anything** while the sidecar is last.
-💡 **Recommended: split the sidecar into its own spec**, taking both open questions above and **F8** with it. It has no consumer, blocks nothing, and its unresolved placement currently makes F8 impossible to write deterministic filesystem assertions for. Keeping it here is the only reason this spec has unresolved questions that its own work does not depend on.
+✅ **DONE 2026-08-12 — split out into **[**Metadata Sidecars — portability, not recovery**](https://app.notion.com/p/3baadccaf42881c19cc8f7d112c571e5)**.** Both open questions above went with it and are now answered there: placement is **beside the video**, and a scene is a `<movie>` read via Kodi's local-information-only scraper, so the filename never has to scrape. **F8 moved too**, as S1.
+⚠️ Everything above this line in this section is retained for context and is **no longer authoritative** — read the sidecar spec instead. One constraint reaches back here: a sidecar must be named for the file it accompanies and follow it through a rename, so **whatever performs the rename writes the sidecar**. A later pass cannot know what a file used to be called.
 ## Open — the scene grammar's last detail
 ❓ **How many performers go in a scene filename, and chosen how?** The revised decision reads *"studio | video name | headliner performers | date of release"*, but "headliner" is undefined. Median is 1 performer and maximum is 10; listing all ten is legal but unwieldy, and any rule for choosing a subset must be stable, or enriching cast data triggers a rename — the instability that removed performers from film names in the first place. Blocks the scene name generator, and makes F1 and F6 unverifiable.
 **Recommended: every credited performer, in the source's billing order, with no fixed cap.**
@@ -108,7 +178,20 @@ Per D10, the sidecar is for **portability, not recovery** — `LibraryBackupServ
 | Cap | none — the 255-byte ceiling is the only limit, and it drops whole names from the end |
 | Why no fixed N | any N is arbitrary, and a name built from "the top 3" changes meaning the moment billing is corrected |
 **Why this is stable in practice:** cast arrives with a match, matches are settled (Epic D4), and relocation happens *at* match time (N2) — so the cast is final when the name is generated. At median 1 and maximum 10 performers, ten names plus a studio and a date still fits 255 bytes in the overwhelming majority of cases, and the truncation hierarchy handles the rest.
-**If "headliner" was meant literally** — a top-billed subset — the rule needs an explicit N and a documented tie-break, and it accepts that correcting billing order renames files. **Needs a decision either way.**
+**If "headliner" was meant literally** — a top-billed subset — the rule needs an explicit N and a documented tie-break, and it accepts that correcting billing order renames files. ✅ **DECIDED 2026-08-12 — three, female first, alphabetical, named once.**
+| Rule |  |
+| --- | --- |
+| Cap | 3 performers |
+| Rank | female and non-binary first, male last |
+| Within a rank | alphabetical |
+| When applied | once, at match time (N2). Regenerated only on explicit request |
+🚨 **The recommendation above is withdrawn, and half of it was never implementable.** `billing` is populated on **0 of 3,771** performer edges — a tie-break on the source's billing order would have sorted every scene by a column that is always null, and the failure would have looked like an ordering bug rather than a missing input.
+**Measured 2026-08-12:**
+- **77 of 1,820** videos (4%) carry more than three performers; the maximum is 16. The cap rarely bites.
+- **27** of those carry more than three FEMALE performers, so the gender rank does not resolve them and the alphabetical tie-break alone decides the name.
+- Gender is fully populated — 1,107 female, 245 male, 1 non-binary, none blank — so the primary rank is never undefined. Non-binary ranks with female so the rule is total rather than leaving one profile unsorted.
+⭐ **Alphabetical is arbitrary, and that is the point.** It is the only ordering that is both deterministic and stable: the same cast yields the same name in this library and in any other, and it never shifts because something unrelated changed. Prominence ordering — most videos first — was rejected for exactly that reason: it renames a video because a DIFFERENT video was added.
+⚠️ **The instability this section worried about is real, and it is handled by WHEN the rule runs rather than by the rule.** A capped, ranked subset does change when cast is enriched. Generating the name once at match — when the cast is final, per the Epic's D4 — and regenerating only on explicit request means enrichment never silently moves files. The rule may be unstable; the filename is not.
 ## Test strategy (Constitution Art. III)
 The Epic owns T18 (a generated path matches the grammar, and personal content never reaches a studio folder), T18b (sanitisation), T23 (a failed move never costs a match) and T24 (per-move reversibility). This spec adds:
 - **F1 — Round-trip.** Every field encoded into a name parses back identically, including titles containing the delimiter and non-ASCII characters.

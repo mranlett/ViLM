@@ -169,3 +169,15 @@ The app should say *"these exist and you do not have them"* and stop there. No f
 ## What the existing graph already supports
 No new edges are needed. `video_performer`, `video_studio`, `video_tag`, `studio_parent` and `performer_tag` are already populated — 2,367 / 1,816 / 2,556 / 115 / 368 rows on the drive library — and the studio hierarchy means a preference for a network can reach the videos of its imprints.
 ⭐ **The graph work of the past two days is the prerequisite, and it is already done.** What is missing is only the preference signal, which is what this spec produces.
+---
+## Implementation state — 2026-08-11
+Delivered except D1's video subject. Status stays **Approved** rather than Implemented for that reason.
+| issue | state |
+| --- | --- |
+| #34 game screen, #39–#43 what-else-are-they-in | closed |
+| #35 leaderboard, #36 choose the pool — built and wired, STILL OPEN pending device confirmation | not closed |
+| #37 "apply these as ratings" (D3) | 🔴 **rejected** |
+| #38 run the game over videos (D1) | deferred, still open |
+**D3 was rejected after playing, not deferred.** A rating is a judgement about a video; a preference score is a relative ranking built from comparisons. Pushing one into the other overwrites deliberate ratings with a derived number whose derivation nobody could audit afterwards. The leaderboard already delivers what D3 was for — seeing where a performer stands — without touching hand-entered data.
+**Since shipping:** the video count under each contender is now a disclosure matching *Known for* in the actor disambiguation sheet — a strip of stills from your own library, tapping through every contact-sheet frame full size.
+⭐ #43's read-only promise is now asserted by test rather than by inspection: a whole-library comparison before and after a session. It is a negative property, so nothing on screen would have looked different had it been broken.

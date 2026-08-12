@@ -3,7 +3,7 @@
 
 ---
 spec: "Match Confidence — how much to trust a fingerprint hit"
-status: In Review
+status: Approved
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Match-Confidence-how-much-to-trust-a-fingerprint-hit-3b7adccaf42881ab86efef4b1ea806b4
@@ -47,5 +47,8 @@ We send one algorithm and they read several. Storing which produced a hit costs 
 - **C6** — A match made by title or cast is unaffected — this concerns fingerprints only.
 ## ❓ Open — Human Operator
 1. **D2** — what duration tolerance counts as disagreement?
+  1. ✅ **Decision - **if the difference is greater than 30 seconds
 2. Should low confidence feed the existing match-review queue, or only show on the video?
+  1. ✅ **Decision - I’ll accept your recommendation**
 3. Backfill the 1,378, or start fresh?
+  1. ✅ **Decision - I’ll accept your recommendation**

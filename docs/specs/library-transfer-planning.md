@@ -3,7 +3,7 @@
 
 ---
 spec: "Moving Libraries by Intent, in Constrained Space"
-status: Draft
+status: Approved
 kind: Feature
 priority: P3
 notion: https://app.notion.com/p/Moving-Libraries-by-Intent-in-Constrained-Space-3b6adccaf428817fbec9ff19bff9d390

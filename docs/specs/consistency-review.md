@@ -3,7 +3,7 @@
 
 ---
 spec: "Consistency, Maintainability & Documentation Review"
-status: Draft
+status: Implemented
 kind: Spike
 priority: P2
 notion: https://app.notion.com/p/Consistency-Maintainability-Documentation-Review-3b5adccaf428810384a9f94af29fb2d7
@@ -11,6 +11,19 @@ notion: https://app.notion.com/p/Consistency-Maintainability-Documentation-Revie
 
 # Consistency, Maintainability & Documentation Review
 
+> ✅ **Status: Implemented 2026-08-12.** A spike delivers an answer, and the answer is written below. Verified against the code before closing.
+> 
+> **Of the three changes it recommended:**
+> 
+> | | | |
+> | --- | --- | --- |
+> | 1. Standardise sheet sizing | ⏳ not done | 42 uses of the two helpers, but raw `#if os(macOS)` + `.frame` still present — tracked as [#60](https://github.com/mranlett/ViLM/issues/60) |
+> | 2. Rewrite both READMEs | ✅ done | Both updated 2026-08-07. The app README now covers the graph; the plugin README no longer claims a local path dependency |
+> | 3. Add missing tools to in-app help | ⏳ partial | 4 of 7 added; Repair Studio Spelling, Remove Series Names and Age-at-Release still absent — tracked as [#61](https://github.com/mranlett/ViLM/issues/61) |
+> 
+> ⭐ Also since acted on: `LibraryStore.swift` was split by subject into `+Migrations`, `+Graph`, `+GraphEdges` and `+Collections`, which was the spike's largest maintainability finding.
+> 
+> ⚠️ Closed as Implemented because the deliverable is the review, not its recommendations — those are now issues so that closing this page cannot bury them.
 > Operator request, 2026-08-07: *"record the user experience with an eye for consistency across screens and platforms... then review the code files for maintainability... then a review of documentation."* Reviewed jointly with the independent Antigravity/Gemini auditor; **where we disagreed, the disagreement is recorded rather than averaged.**
 ## 1. Modal sizing — the finding is DIVERGENCE, not breakage
 The auditor called this *"15 functional blockers — users cannot see 15 modal workflows on macOS"*. 🚨 **That is wrong, and the way it is wrong is the actual finding.**

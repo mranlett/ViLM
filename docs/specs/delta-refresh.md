@@ -3,7 +3,7 @@
 
 ---
 spec: "Delta Refresh — stop re-fetching what has not changed"
-status: In Review
+status: Approved
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Delta-Refresh-stop-re-fetching-what-has-not-changed-3b7adccaf428811eb8b4e55205651565
@@ -36,4 +36,6 @@ Whenever a delta is wrong, the recovery is a full pass. ⚠️ If the only refre
 - **D6** — A clock disagreement between us and the source cannot cause a permanent skip.
 ## ❓ Open — Human Operator
 1. Is there a reliable per-video last-checked timestamp today? If not, that half ships first.
+  1. ✅ **Decision - **Not if you’re not storing it in the app’s metadata
 2. Given it is an optimisation, should it wait until a rate limit is actually hit — or is the point to avoid finding out the hard way? Recommend waiting: the report says the limit is untested, and building against an unmeasured constraint is how the studio-overlap work went wrong the first time.
+  1. ✅ **Decision - **wait for issues - don’t build in anticipation of a problem we don’t have.

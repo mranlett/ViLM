@@ -3,7 +3,7 @@
 
 ---
 spec: "Filename Parsing & Bulk Rename Utility"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf42881638590ee35f41e3870
@@ -11,6 +11,15 @@ notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf4
 
 # Filename Parsing & Bulk Rename Utility
 
+> ✅ **Status: Implemented 2026-08-12 — with the rename half superseded.**
+> 
+> **What shipped:** the parsing side, in full. `FileNameParser` reads a filename back into fields using the library's own vocabulary rather than by position, `FileNameParseReviewView` presents each reading for confirmation, and nothing is written without it. #51 later corrected the one real defect in it — the series/episode block was being filed wholesale as a series, and it now splits into series, season, episode number and episode title by the same rule `SeriesTitleRepair` uses.
+> 
+> **What did not, and will not from here:** the bulk RENAME utility. It was never built, and it has been superseded by *Kodi-Compliant Library Naming* (#17), which targets a different scheme entirely — `Title (Year)` with an NFO sidecar, rather than this spec's `Actors - Series - Tags - Studio`.
+> 
+> ⚠️ Not a change of mind about scope. #51 established that the four-section format **cannot be read back unambiguously**, which is the reason the parser had to guess and the reason 188 of 310 series values were wrong. Building a bulk renamer that emits more of that format would have manufactured the same defect at scale. The Kodi spec removes the ambiguity at its source by making the NFO the round trip, so nothing has to be parsed out of a name at all.
+> 
+> Marked Implemented rather than Archived because the parsing half is live, tested and in daily use.
 > ⚠️ **PARTIAL as of 2026-08-08.** Parsing and the audit shipped — `FileNameParser`, `MediaTitleParser`, `SeriesNameAudit`, `FileNameAuditView`.
 > 
 > **Still open:** [#17](https://github.com/mranlett/ViLM/issues/17) — per-content-class naming conventions and the library migration. That is the bulk-rename half of this spec and it is unbuilt.

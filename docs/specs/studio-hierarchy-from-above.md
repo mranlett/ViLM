@@ -3,7 +3,7 @@
 
 ---
 spec: "Studio Hierarchy from Above — imprints and aliases"
-status: In Review
+status: Approved
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Studio-Hierarchy-from-Above-imprints-and-aliases-3b7adccaf42881e9affdd281e16d0448
@@ -23,7 +23,7 @@ Not a library-wide sweep. ⚠️ Pulling every imprint of every network would cr
 |  |  |
 | --- | --- |
 | Create the profile | The hierarchy is complete and browsable, but the studio list fills with names the operator owns nothing from |
-| Create nothing, show the gap | Honest, and the hierarchy stays partial |
+| Create nothing, show the gap | Honest, and the hierarchy stays partial  |
 | Create, and mark as "not in your library" | Complete AND distinguishable, at the cost of a new state |
 ✅ **DECIDED 2026-08-09 — create and mark.** The Human Operator chose the third option.
 The hierarchy is complete and browsable, and an imprint the library owns nothing from is visibly distinct from one it does. ⚠️ The marking is not decoration: without it the studio list would imply the library contains things it does not, which is the same class of quiet wrongness this project keeps finding.
@@ -53,3 +53,4 @@ Two gaps the auditor found, both real:
 - **H8** — An alias with no corresponding local studio creates nothing and is reported, not silently discarded.
 ## ❓ Open — Human Operator
 1. Should this run for a studio FAMILY (a network and everything beneath it) in one action, or strictly one level at a time? 🔴 Recommend **one level** — depth is where a cycle or an explosion of imprints would appear, and one level at a time keeps both visible before they compound.
+  1. ✅ **Decision - **One level at a time
