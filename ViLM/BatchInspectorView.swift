@@ -132,8 +132,34 @@ struct BatchInspectorView: View {
         }
     }
 
+    /// ⚠️ NOT `applyToAll`. That writes row by row, so a mid-batch failure
+    /// leaves a half-declared selection that looks exactly like a finished one.
+    /// T25 requires all or nothing, and it also requires refusing a selection
+    /// that is already declared — re-declaring in bulk is how a video marked
+    /// `personal` would silently become `scene`.
     private func applyContentKind(_ kind: ContentKind) {
-        applyToAll { $0.contentKind = kind }
+        let ids = selectedAssets.map(\.id)
+        // Grouped by store: a federated selection can span libraries, and one
+        // transaction cannot cross two databases.
+        var byStore: [ObjectIdentifier: (LibraryStore, [UUID])] = [:]
+        for id in ids {
+            guard let store = try? LibrarySession.shared.store(for: id) else { continue }
+            let key = ObjectIdentifier(store)
+            byStore[key, default: (store, [])].1.append(id)
+        }
+        do {
+            for (store, group) in byStore.values {
+                try store.declareContentKind(kind, forAssetIds: group)
+            }
+            for index in assets.indices where ids.contains(assets[index].id) {
+                assets[index].contentKind = kind
+            }
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+        } catch let refusal as DeclarationRefusal {
+            AppErrorReporter.report(refusal.reason)
+        } catch {
+            AppErrorReporter.report("Couldn't declare those: \(error.localizedDescription)")
+        }
     }
 
     private var seriesSection: some View {

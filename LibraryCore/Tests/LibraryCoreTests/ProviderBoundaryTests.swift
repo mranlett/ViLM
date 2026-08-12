@@ -145,4 +145,64 @@ final class ProviderBoundaryTests: XCTestCase {
         try store.insertAsset(undeclared)
         XCTAssertNil(try store.fetchAllAssets().first { $0.id == undeclared.id }?.contentKind)
     }
+
+    // MARK: - T25 — declaring in bulk is all or nothing
+
+    private func makeStore() throws -> (LibraryStore, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return (try LibraryStore(at: dir), dir)
+    }
+
+    func testDeclaringAcrossASelectionAppliesToEveryAsset() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let ids = try (1...3).map { n -> UUID in
+            let a = Asset(relativePath: "\(n).mp4", fileName: "\(n).mp4")
+            try store.insertAsset(a); return a.id
+        }
+        XCTAssertEqual(try store.declareContentKind(.scene, forAssetIds: ids), 3)
+        XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .scene })
+    }
+
+    /// 🚨 The case T25 exists for. Re-declaring in bulk is how a video marked
+    /// `personal` silently becomes `scene`, so an already-declared member
+    /// refuses the whole batch — and leaves nothing behind.
+    func testAnAlreadyDeclaredMemberRefusesTheBatchAndWritesNothing() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let mine = Asset(relativePath: "mine.mp4", fileName: "mine.mp4", contentKind: .personal)
+        let other = Asset(relativePath: "other.mp4", fileName: "other.mp4")
+        try store.insertAsset(mine)
+        try store.insertAsset(other)
+
+        XCTAssertThrowsError(try store.declareContentKind(.scene, forAssetIds: [mine.id, other.id])) {
+            XCTAssertEqual($0 as? DeclarationRefusal, .alreadyDeclared(count: 1))
+        }
+
+        let after = try store.fetchAllAssets()
+        XCTAssertEqual(after.first { $0.id == mine.id }?.contentKind, .personal,
+                       "the declaration that mattered must survive the refusal")
+        XCTAssertNil(after.first { $0.id == other.id }?.contentKind,
+                     "and nothing else may be written — all or nothing")
+    }
+
+    func testAMissingMemberRefusesTheBatchAndWritesNothing() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let present = Asset(relativePath: "p.mp4", fileName: "p.mp4")
+        try store.insertAsset(present)
+
+        XCTAssertThrowsError(
+            try store.declareContentKind(.scene, forAssetIds: [present.id, UUID()])) {
+            XCTAssertEqual($0 as? DeclarationRefusal, .missing(count: 1))
+        }
+        XCTAssertNil(try store.fetchAllAssets().first?.contentKind)
+    }
 }

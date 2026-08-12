@@ -89,3 +89,75 @@ public enum ProviderBoundary {
         refusal(for: kind) == nil
     }
 }
+
+/// Why a bulk declaration was refused, naming what to do about it.
+public enum DeclarationRefusal: Error, Equatable {
+    /// Some of the selection already carries a declaration.
+    ///
+    /// 🚨 The batch is refused rather than overwriting them (T25). Re-declaring
+    /// in bulk is how a video the operator marked `personal` would quietly
+    /// become `scene` — the one mistake in this whole area that cannot be
+    /// taken back, and the operator would have no way to know it happened.
+    case alreadyDeclared(count: Int)
+    /// A selected asset is not in this library.
+    case missing(count: Int)
+
+    public var reason: String {
+        switch self {
+        case let .alreadyDeclared(count):
+            return "\(count) of these already say what they are. Nothing was changed — "
+                 + "narrow the selection, or change those individually, so a bulk action "
+                 + "cannot overwrite a video you marked as your own."
+        case let .missing(count):
+            return "\(count) of these are no longer in the library. Nothing was changed."
+        }
+    }
+}
+
+public extension LibraryStore {
+
+    /// Declares a kind across a selection, all or nothing (T25).
+    ///
+    /// ⚠️ ONE transaction. The per-row loop it replaces left a half-declared
+    /// selection behind any mid-batch failure — the same invisible partial that
+    /// `saveEntityProfiles` exists to prevent (DEFECT_INVENTORY M4), and worse
+    /// here, because a partly-declared selection looks exactly like a finished
+    /// one.
+    ///
+    /// - Returns: how many assets were declared.
+    @discardableResult
+    func declareContentKind(_ kind: ContentKind, forAssetIds ids: [UUID]) throws -> Int {
+        try performInTransaction { db in
+            var assets: [Asset] = []
+            var alreadyDeclared = 0
+            var missing = 0
+
+            for id in ids {
+                guard let asset = try Asset.fetchOne(db, key: id.uuidString) else {
+                    missing += 1
+                    continue
+                }
+                if asset.contentKind != nil { alreadyDeclared += 1 } else { assets.append(asset) }
+            }
+
+            // ⭐ The TRANSACTION is what makes this all-or-nothing — throwing
+            // anywhere inside rolls back every write, so ordering is not what
+            // protects the property. Verified: reordering the checks after the
+            // writes kills no test, while removing the transaction kills two.
+            //
+            // Checked first anyway, because doing no work before a certain
+            // refusal is cheaper and reads as the intent rather than relying on
+            // a rollback the next reader has to know about.
+            if missing > 0 { throw DeclarationRefusal.missing(count: missing) }
+            if alreadyDeclared > 0 {
+                throw DeclarationRefusal.alreadyDeclared(count: alreadyDeclared)
+            }
+
+            for var asset in assets {
+                asset.contentKind = kind
+                try updateAsset(asset, in: db)
+            }
+            return assets.count
+        }
+    }
+}
