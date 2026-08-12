@@ -200,7 +200,11 @@ final class VideoEnrichmentModel: ObservableObject {
 
     func start(force: Bool = false) async {
         guard let provider else {
-            phase = .failed("No video metadata source is installed.")
+            // 🚨 Say WHICH reason. `provider` is nil for two unrelated causes —
+            // nothing installed, or this video refused by the privacy boundary
+            // — and reporting the wrong one sends the operator to Settings to
+            // fix something that is not broken (#59).
+            phase = .failed(boundaryRefusal?.reason ?? "No video metadata source is installed.")
             return
         }
 
@@ -509,7 +513,11 @@ final class VideoEnrichmentModel: ObservableObject {
     /// about a different record than the one the report queued.
     func resume(sourceId: String) async {
         guard let provider else {
-            phase = .failed("No video metadata source is installed.")
+            // 🚨 Say WHICH reason. `provider` is nil for two unrelated causes —
+            // nothing installed, or this video refused by the privacy boundary
+            // — and reporting the wrong one sends the operator to Settings to
+            // fix something that is not broken (#59).
+            phase = .failed(boundaryRefusal?.reason ?? "No video metadata source is installed.")
             return
         }
         matchRoute = "Reviewing the record this video is matched to"
