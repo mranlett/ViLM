@@ -326,10 +326,48 @@ public class LibraryStore {
         }
         let counts = byProfile.mapValues(\.count)
 
+        // ⭐ The duplicate the source already resolved. Read from the match
+        // rows the upstream-deletions work already writes — no extra fetch, no
+        // new column. A pair where this library holds BOTH sides of an upstream
+        // merge is a fact rather than a heuristic, and it both outranks alias
+        // overlap and settles which profile survives.
+        let upstream = UpstreamMergeAudit.survivorByLoser(from: try allEntityMatchesWithState())
+
         return AliasSplitAudit.findings(.init(
             profiles: profiles.map { ($0.id, $0.name, $0.akas,
                                       $0.enrichmentState == .matched, $0.birthYear) },
-            videoCounts: counts))
+            videoCounts: counts,
+            upstreamMerges: upstream))
+    }
+
+    /// Every entity match row INCLUDING its upstream state, for audits that
+    /// reason across profiles rather than about one.
+    ///
+    /// 🚨 Not `allEntityMatches()`. That one exists for sync and selects only
+    /// the five columns a sync carries — `merged_into` is not among them, so
+    /// every row it returns reports `mergedInto == nil`. Reusing it here would
+    /// have compiled, run, and found no upstream merges ever, which is the
+    /// worst kind of wrong: a feature that looks implemented and does nothing.
+    func allEntityMatchesWithState() throws -> [NodeMatch] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT entity_id, source, source_id, method, matched_at,
+                       deleted_at, merged_into, checked_at
+                  FROM entity_match
+                """)
+                .compactMap { row in
+                    // ⚠️ Same rule as `readMatches`: an unrecognised method is
+                    // SKIPPED, never defaulted, so a row written by a newer
+                    // build cannot silently read as a weaker match kind.
+                    guard let method = MatchMethod(rawValue: row["method"]) else { return nil }
+                    return NodeMatch(nodeId: row["entity_id"], source: row["source"],
+                                     sourceId: row["source_id"], method: method,
+                                     matchedAt: row["matched_at"],
+                                     deletedAt: row["deleted_at"],
+                                     mergedInto: row["merged_into"],
+                                     checkedAt: row["checked_at"])
+                }
+        }
     }
 
     /// Profiles nothing refers to, grouped by node kind.

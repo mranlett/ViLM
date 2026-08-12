@@ -169,6 +169,15 @@ struct AliasSplitMergeView: View {
                       ? "questionmark.circle" : "person.2")
                     .foregroundStyle(candidate.isAmbiguous ? .orange : .secondary)
                 Text(candidate.alias.displayName)
+                // ⭐ D2 is a RANKING, and a ranking nobody can see buys nothing.
+                // The list is already ordered by evidence; this says why, so the
+                // operator knows which rows are a fact and which are a guess.
+                if candidate.evidence != .aliasOverlap {
+                    Label(candidate.evidence == .both ? "confirmed" : "source merge",
+                          systemImage: "arrow.triangle.merge")
+                        .font(.caption2).labelStyle(.titleAndIcon)
+                        .foregroundStyle(.green)
+                }
                 Spacer()
                 Text("\(candidate.combinedVideos) video\(candidate.combinedVideos == 1 ? "" : "s")")
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
@@ -177,6 +186,14 @@ struct AliasSplitMergeView: View {
             if candidate.isAmbiguous {
                 // 🚨 The one case where being helpful would be harmful.
                 Text("⚠️ \(candidate.claimants.count) performers list this name as an alias, so it cannot be a duplicate of all of them. Check the photos and dates before choosing — or leave it.")
+            } else if candidate.upstreamSurvivorId != nil {
+                // ⚠️ Says what the source did and what it did NOT do. An
+                // upstream merge means the source decided two of ITS records
+                // were one person; it does not decide that for these two local
+                // profiles, so the operator still confirms (D1).
+                Text(candidate.evidence == .both
+                     ? "The source has already merged these two records, and the names overlap. Still worth a glance before you confirm."
+                     : "The source has already merged these two records — the names do not overlap, so nothing else would have found this. Still worth a glance before you confirm.")
             }
         }
     }

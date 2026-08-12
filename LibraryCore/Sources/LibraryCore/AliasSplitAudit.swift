@@ -53,20 +53,58 @@ public struct AliasSplitCandidate: Equatable, Sendable, Identifiable {
         }
     }
 
+    /// What supports this pair, and therefore how far to trust it.
+    ///
+    /// ⭐ D2 — the point is not more candidates, it is better-ranked ones. Alias
+    /// overlap is a heuristic and produces false pairs; an upstream merge is a
+    /// fact the source recorded. A pair carrying both is materially more
+    /// certain than one carrying either.
+    public enum Evidence: Int, Equatable, Sendable, Comparable {
+        /// The source merged these two records AND their names overlap.
+        case both = 0
+        /// The source merged these two records.
+        case upstreamMerge = 1
+        /// One profile's name appears in the other's alias list.
+        case aliasOverlap = 2
+
+        public static func < (a: Evidence, b: Evidence) -> Bool {
+            a.rawValue < b.rawValue
+        }
+    }
+
     /// The profile whose NAME appears in someone else's alias list.
     public let alias: Claimant
     /// Every profile listing that name as an alias, best-evidenced first.
     public let claimants: [Claimant]
+    public let evidence: Evidence
+    /// The claimant the SOURCE says survived, when it said so.
+    public let upstreamSurvivorId: String?
 
     public var id: String { alias.id }
 
     /// ⚠️ More than one performer claims this name, so no merge can be
     /// suggested — only presented. This is the `Corvyn` case.
-    public var isAmbiguous: Bool { claimants.count > 1 }
+    ///
+    /// ⭐ Unless the source already answered it. An upstream merge names WHICH
+    /// record survived, which is exactly the question the alias heuristic
+    /// cannot answer — so a pair the source settled is not ambiguous, however
+    /// many profiles claim the name.
+    public var isAmbiguous: Bool {
+        if upstreamSurvivorId != nil { return false }
+        return claimants.count > 1
+    }
 
     /// The single obvious answer, or nil when a person has to choose.
+    ///
+    /// 🚨 M4 — when the source named a survivor, that is the one returned, even
+    /// where it is not the best-evidenced claimant by the local heuristic.
+    /// Returning the other would propose merging the survivor into the ghost.
     public var unambiguousClaimant: Claimant? {
-        isAmbiguous ? nil : claimants.first
+        if let upstreamSurvivorId,
+           let named = claimants.first(where: { $0.id == upstreamSurvivorId }) {
+            return named
+        }
+        return isAmbiguous ? nil : claimants.first
     }
 
     /// How many videos would be brought together by merging.
@@ -74,9 +112,15 @@ public struct AliasSplitCandidate: Equatable, Sendable, Identifiable {
         alias.videoCount + (claimants.first?.videoCount ?? 0)
     }
 
-    public init(alias: Claimant, claimants: [Claimant]) {
+    /// ⭐ Defaults preserve the pre-#17 behaviour exactly, so every existing
+    /// caller and test reads as "alias overlap, nothing from the source".
+    public init(alias: Claimant, claimants: [Claimant],
+                evidence: Evidence = .aliasOverlap,
+                upstreamSurvivorId: String? = nil) {
         self.alias = alias
         self.claimants = claimants
+        self.evidence = evidence
+        self.upstreamSurvivorId = upstreamSurvivorId
     }
 }
 
@@ -88,10 +132,19 @@ public enum AliasSplitAudit {
         /// Videos per profile id.
         public let videoCounts: [String: Int]
 
+        /// Losing profile id → surviving profile id, where the SOURCE has
+        /// already merged the two records. From `UpstreamMergeAudit`.
+        ///
+        /// ⭐ Empty is the pre-existing behaviour: alias overlap alone. A
+        /// library that has never run a lookup keeps working unchanged.
+        public let upstreamMerges: [String: String]
+
         public init(profiles: [(id: String, name: String, akas: [String], isMatched: Bool, birthYear: Int?)],
-                    videoCounts: [String: Int]) {
+                    videoCounts: [String: Int],
+                    upstreamMerges: [String: String] = [:]) {
             self.profiles = profiles
             self.videoCounts = videoCounts
+            self.upstreamMerges = upstreamMerges
         }
     }
 
@@ -131,7 +184,7 @@ public enum AliasSplitAudit {
             }
         }
 
-        return claims.compactMap { aliasId, claimantIds -> AliasSplitCandidate? in
+        var candidates = claims.compactMap { aliasId, claimantIds -> AliasSplitCandidate? in
             guard let alias = claimant(aliasId) else { return nil }
             let found = claimantIds.compactMap(claimant)
                 // Most-evidenced first: a confirmed profile with a filmography
@@ -140,9 +193,39 @@ public enum AliasSplitAudit {
                     $0.isMatched != $1.isMatched ? $0.isMatched : $0.videoCount > $1.videoCount
                 }
             guard !found.isEmpty else { return nil }
+
+            // ⭐ The source agrees with the alias reading: same pair, same
+            // direction. This is the strongest thing the audit can produce.
+            if let survivor = input.upstreamMerges[aliasId],
+               found.contains(where: { $0.id == survivor }) {
+                return AliasSplitCandidate(alias: alias, claimants: found,
+                                           evidence: .both, upstreamSurvivorId: survivor)
+            }
             return AliasSplitCandidate(alias: alias, claimants: found)
         }
-        .sorted {
+
+        // Pairs the source merged that the alias heuristic did not find — or
+        // found pointing the OTHER WAY.
+        //
+        // 🚨 Direction disagreement is emitted separately rather than folded
+        // into the alias candidate. The model puts the profile being folded in
+        // the `alias` slot, so a candidate cannot express "merge the claimant
+        // into the alias" — silently reusing the alias reading would propose
+        // the merge backwards, which is the one thing M4 forbids. Two rows for
+        // one pair is worth it: the operator sees the conflict, and the
+        // source-backed row sorts first.
+        let agreed = Set(candidates.filter { $0.evidence == .both }.map(\.alias.id))
+        for (losing, surviving) in input.upstreamMerges where !agreed.contains(losing) {
+            guard let alias = claimant(losing), let survivor = claimant(surviving) else { continue }
+            candidates.append(AliasSplitCandidate(alias: alias, claimants: [survivor],
+                                                  evidence: .upstreamMerge,
+                                                  upstreamSurvivorId: surviving))
+        }
+
+        return candidates.sorted {
+            // ⭐ Evidence first. D2's whole point: the ranking is the feature,
+            // and a fact from the source outranks a name that merely overlaps.
+            if $0.evidence != $1.evidence { return $0.evidence < $1.evidence }
             if $0.isAmbiguous != $1.isAmbiguous { return !$0.isAmbiguous }
             if $0.combinedVideos != $1.combinedVideos { return $0.combinedVideos > $1.combinedVideos }
             return $0.alias.displayName.localizedCaseInsensitiveCompare(

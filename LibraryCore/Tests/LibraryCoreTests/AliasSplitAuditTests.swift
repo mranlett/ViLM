@@ -15,12 +15,16 @@ final class AliasSplitAuditTests: XCTestCase {
     private func input(_ profiles: [(String, [String])],
                        videos: [String: Int] = [:],
                        matched: Set<String> = [],
-                       birthYears: [String: Int] = [:]) -> AliasSplitAudit.Input {
+                       birthYears: [String: Int] = [:],
+                       upstreamMerges: [String: String] = [:]) -> AliasSplitAudit.Input {
         .init(profiles: profiles.map { (id: "actor:\($0.0)", name: $0.0, akas: $0.1,
                                         isMatched: matched.contains("actor:\($0.0)"),
                                         birthYear: birthYears["actor:\($0.0)"]) },
               videoCounts: Dictionary(uniqueKeysWithValues:
-                videos.map { ("actor:\($0.key)", $0.value) }))
+                videos.map { ("actor:\($0.key)", $0.value) }),
+              // Given as NAMES here and keyed by id, like every other argument.
+              upstreamMerges: Dictionary(uniqueKeysWithValues:
+                upstreamMerges.map { ("actor:\($0.key)", "actor:\($0.value)") }))
     }
 
     /// 🚨 The claimant's display name is CARRIED, not sliced off the id.
@@ -165,5 +169,93 @@ final class AliasSplitAuditTests: XCTestCase {
     /// Nothing here merges anything — it reports.
     func testAnEmptyLibraryProducesNothing() {
         XCTAssertTrue(AliasSplitAudit.findings(input([])).isEmpty)
+    }
+
+    // MARK: - ⭐ D2 — evidence from the source outranks the heuristic
+
+    /// The point of Upstream Merges: not more candidates, better-ranked ones. A
+    /// pair the source confirmed must sort above one found by name overlap
+    /// alone, or the extra evidence buys nothing.
+    func testAPairTheSourceConfirmedOutranksOneFoundByNameAlone() {
+        let found = AliasSplitAudit.findings(input(
+            [("Corvyn", []), ("Halloway Pike", ["Corvyn"]),
+             ("Venlowe", []), ("Marta Venlowe", ["Venlowe"])],
+            // The source merged Venlowe's record into Marta Venlowe's.
+            upstreamMerges: ["Venlowe": "Marta Venlowe"]))
+
+        XCTAssertEqual(found.first?.alias.displayName, "Venlowe")
+        XCTAssertEqual(found.first?.evidence, .both)
+        XCTAssertEqual(found.last?.evidence, .aliasOverlap)
+    }
+
+    /// ⭐ A merge the name heuristic could never have found — no alias overlap
+    /// at all — still becomes a candidate.
+    func testAMergeWithNoNameOverlapIsStillOffered() {
+        let found = AliasSplitAudit.findings(input(
+            [("Bracken Mote", []), ("Ondine Fyfe", [])],
+            upstreamMerges: ["Bracken Mote": "Ondine Fyfe"]))
+
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.evidence, .upstreamMerge)
+        XCTAssertEqual(found.first?.alias.displayName, "Bracken Mote")
+        XCTAssertEqual(found.first?.unambiguousClaimant?.displayName, "Ondine Fyfe")
+    }
+
+    /// 🚨 The question the alias heuristic cannot answer. Three profiles claim
+    /// one name, so alias overlap must refuse to choose — but the source SAID
+    /// which record survived, and that settles it.
+    func testTheSourceSettlesAnAmbiguityTheAliasHeuristicCannot() {
+        let ambiguous = AliasSplitAudit.findings(input(
+            [("Corvyn", []), ("Halloway Pike", ["Corvyn"]), ("Sable Quintero", ["Corvyn"])]))
+        XCTAssertTrue(ambiguous.first?.isAmbiguous == true, "two claimants, no answer")
+        XCTAssertNil(ambiguous.first?.unambiguousClaimant)
+
+        let settled = AliasSplitAudit.findings(input(
+            [("Corvyn", []), ("Halloway Pike", ["Corvyn"]), ("Sable Quintero", ["Corvyn"])],
+            upstreamMerges: ["Corvyn": "Sable Quintero"]))
+        XCTAssertFalse(settled.first?.isAmbiguous == true)
+        XCTAssertEqual(settled.first?.unambiguousClaimant?.displayName, "Sable Quintero")
+    }
+
+    /// 🚨 M4 at the candidate level. The source-named survivor wins even when
+    /// the LOCAL evidence points at the other claimant — a confirmed profile
+    /// with a filmography sorts first among claimants, and the source can still
+    /// overrule it. Returning the better-evidenced one would merge backwards.
+    func testTheSourceNamedSurvivorWinsOverTheBetterEvidencedClaimant() {
+        let found = AliasSplitAudit.findings(input(
+            [("Corvyn", []), ("Halloway Pike", ["Corvyn"]), ("Sable Quintero", ["Corvyn"])],
+            videos: ["Halloway Pike": 40],
+            matched: ["actor:Halloway Pike"],
+            upstreamMerges: ["Corvyn": "Sable Quintero"]))
+
+        XCTAssertEqual(found.first?.claimants.first?.displayName, "Halloway Pike",
+                       "local ranking still puts the strong claimant first")
+        XCTAssertEqual(found.first?.unambiguousClaimant?.displayName, "Sable Quintero",
+                       "but the source decided, and it decided the other way")
+    }
+
+    /// ⚠️ Direction disagreement. The alias reading says fold A into B; the
+    /// source says the opposite. Emitted as its own candidate with the correct
+    /// direction rather than reusing the alias one, which cannot express it —
+    /// so the operator sees the conflict and the source-backed row sorts first.
+    func testADisagreementOnDirectionIsShownRatherThanSilentlyResolved() {
+        let found = AliasSplitAudit.findings(input(
+            [("Corvyn", []), ("Halloway Pike", ["Corvyn"])],
+            // The source says Halloway Pike folded into Corvyn — the reverse.
+            upstreamMerges: ["Halloway Pike": "Corvyn"]))
+
+        XCTAssertEqual(found.count, 2, "both readings are shown")
+        XCTAssertEqual(found.first?.evidence, .upstreamMerge)
+        XCTAssertEqual(found.first?.alias.displayName, "Halloway Pike",
+                       "the source-backed row folds the direction the source stated")
+        XCTAssertEqual(found.first?.unambiguousClaimant?.displayName, "Corvyn")
+    }
+
+    /// ⭐ Default-preserving: no upstream data changes nothing.
+    func testWithNoUpstreamEvidenceEverythingReadsAsAliasOverlap() {
+        let found = AliasSplitAudit.findings(input(
+            [("Venlowe", []), ("Marta Venlowe", ["Venlowe"])]))
+        XCTAssertEqual(found.first?.evidence, .aliasOverlap)
+        XCTAssertNil(found.first?.upstreamSurvivorId)
     }
 }
