@@ -209,8 +209,21 @@ struct FileNameParseReviewView: View {
                         ForEach(proposal.additions, id: \.self) { addition in
                             chip(addition)
                         }
-                        if let series = proposal.seriesBlock {
+                        // ⭐ Series and episode title are DIFFERENT pills. They
+                        // used to be one — every block displayed as a series —
+                        // so the review could not show the operator the single
+                        // decision most likely to be wrong.
+                        if let series = proposal.block.series {
                             pill(series, color: .orange, icon: "tv")
+                        }
+                        if let title = proposal.block.episodeTitle {
+                            pill(title, color: .teal, icon: "textformat")
+                        }
+                        if let season = proposal.block.seasonNumber {
+                            pill("season \(season)", color: .orange, icon: "number")
+                        }
+                        if let episode = proposal.block.episodeNumber {
+                            pill("episode \(episode)", color: .teal, icon: "number")
                         }
                     }
                     // The text nothing could be made of. Shown because a reading

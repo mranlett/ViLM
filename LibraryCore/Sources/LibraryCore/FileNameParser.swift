@@ -45,6 +45,33 @@ public struct ParsedFileName: Equatable, Sendable {
     }
 }
 
+/// What the series/episode block turned out to be.
+///
+/// 🚨 Four fields, not one. The parser used to hand the whole block to the
+/// series field and nothing else, which is how 188 of 310 series values became
+/// titles filed under a series of their own (#51). The block is genuinely
+/// ambiguous — `ParsedFileName.seriesBlock` is even documented as "the
+/// series/episode block" — so calling all of it a series was a guess dressed as
+/// a reading.
+public struct SeriesEpisodeFields: Equatable, Sendable {
+    public var series: String?
+    public var seasonNumber: Int?
+    public var episodeNumber: Int?
+    public var episodeTitle: String?
+
+    public var isEmpty: Bool {
+        series == nil && seasonNumber == nil && episodeNumber == nil && episodeTitle == nil
+    }
+
+    public init(series: String? = nil, seasonNumber: Int? = nil,
+                episodeNumber: Int? = nil, episodeTitle: String? = nil) {
+        self.series = series
+        self.seasonNumber = seasonNumber
+        self.episodeNumber = episodeNumber
+        self.episodeTitle = episodeTitle
+    }
+}
+
 /// What the library already knows, used to recognise segments.
 public struct NameVocabulary: Sendable {
     public let actors: Set<String>
@@ -222,8 +249,13 @@ public enum FileNameParser {
     /// Additive by construction: parsing is evidence about a file, not a
     /// correction of the operator's work, and a filename is often staler than
     /// the record. Nothing is removed and nothing already set is overwritten.
-    public static func additions(for asset: Asset,
-                                 parsed: ParsedFileName) -> (tags: [String], seriesBlock: String?) {
+    /// - Parameter groupings: normalised names already behaving like a real
+    ///   grouping — shared by more than one video, or carrying an episode
+    ///   number. Empty is the safe default and the conservative reading: with
+    ///   no evidence of a grouping, an unstructured block is one video's title.
+    public static func additions(for asset: Asset, parsed: ParsedFileName,
+                                 groupings: Set<String> = []) -> (tags: [String],
+                                                                  block: SeriesEpisodeFields) {
         var additions: [String] = []
         let held = Set(asset.tags.map { $0.lowercased() })
 
@@ -243,10 +275,53 @@ public enum FileNameParser {
             for studio in parsed.studios { add("studio:\(studio)") }
         }
 
-        // Only offered when the record has no series at all — a filename must
-        // not overwrite one that was entered deliberately.
-        let series = (asset.videoName?.isEmpty ?? true) ? parsed.seriesBlock : nil
-        return (additions, series)
+        // ⚠️ Gated FIELD BY FIELD, not block by block. The old rule dropped the
+        // whole block whenever a series was already recorded, so a video with a
+        // series but no title never got its title — the very field the block
+        // most often actually holds.
+        var block = readBlock(parsed.seriesBlock, groupings: groupings)
+        if !(asset.videoName?.isEmpty ?? true) { block.series = nil }
+        if !(asset.episode?.isEmpty ?? true) { block.episodeTitle = nil }
+        if asset.seasonNumber != nil { block.seasonNumber = nil }
+        if asset.episodeNumber != nil { block.episodeNumber = nil }
+        return (additions, block)
+    }
+
+    /// Reads the series/episode block into its parts.
+    ///
+    /// ⭐ Two rules, and they are deliberately the SAME two `SeriesTitleRepair`
+    /// uses — otherwise the parser writes rows the repair tool immediately
+    /// offers to undo, and the operator is caught between two tools that
+    /// disagree:
+    ///
+    ///   • a number marker splits the block, because it says where the boundary
+    ///     is — "Some Series Episode 3" is a series and an episode
+    ///   • otherwise, a name shared by more than one video is a grouping, and a
+    ///     name held by one video with nothing sequencing it is that video's
+    ///     TITLE
+    ///
+    /// ⚠️ The fallback is title, not series. That is the whole fix: an
+    /// unexplained block was previously assumed to be a series, and it usually
+    /// is not.
+    public static func readBlock(_ raw: String?,
+                                 groupings: Set<String> = []) -> SeriesEpisodeFields {
+        guard let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return SeriesEpisodeFields()
+        }
+        let read = MediaTitleParser.parse(raw)
+        if read.isStructured {
+            return SeriesEpisodeFields(series: read.seriesName,
+                                       seasonNumber: read.seasonNumber,
+                                       episodeNumber: read.episodeNumber,
+                                       episodeTitle: read.title)
+        }
+        return groupings.contains(groupingKey(raw))
+            ? SeriesEpisodeFields(series: raw)
+            : SeriesEpisodeFields(episodeTitle: raw)
+    }
+
+    static func groupingKey(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
@@ -258,22 +333,24 @@ public struct FileNameProposal: Equatable, Sendable, Identifiable {
     public let parsed: ParsedFileName
     /// Prefixed tags this would add, none of which the record already holds.
     public let additions: [String]
-    public let seriesBlock: String?
+    /// The series/episode block, already read into fields. Only the parts the
+    /// record does not already hold.
+    public let block: SeriesEpisodeFields
 
     public var id: UUID { assetId }
-    public var hasSomethingToAdd: Bool { !additions.isEmpty || seriesBlock != nil }
+    public var hasSomethingToAdd: Bool { !additions.isEmpty || !block.isEmpty }
 
     /// Every segment was placed AND something new came of it. These are the
     /// ones safe to accept without reading each in turn.
     public var isClean: Bool { parsed.unrecognised.isEmpty && hasSomethingToAdd }
 
     public init(assetId: UUID, fileName: String, parsed: ParsedFileName,
-                additions: [String], seriesBlock: String?) {
+                additions: [String], block: SeriesEpisodeFields) {
         self.assetId = assetId
         self.fileName = fileName
         self.parsed = parsed
         self.additions = additions
-        self.seriesBlock = seriesBlock
+        self.block = block
     }
 }
 
@@ -286,12 +363,22 @@ public extension FileNameParser {
     /// nothing could be read from are kept though — see `unreadable`, because
     /// "we could not read this" is a finding, not an absence.
     static func plan(assets: [Asset], vocabulary: NameVocabulary) -> [FileNameProposal] {
-        assets.compactMap { asset in
-            let parsed = parse(fileName: asset.fileName, vocabulary: vocabulary)
-            let (additions, series) = additions(for: asset, parsed: parsed)
-            let proposal = FileNameProposal(assetId: asset.id, fileName: asset.fileName,
-                                            parsed: parsed, additions: additions,
-                                            seriesBlock: series)
+        // 🚨 TWO passes. "Is this a series?" is a question about the whole
+        // library, not about one filename — a name is a grouping precisely
+        // because other videos share it, and a single file can never show that.
+        // Deciding per-file is what filed 188 one-off titles as series.
+        let readings = assets.map {
+            (asset: $0, parsed: parse(fileName: $0.fileName, vocabulary: vocabulary))
+        }
+        let groupings = groupings(in: readings)
+
+        return readings.compactMap { reading in
+            let (additions, block) = additions(for: reading.asset, parsed: reading.parsed,
+                                               groupings: groupings)
+            let proposal = FileNameProposal(assetId: reading.asset.id,
+                                            fileName: reading.asset.fileName,
+                                            parsed: reading.parsed, additions: additions,
+                                            block: block)
             return proposal.hasSomethingToAdd ? proposal : nil
         }
         // Cleanest first: a reviewer who stops halfway has still banked the
@@ -301,6 +388,45 @@ public extension FileNameParser {
                 ? $0.parsed.confidence > $1.parsed.confidence
                 : $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
         }
+    }
+
+    /// Names that already behave like a real grouping, normalised for lookup.
+    ///
+    /// ⭐ Evidence from BOTH sides. What the library already records answers it
+    /// for videos that have been curated; what the filenames themselves propose
+    /// answers it for a fresh import, where a set of files sharing a block is a
+    /// grouping on the FIRST pass rather than only after somebody has hand-
+    /// accepted one of them.
+    static func groupings(in readings: [(asset: Asset, parsed: ParsedFileName)]) -> Set<String> {
+        var members: [String: Int] = [:]
+        var numbered: Set<String> = []
+
+        for reading in readings {
+            // ⚠️ At most ONE key per video. Counting the recorded series AND the
+            // filename block would let a single video whose filename repeats its
+            // own series name reach a count of two and pass as a grouping — a
+            // one-video "grouping", which is exactly the thing being fixed.
+            var key: String?
+            if let series = reading.asset.videoName, !series.isEmpty {
+                key = groupingKey(series)
+            } else if let block = reading.parsed.seriesBlock {
+                let read = MediaTitleParser.parse(block)
+                if read.isStructured {
+                    // A number marker already settles it: whatever sits in front
+                    // is a series however few videos currently share it.
+                    if let name = read.seriesName { numbered.insert(groupingKey(name)) }
+                } else {
+                    key = groupingKey(block)
+                }
+            }
+            guard let key else { continue }
+            members[key, default: 0] += 1
+            // A recorded episode number sequences it, which is the operator's
+            // other reason for a series to exist.
+            if reading.asset.episodeNumber != nil { numbered.insert(key) }
+        }
+
+        return Set(members.filter { $0.value > 1 }.keys).union(numbered)
     }
 
     /// Files whose names yielded nothing at all.
@@ -323,8 +449,23 @@ public extension FileNameParser {
             }
         }
         updated.tags = tags
-        if let series = proposal.seriesBlock, (updated.videoName?.isEmpty ?? true) {
+
+        // Still additive: each field is written only where the record holds
+        // nothing, so a filename never overwrites what a person or a source put
+        // there. `additions` has already gated these; the checks are repeated
+        // because `applying` is public and a caller can hand it any proposal.
+        let block = proposal.block
+        if let series = block.series, (updated.videoName?.isEmpty ?? true) {
             updated.videoName = series
+        }
+        if let title = block.episodeTitle, (updated.episode?.isEmpty ?? true) {
+            updated.episode = title
+        }
+        if let season = block.seasonNumber, updated.seasonNumber == nil {
+            updated.seasonNumber = season
+        }
+        if let number = block.episodeNumber, updated.episodeNumber == nil {
+            updated.episodeNumber = number
         }
         return updated
     }

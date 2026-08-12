@@ -70,7 +70,7 @@ final class FileNameRealShapeTests: XCTestCase {
 
         let applied = FileNameParser.applying(
             FileNameProposal(assetId: asset.id, fileName: asset.fileName, parsed: parsed,
-                             additions: additions.tags, seriesBlock: additions.seriesBlock),
+                             additions: additions.tags, block: additions.block),
             to: asset)
         XCTAssertEqual(applied.actors.sorted(), ["Alice Example", "Bob Example"],
                        "the performer only the database knew is still there")
@@ -90,7 +90,7 @@ final class FileNameRealShapeTests: XCTestCase {
 
         let applied = FileNameParser.applying(
             FileNameProposal(assetId: asset.id, fileName: asset.fileName, parsed: parsed,
-                             additions: additions.tags, seriesBlock: additions.seriesBlock),
+                             additions: additions.tags, block: additions.block),
             to: asset)
         XCTAssertEqual(applied.studios, ["Example Studio"], "exactly one studio")
     }

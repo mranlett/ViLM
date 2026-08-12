@@ -129,15 +129,89 @@ final class FileNameParserTests: XCTestCase {
 
         let additions = FileNameParser.additions(for: asset, parsed: parsed)
         XCTAssertEqual(additions.tags.sorted(), ["actor:Bob Example", "studio:Example Pictures"])
-        XCTAssertNil(additions.seriesBlock, "a series already entered is never replaced")
+        XCTAssertNil(additions.block.series, "a series already entered is never replaced")
+
+        // ⭐ But the block is still offered as the TITLE, which the record does
+        // not have. The old rule dropped the whole block whenever a series was
+        // present, so a video with a series never gained a title from its name.
+        XCTAssertEqual(additions.block.episodeTitle, "Something Else")
     }
 
-    func testASeriesIsOfferedWhenTheRecordHasNone() {
+    // MARK: - Series or title? (#51)
+
+    /// 🚨 The defect. A lone block with nothing sequencing it is that video's
+    /// TITLE, and reading it as a series is what filed 188 of 310 series values
+    /// as one-video "series".
+    func testALoneUnstructuredBlockIsTheTitleNotASeries() {
         let asset = Asset(relativePath: "x.mp4", fileName: "x.mp4")
         var parsed = ParsedFileName()
-        parsed.seriesBlock = "Some Series"
-        XCTAssertEqual(FileNameParser.additions(for: asset, parsed: parsed).seriesBlock,
-                       "Some Series")
+        parsed.seriesBlock = "Some One-Off Name"
+
+        let block = FileNameParser.additions(for: asset, parsed: parsed).block
+        XCTAssertEqual(block.episodeTitle, "Some One-Off Name")
+        XCTAssertNil(block.series, "nothing said this was a grouping")
+    }
+
+    /// ⭐ The other half of the operator's rule: shared by more than one video,
+    /// so it IS a grouping and must survive.
+    func testABlockSharedBySeveralVideosIsASeries() {
+        let assets = (1...3).map {
+            Asset(relativePath: "\($0).mp4",
+                  fileName: "Alice Example - Road Trip - Example Pictures.mp4")
+        }
+        let plans = FileNameParser.plan(assets: assets, vocabulary: vocabulary)
+
+        XCTAssertEqual(plans.count, 3)
+        for plan in plans {
+            XCTAssertEqual(plan.block.series, "Road Trip")
+            XCTAssertNil(plan.block.episodeTitle, "the grouping is the whole block")
+        }
+    }
+
+    /// A number marker says where the boundary is, so one video is enough.
+    func testANumberedBlockSplitsWithoutNeedingCompany() {
+        let block = FileNameParser.readBlock("Some Series Episode 3")
+        XCTAssertEqual(block.series, "Some Series")
+        XCTAssertEqual(block.episodeNumber, 3)
+    }
+
+    /// ⚠️ An episode number already on the RECORD is the operator sequencing a
+    /// group by hand — the case `SeriesTitleRepair` refuses to touch. The
+    /// parser must not contradict it by demoting the series to a title.
+    func testASingleVideoTheOperatorNumberedKeepsItsSeries() {
+        let asset = Asset(relativePath: "1.mp4",
+                          fileName: "Alice Example - Road Trip - Example Pictures.mp4",
+                          episodeNumber: 4)
+        let plan = FileNameParser.plan(assets: [asset], vocabulary: vocabulary)
+
+        XCTAssertEqual(plan.first?.block.series, "Road Trip")
+        XCTAssertNil(plan.first?.block.episodeTitle)
+    }
+
+    /// 🚨 The invariant that keeps the two tools from fighting. Whatever the
+    /// parser writes, `SeriesTitleRepair` must have nothing to repair — else
+    /// the operator accepts a parse and is immediately offered its undo.
+    func testTheParserNeverWritesRowsTheRepairToolWouldUndo() {
+        let assets = [
+            Asset(relativePath: "1.mp4", fileName: "Alice Example - A Lone Title - Example Pictures.mp4"),
+            Asset(relativePath: "2.mp4", fileName: "Bob Example - Road Trip - Example Pictures.mp4"),
+            Asset(relativePath: "3.mp4", fileName: "Carol Example - Road Trip - Example Pictures.mp4"),
+            Asset(relativePath: "4.mp4", fileName: "Alice Example - Night Shift Episode 2 - Night.mp4"),
+        ]
+        let plans = FileNameParser.plan(assets: assets, vocabulary: vocabulary)
+        let applied = assets.map { asset in
+            plans.first { $0.assetId == asset.id }
+                .map { FileNameParser.applying($0, to: asset) } ?? asset
+        }
+
+        let report = SeriesTitleRepair.report(assets: applied)
+        XCTAssertTrue(report.repairable.isEmpty,
+                      "parser produced rows the repair tool would undo: \(report.repairable)")
+
+        // And the grouping genuinely survived rather than being avoided by
+        // writing no series at all.
+        XCTAssertEqual(applied.filter { $0.videoName == "Road Trip" }.count, 2)
+        XCTAssertEqual(applied.first { $0.relativePath == "1.mp4" }?.episode, "A Lone Title")
     }
 
     // MARK: - Vocabulary
