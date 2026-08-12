@@ -139,7 +139,8 @@ final class ActorSyncConvergenceTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty, "still differing: \(remaining)")
     }
 
-    /// One token, two different images — the Bracken Mote shape.
+    /// One token, two different images — a shape the libraries really produce,
+    /// under an invented name.
     ///
     /// Both libraries call their primary by the same URL but the bytes differ.
     /// The merge refuses to overwrite an existing primary file, so neither
@@ -164,7 +165,7 @@ final class ActorSyncConvergenceTests: XCTestCase {
                       "one token holding two images must still converge; differing: \(remaining)")
     }
 
-    /// The Ondine Fyfe shape: one token naming two different images, where the
+    /// The same shape under another invented name, except that here the
     /// clash is in the GALLERY rather than the primary.
     ///
     /// The gallery filename is derived from the token, and the write is guarded

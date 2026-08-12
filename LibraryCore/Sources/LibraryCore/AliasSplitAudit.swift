@@ -13,9 +13,14 @@
 // itself. Measured on the drive library: 43 such pairs across 1,306 profiles.
 //
 // ⚠️ Almost certainly, not certainly. A short alias can belong to more than one
-// performer — the real library has `Corvyn` listed as an alias of BOTH
-// `Halloway Pike` and `Sable Quintero`. Nothing here merges anything; it assembles
-// the evidence and hands it to a person.
+// performer, and the library really does contain such a case: one alias listed
+// against two separate profiles. Nothing here merges anything; it assembles the
+// evidence and hands it to a person.
+//
+// 🚨 The names below (`Corvyn`, `Halloway Pike`, `Sable Quintero`) are INVENTED
+// stand-ins for that case, and must stay invented. This repository is public;
+// the shape is what documents the behaviour, and the real names document
+// nothing that these do not. Do not "restore" them for fidelity.
 
 import Foundation
 

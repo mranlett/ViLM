@@ -106,8 +106,9 @@ final class AliasSplitAuditTests: XCTestCase {
 
     // MARK: - ⚠️ Ambiguity, which is real
 
-    /// The `Corvyn` case from the live library: an alias of BOTH
-    /// `Halloway Pike` and `Sable Quintero`. Nothing may be suggested here.
+    /// A real shape from the library under invented names: one alias claimed
+    /// by BOTH `Halloway Pike` and `Sable Quintero`. Nothing may be suggested
+    /// here — see the note in `AliasSplitAudit` about keeping these invented.
     func testAnAliasClaimedByTwoPerformersIsAmbiguous() {
         let found = AliasSplitAudit.findings(input([
             ("Corvyn", []),
