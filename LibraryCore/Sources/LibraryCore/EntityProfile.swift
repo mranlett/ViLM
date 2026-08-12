@@ -260,14 +260,22 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         return max(0, calendar.component(.year, from: now) - birthYear)
     }
 
-    /// True when the performer has a recorded start and no recorded end.
-    public var isCareerOngoing: Bool { careerStartYear != nil && careerEndYear == nil }
+    /// True when the performer has a recorded start and no end — recorded OR
+    /// implied by a death date.
+    ///
+    /// 🚨 Reads `effectiveCareerEndYear`, not `careerEndYear`. Reading the raw
+    /// field reported a performer who had died as still working (#58): D5's
+    /// derivation existed and only the audit used it, so the wrongness was
+    /// fixed where nothing could see it and left everywhere it was displayed.
+    public var isCareerOngoing: Bool { careerStartYear != nil && effectiveCareerEndYear == nil }
 
     public var yearsActive: Int? { yearsActive(asOf: Date()) }
 
+    /// ⚠️ Stops at the effective end. Counting to the current year for someone
+    /// who has died means the number grows every January (#58).
     public func yearsActive(asOf now: Date) -> Int? {
         guard let start = careerStartYear else { return nil }
-        let end = careerEndYear ?? Calendar.current.component(.year, from: now)
+        let end = effectiveCareerEndYear ?? Calendar.current.component(.year, from: now)
         return max(0, end - start)
     }
 
@@ -280,10 +288,6 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         return (0...120).contains(derived) ? derived : nil
     }
 
-    /// `"1994-present (started around 18 years old; 32 years active)"`.
-    ///
-    /// `nil` when there is no start year, because a span with no beginning says
-    /// nothing worth showing.
     /// The career end to reason with: the recorded one, or the year they died.
     ///
     /// 🚨 D5. `careerEndYear == nil` means "still performing", which for
@@ -301,11 +305,18 @@ public struct EntityProfile: Identifiable, Codable, Equatable, FetchableRecord, 
         return year
     }
 
+    /// `"1994-present (started around 18 years old; 32 years active)"`.
+    ///
+    /// `nil` when there is no start year, because a span with no beginning says
+    /// nothing worth showing.
     public var careerDisplay: String? { careerDisplay(asOf: Date()) }
 
+    /// 🚨 "present" is the word this had to stop printing for someone who has
+    /// died (#58). The end comes from `effectiveCareerEndYear`, so a death date
+    /// closes the span even where no end year was ever recorded.
     public func careerDisplay(asOf now: Date) -> String? {
         guard let start = careerStartYear else { return nil }
-        let span = careerEndYear.map { "\(start)-\($0)" } ?? "\(start)-present"
+        let span = effectiveCareerEndYear.map { "\(start)-\($0)" } ?? "\(start)-present"
 
         var notes: [String] = []
         if let age = careerStartAge { notes.append("started around \(age) years old") }

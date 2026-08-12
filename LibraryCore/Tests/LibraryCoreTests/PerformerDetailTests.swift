@@ -172,4 +172,58 @@ final class PerformerDetailTests: XCTestCase {
         XCTAssertNotNil(row, "shown as a reviewable row, with its source noted")
         XCTAssertEqual(row?.sourceNote, "TheSource")
     }
+
+    // MARK: - 🚨 #58 — the derivation has to reach what the operator SEES
+
+    // The defect these exist for: `effectiveCareerEndYear` was correct and only
+    // `GraphAudit` consumed it. Every member the profile page renders still read
+    // the raw `careerEndYear`, so the wrongness D5 describes was fixed where
+    // nothing could see it and left intact everywhere it was displayed.
+    //
+    // ⚠️ Testing the derivation alone is what let that through. These test the
+    // CONSUMERS.
+
+    /// A performer who has died is not still working.
+    func testADeceasedPerformerIsNotOngoing() {
+        XCTAssertFalse(profile(deathDate: "2018-04-02").isCareerOngoing)
+        XCTAssertTrue(profile().isCareerOngoing, "no death date, no recorded end — still open")
+    }
+
+    /// 🚨 The literal word the bug printed.
+    func testTheCareerSpanDoesNotSayPresentForSomeoneWhoHasDied() {
+        let shown = profile(deathDate: "2018-04-02").careerDisplay(asOf: date(2026))
+        XCTAssertNotNil(shown)
+        XCTAssertFalse(shown!.contains("present"), "still advertising them as active: \(shown!)")
+        XCTAssertTrue(shown!.contains("2005-2018"), "span should close at the death year: \(shown!)")
+    }
+
+    /// ⚠️ Otherwise the number grows every January for someone who has died.
+    func testYearsActiveStopsAtDeathRatherThanTheCurrentYear() {
+        XCTAssertEqual(profile(deathDate: "2018-04-02").yearsActive(asOf: date(2026)), 13)
+        XCTAssertEqual(profile().yearsActive(asOf: date(2026)), 21, "still active, still counting")
+    }
+
+    /// ⭐ P4, restated at the consumer level: a recorded end always wins, because
+    /// someone may have retired years before they died and that is the truer end.
+    func testARecordedEndStillOutranksTheDeathDateEverywhere() {
+        let p = profile(deathDate: "2018-04-02", careerEnd: 2012)
+        XCTAssertEqual(p.effectiveCareerEndYear, 2012)
+        XCTAssertFalse(p.isCareerOngoing)
+        XCTAssertEqual(p.yearsActive(asOf: date(2026)), 7)
+        XCTAssertTrue(p.careerDisplay(asOf: date(2026))!.contains("2005-2012"))
+    }
+
+    /// An unparseable death date changes nothing — it must not silently close a
+    /// career on a value nobody can read.
+    func testAnUnreadableDeathDateLeavesTheCareerOpen() {
+        for bad in ["unknown", "", "n/a"] {
+            let p = profile(deathDate: bad)
+            XCTAssertTrue(p.isCareerOngoing, "\(bad) should not end a career")
+            XCTAssertTrue(p.careerDisplay(asOf: date(2026))!.contains("present"))
+        }
+    }
+
+    private func date(_ year: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: 6, day: 1))!
+    }
 }
