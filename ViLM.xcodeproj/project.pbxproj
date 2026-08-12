@@ -211,15 +211,15 @@
 				LastSwiftUpdateCheck = 2650;
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
+					AA1102BB22CC33DD44EE02 = {
+						TestTargetID = E9D469532F3425C300D52C46;
+					};
 					E95BEF422FF2C34B004B0156 = {
 						CreatedOnToolsVersion = 26.5;
 						TestTargetID = E9D469532F3425C300D52C46;
 					};
 					E9D469532F3425C300D52C46 = {
 						CreatedOnToolsVersion = 26.2;
-					};
-					AA1102BB22CC33DD44EE02 = {
-						TestTargetID = E9D469532F3425C300D52C46;
 					};
 				};
 			};

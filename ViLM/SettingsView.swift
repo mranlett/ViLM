@@ -48,6 +48,10 @@ struct SettingsView: View {
     /// that needs no heuristic, and the only one that can reach a profile with
     /// no name.
     var onSameIdentity: (() -> Void)?
+
+    /// Titles that ended up in the series field, giving one video a series of
+    /// its own. ⚠️ Leaves the operator's sequencing groups alone.
+    var onSeriesTitles: (() -> Void)?
     var onConnectGraph: (() -> Void)?
     var onResetMatches: (() -> Void)?
     var onMoveVideos: (() -> Void)?
@@ -214,6 +218,9 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Same Person, Twice",
                                icon: "person.2.crop.square.stack", action: onSameIdentity)
+                        .disabled(session.isFederated)
+                    toolButton("Titles in the Series Field",
+                               icon: "textformat.abc.dottedunderline", action: onSeriesTitles)
                         .disabled(session.isFederated)
                 }
 
