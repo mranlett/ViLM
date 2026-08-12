@@ -30,10 +30,21 @@ public enum CountryName {
         // regional-indicator scalars — is removed whole. Letters, marks and
         // ordinary punctuation in a real name (Côte d'Ivoire, Timor-Leste) are
         // kept; symbols and pictographs are not.
+        //
+        // 🚨 Tag characters matter as much as the flag itself. England,
+        // Scotland and Wales are SUBDIVISION flags: a 🏴 base followed by an
+        // invisible tag sequence spelling "gbeng". Dropping only the base left
+        // "England" plus five invisible scalars — a string that renders
+        // identically to "England" and compares unequal to it, which is
+        // precisely the split this whole type exists to prevent, hiding in the
+        // three values nobody could see.
         let kept = raw.unicodeScalars.filter { scalar in
-            !(scalar.properties.isEmojiPresentation
-              || scalar.properties.generalCategory == .otherSymbol
-              || (0x1F1E6...0x1F1FF).contains(scalar.value))
+            let v = scalar.value
+            return !(scalar.properties.isEmojiPresentation
+                     || scalar.properties.generalCategory == .otherSymbol
+                     || (0x1F1E6...0x1F1FF).contains(v)   // 🇦–🇿
+                     || (0xE0000...0xE007F).contains(v)   // tag sequence payload
+                     || v == 0xFE0F)                      // variation selector
         }
         let cleaned = String(String.UnicodeScalarView(kept))
             .trimmingCharacters(in: .whitespacesAndNewlines)

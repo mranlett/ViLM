@@ -136,7 +136,8 @@ struct ActorFilterBuilderView: View {
                     singleSelectionSection(
                         items: allUniqueCountries,
                         selectionBinding: $criteria.country,
-                        emptyBinding: $criteria.matchEmptyCountry
+                        emptyBinding: $criteria.matchEmptyCountry,
+                        label: { CountryFlagHelper.withFlag($0.capitalized) }
                     )
                 }
                 
@@ -236,7 +237,16 @@ struct ActorFilterBuilderView: View {
         #endif
     }
 
-    private func singleSelectionSection(items: [String], selectionBinding: Binding<String>, emptyBinding: Binding<Bool>) -> some View {
+    /// - Parameter label: how each value is DISPLAYED. Presentation only.
+    ///
+    /// 🚨 The selection, the alpha filter and the search all keep using the
+    /// stored value. Migration v40 took the flag out of `country_of_origin`
+    /// precisely because storing presentation split 57 countries into 94
+    /// values — so the flag goes on here, at the last possible moment, and
+    /// decorating the label must never change what is matched.
+    private func singleSelectionSection(items: [String], selectionBinding: Binding<String>,
+                                        emptyBinding: Binding<Bool>,
+                                        label: @escaping (String) -> String = { $0.capitalized }) -> some View {
         let filtered = items.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
 
         return Group {
@@ -295,7 +305,7 @@ struct ActorFilterBuilderView: View {
                             }
                         } label: {
                             HStack {
-                                Text(item.capitalized).foregroundColor(.primary)
+                                Text(label(item)).foregroundColor(.primary)
                                 Spacer()
                                 if isSelected {
                                     Image(systemName: "checkmark").foregroundColor(.accentColor)

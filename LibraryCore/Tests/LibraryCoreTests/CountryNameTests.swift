@@ -129,4 +129,35 @@ final class CountryNameTests: XCTestCase {
         XCTAssertEqual(try store.fetchEntityProfile(for: profile.id)?.countryOfOrigin,
                        "Russia")
     }
+
+    // MARK: - Subdivision flags (found by #53)
+
+    /// 🚨 England, Scotland and Wales do not use regional-indicator pairs. They
+    /// are a 🏴 base plus an INVISIBLE tag sequence spelling the subdivision,
+    /// and the canonicaliser removed only the base — leaving "England" plus
+    /// five invisible scalars.
+    ///
+    /// ⚠️ That string renders identically to "England" and compares unequal to
+    /// it, so it is a split value nobody could see: two rows in the country
+    /// filter with the same visible name and different people under each. The
+    /// exact defect v40 exists to prevent, surviving inside it.
+    func testASubdivisionFlagIsRemovedIncludingItsInvisibleTagCharacters() {
+        for (decorated, bare) in [("England \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "England"),
+                                  ("Scotland \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}", "Scotland"),
+                                  ("Wales \u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}", "Wales")] {
+            let canonical = CountryName.canonical(decorated)
+            XCTAssertEqual(canonical, bare)
+            // Spelled out, because the whole failure mode is invisibility: the
+            // two forms must be the SAME STRING, not merely look alike.
+            XCTAssertEqual(canonical?.unicodeScalars.count, bare.unicodeScalars.count,
+                           "invisible scalars survived canonicalisation")
+        }
+    }
+
+    /// The flagged and bare forms must land on one value, which is the whole
+    /// point — 57 countries, not 94.
+    func testTheFlaggedAndBareFormsOfASubdivisionAreOneValue() {
+        let flagged = CountryName.canonical("Scotland \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}")
+        XCTAssertEqual(Set([flagged, CountryName.canonical("Scotland")]).count, 1)
+    }
 }

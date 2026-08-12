@@ -3,6 +3,7 @@
 // saving an actor's country of origin so the flag renders alongside it.
 
 import Foundation
+import LibraryCore
 
 // Pure, stateless country↔flag lookups — marked `nonisolated` so the CSV
 // import (which runs on a background task) can call them without tripping the
@@ -55,16 +56,14 @@ nonisolated struct CountryFlagHelper {
     /// indicator flags and the tag-sequence subdivision flags (England,
     /// Scotland, Wales). Used to keep flag glyphs out of CSV, which can't
     /// carry them reliably.
+    /// 🚨 Delegates to `CountryName.canonical` rather than reimplementing it.
+    /// These two used to strip independently and DISAGREED: this one removed
+    /// the tag characters behind the England/Scotland/Wales flags, the storage
+    /// rule did not. Two functions that must agree, kept in step by hand, is
+    /// how "England" and "England<invisible payload>" both ended up storable
+    /// after a migration whose entire purpose was one value per country.
     static func strippedOfFlag(_ text: String) -> String {
-        let filtered = text.unicodeScalars.filter { scalar in
-            let v = scalar.value
-            let isRegionalIndicator = (0x1F1E6...0x1F1FF).contains(v) // 🇦–🇿
-            let isWavingBlackFlag = v == 0x1F3F4                      // 🏴 base of subdivision flags
-            let isTagCharacter = (0xE0000...0xE007F).contains(v)      // tag sequence payload
-            let isVariationSelector = v == 0xFE0F
-            return !(isRegionalIndicator || isWavingBlackFlag || isTagCharacter || isVariationSelector)
-        }
-        return String(String.UnicodeScalarView(filtered)).trimmingCharacters(in: .whitespaces)
+        CountryName.canonical(text) ?? ""
     }
 
     /// Returns the country name with its flag appended (e.g. "Russia" ->

@@ -262,7 +262,8 @@ struct FilterBuilderView: View {
                             items: allUniqueActorCountries,
                             filter: actorCountryAlphaFilter,
                             logicBinding: $criteria.actorCountriesLogic,
-                            selectionBinding: $criteria.selectedActorCountries
+                            selectionBinding: $criteria.selectedActorCountries,
+                            label: CountryFlagHelper.withFlag
                         )
                     }
                 }
@@ -325,7 +326,13 @@ struct FilterBuilderView: View {
         }
     }
 
-    private func filterSection(items: [String], filter: Character?, logicBinding: Binding<AssetFilterCriteria.Logic>, selectionBinding: Binding<Set<String>>) -> some View {
+    /// - Parameter label: how each value is DISPLAYED. Presentation only — the
+    ///   selection set, the alpha filter and the search all keep using the
+    ///   stored value, so decorating a label can never change what is matched.
+    private func filterSection(items: [String], filter: Character?,
+                               logicBinding: Binding<AssetFilterCriteria.Logic>,
+                               selectionBinding: Binding<Set<String>>,
+                               label: @escaping (String) -> String = { $0 }) -> some View {
         let alphaFiltered = filteredItems(items, by: filter)
         let finalFiltered = alphaFiltered.filter { searchText.isEmpty || $0.localizedCaseInsensitiveContains(searchText) }
         
@@ -351,7 +358,7 @@ struct FilterBuilderView: View {
                             }
                         } label: {
                             HStack {
-                                Text(item).foregroundColor(.primary)
+                                Text(label(item)).foregroundColor(.primary)
                                 Spacer()
                                 if isSelected {
                                     Image(systemName: "checkmark").foregroundColor(.accentColor)
