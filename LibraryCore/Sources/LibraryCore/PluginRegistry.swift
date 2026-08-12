@@ -134,6 +134,28 @@ public final class PluginRegistry: @unchecked Sendable {
         installed.compactMap { $0 as? any VideoMetadataProvider }
     }
 
+    /// Video providers that may be used **for this asset**.
+    ///
+    /// 🚨 THE privacy boundary (#59). Personal and undeclared content get an
+    /// empty list, so a caller cannot obtain a provider to send them to — the
+    /// refusal happens before a request can be constructed, which is the
+    /// requirement. Checking inside each enrichment loop would be "a skipped
+    /// iteration", and a skipped iteration is a property of one caller rather
+    /// than a boundary.
+    ///
+    /// ⚠️ `installedVideoProviders()` above still exists because presence
+    /// checks need it — "is anything installed at all", for showing or hiding
+    /// an action. It hands back a usable provider, so anything that actually
+    /// SENDS must come through here instead.
+    public func videoProviders(for asset: Asset) -> [any VideoMetadataProvider] {
+        ProviderBoundary.allows(asset.contentKind) ? installedVideoProviders() : []
+    }
+
+    /// The same gate, phrased for a caller that wants to explain itself.
+    public func refusalForVideoLookup(of asset: Asset) -> ProviderBoundary.Refusal? {
+        ProviderBoundary.refusal(for: asset.contentKind)
+    }
+
     public func installedStudioProviders() -> [any StudioMetadataProvider] {
         installed.compactMap { $0 as? any StudioMetadataProvider }
     }

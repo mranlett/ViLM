@@ -32,6 +32,9 @@ final class MatchResetTests: XCTestCase {
             tags: ["actor:Alice Example", "studio:Example Studio", "tag:Outdoors"],
             rating: 4,
             videoName: "Example Series",
+            // Declared, so these exercise the enrichment-state logic rather
+            // than stopping at the privacy boundary (#59).
+            contentKind: .scene,
             releaseDate: "2019-04-12",
             enrichmentState: state,
             enrichmentSource: state == nil ? nil : "TestSource",

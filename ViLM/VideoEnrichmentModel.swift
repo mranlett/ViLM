@@ -149,8 +149,16 @@ final class VideoEnrichmentModel: ObservableObject {
         self.knownTags = knownTags
     }
 
+    /// 🚨 Asset-scoped, so personal and undeclared content cannot obtain a
+    /// provider at all (#59). Refusing here rather than inside the lookup means
+    /// there is no path that constructs a request first and checks afterwards.
     private var provider: (any VideoMetadataProvider)? {
-        PluginEnvironment.registry.installedVideoProviders().first
+        PluginEnvironment.registry.videoProviders(for: asset).first
+    }
+
+    /// Why a lookup will not run, when it will not.
+    var boundaryRefusal: ProviderBoundary.Refusal? {
+        PluginEnvironment.registry.refusalForVideoLookup(of: asset)
     }
 
     var hasAnythingToApply: Bool { !accepted.isEmpty || !acceptedTags.isEmpty }

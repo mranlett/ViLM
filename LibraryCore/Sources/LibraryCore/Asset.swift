@@ -59,6 +59,13 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public var seasonNumber: Int?          // Season / Movie number (Star Wars 3, MWC Season 4)
     public var episodeNumber: Int?         // Episode number
     public var episode: String?            // Episode Title (freeform, e.g. "Valentine's Day")
+
+    /// What this video IS — declared, never inferred (v43).
+    ///
+    /// 🚨 `nil` means UNDECLARED and is refused by `ProviderBoundary`, the same
+    /// as `personal`. Every row begins nil, so the other reading would have
+    /// opened the privacy boundary across the whole library at once.
+    public var contentKind: ContentKind?
     /// When the work was published, as `yyyy-MM-dd`.
     ///
     /// Stored verbatim rather than as a Date: sources state a calendar day with
@@ -127,6 +134,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 seasonNumber: Int? = nil,
                 episodeNumber: Int? = nil,
                 episode: String? = nil,
+                contentKind: ContentKind? = nil,
                 releaseDate: String? = nil,
                 enrichmentState: EnrichmentState? = nil,
                 enrichmentSource: String? = nil,
@@ -157,6 +165,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.episode = episode
+        self.contentKind = contentKind
         self.releaseDate = releaseDate
         self.enrichmentState = enrichmentState
         self.enrichmentSource = enrichmentSource
@@ -189,6 +198,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
         self.episodeNumber = try container.decodeIfPresent(Int.self, forKey: .episodeNumber)
         self.episode = try container.decodeIfPresent(String.self, forKey: .episode)
+        self.contentKind = try container.decodeIfPresent(ContentKind.self, forKey: .contentKind)
         self.releaseDate = try container.decodeIfPresent(String.self, forKey: .releaseDate)
         self.enrichmentState = try container.decodeIfPresent(EnrichmentState.self, forKey: .enrichmentState)
         self.enrichmentSource = try container.decodeIfPresent(String.self, forKey: .enrichmentSource)
@@ -238,6 +248,7 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case seasonNumber = "season_number"
         case episodeNumber = "episode_number"
         case episode
+        case contentKind = "content_kind"
         case releaseDate = "release_date"
         case enrichmentState = "enrichment_state"
         case enrichmentSource = "enrichment_source"
@@ -282,6 +293,7 @@ extension Asset {
         container["season_number"] = seasonNumber
         container["episode_number"] = episodeNumber
         container["episode"] = episode
+        container["content_kind"] = contentKind?.rawValue
         container["release_date"] = releaseDate
         container["enrichment_state"] = enrichmentState?.rawValue
         container["enrichment_source"] = enrichmentSource

@@ -1029,6 +1029,33 @@ struct SingleInspectorView: View {
                             .onSubmit { commitEpisodeTitleDraft() }
                     }
 
+                    // 🚨 What this video IS, which decides whether its title may
+                    // ever be sent anywhere (#59). Undeclared is a real state and
+                    // is shown as such — never pre-filled, because a default kind
+                    // is inference dressed as a declaration.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("What is this?").font(.subheadline).foregroundColor(.secondary)
+                        Picker("", selection: Binding(
+                            get: { asset.contentKind },
+                            set: { commitContentKind($0) }
+                        )) {
+                            Text("Not said yet").tag(ContentKind?.none)
+                            ForEach(ContentKind.allCases, id: \.self) { kind in
+                                Text(kind.displayName).tag(ContentKind?.some(kind))
+                            }
+                        }
+                        .labelsHidden()
+                        #if os(iOS)
+                        .pickerStyle(.menu)
+                        #endif
+
+                        if let refusal = ProviderBoundary.refusal(for: asset.contentKind) {
+                            Label(refusal.reason, systemImage: "lock.shield")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
                     if !asset.seriesTitleBlock.isEmpty {
                         Text("Sorts and files as: \(asset.seriesTitleBlock)")
                             .font(.caption)
@@ -1663,6 +1690,14 @@ struct SingleInspectorView: View {
         guard newName != asset.videoName else { return }
         var updated = asset
         updated.videoName = newName
+        updateAsset(updated, at: url)
+    }
+
+    private func commitContentKind(_ kind: ContentKind?) {
+        guard let url = LibrarySession.shared.url(for: asset.id) else { return }
+        guard kind != asset.contentKind else { return }
+        var updated = asset
+        updated.contentKind = kind
         updateAsset(updated, at: url)
     }
 

@@ -863,6 +863,21 @@ extension LibraryStore {
             }
         }
 
+        // 🚨 The privacy boundary's missing half. v24 shipped its match-key
+        // columns and never shipped this one, so the guard specified in both
+        // epics — personal content never reaches a provider — had nothing to
+        // read and was never built (#59).
+        //
+        // ⚠️ Nullable with NO default. `nil` means undeclared, which the
+        // boundary refuses; defaulting it to any kind would declare 2,000
+        // videos on the operator's behalf, and a guessed `personal` is the one
+        // guess that cannot be taken back.
+        migrator.registerMigration("v43") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "content_kind", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

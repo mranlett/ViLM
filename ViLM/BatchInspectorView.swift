@@ -72,6 +72,8 @@ struct BatchInspectorView: View {
 
                 Divider()
 
+                contentKindSection
+                Divider()
                 seriesSection
 
                 Divider()
@@ -98,6 +100,40 @@ struct BatchInspectorView: View {
             batchSeriesName = commonVideoName ?? ""
             batchSeason = commonSeason.map(String.init) ?? ""
         }
+    }
+
+    /// Declaring what these videos ARE — the bulk surface the privacy boundary
+    /// depends on (#59).
+    ///
+    /// 🚨 Every row starts undeclared and undeclared content is refused, so
+    /// without a way to declare in bulk the boundary would simply halt a
+    /// 2,000-video library. This is that way: select all, declare, then pick
+    /// out the exceptions.
+    ///
+    /// ⚠️ Nothing is pre-selected. A default kind would be inference wearing a
+    /// declaration's clothes, and `personal` is the case where being wrong
+    /// cannot be taken back.
+    private var contentKindSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("What are these?").font(.headline).foregroundColor(.secondary)
+
+            HStack {
+                ForEach(ContentKind.allCases, id: \.self) { kind in
+                    Button(kind.displayName) { applyContentKind(kind) }
+                        .buttonStyle(.bordered)
+                }
+            }
+
+            Text("Titles are only sent to an external source once you say a video is not "
+                 + "your own. Personal videos are never sent — and neither is anything "
+                 + "still undeclared.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func applyContentKind(_ kind: ContentKind) {
+        applyToAll { $0.contentKind = kind }
     }
 
     private var seriesSection: some View {

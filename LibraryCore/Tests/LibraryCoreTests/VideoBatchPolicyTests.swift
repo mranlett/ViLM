@@ -83,7 +83,8 @@ final class VideoBatchPolicyTests: XCTestCase {
     }
 
     private func asset(_ state: EnrichmentState?) -> Asset {
-        Asset(relativePath: "a.mp4", fileName: "a.mp4", enrichmentState: state)
+        Asset(relativePath: "a.mp4", fileName: "a.mp4",
+              contentKind: .scene, enrichmentState: state)
     }
 
     // MARK: - What gets recorded
@@ -128,7 +129,7 @@ extension VideoBatchPolicyTests {
 
     func testAConfirmedMatchIsNeverExaminedAgain() {
         let matched = VideoEnrichmentReview.recordingOutcome(
-            Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene),
             state: .matched, source: "TestSource")
         XCTAssertEqual(VideoBatchPolicy.skipReason(for: matched), "already matched")
     }
@@ -158,7 +159,7 @@ extension VideoBatchPolicyTests {
     /// usually a confirmed studio — exists.
     func testAQueuedVideoIsNotExaminedAgain() {
         let queued = VideoEnrichmentReview.recordingOutcome(
-            Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene),
             state: .ambiguous, source: "TestSource")
 
         XCTAssertNotNil(VideoBatchPolicy.skipReason(for: queued))
@@ -170,13 +171,13 @@ extension VideoBatchPolicyTests {
     func testAnUnresolvedVideoIsStillExamined() {
         for state in [EnrichmentState.noMatch, .needsReview] {
             let asset = VideoEnrichmentReview.recordingOutcome(
-                Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+                Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene),
                 state: state, source: "TestSource")
             XCTAssertNil(VideoBatchPolicy.skipReason(for: asset),
                          "\(state) has to come back")
         }
         XCTAssertNil(VideoBatchPolicy.skipReason(
-            for: Asset(relativePath: "a.mp4", fileName: "a.mp4")),
+            for: Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene)),
                      "never checked has to come back")
     }
 }

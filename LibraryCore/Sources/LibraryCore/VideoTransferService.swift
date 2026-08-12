@@ -273,6 +273,12 @@ public final class VideoTransferService {
                 seasonNumber: asset.seasonNumber,
                 episodeNumber: asset.episodeNumber,
                 episode: asset.episode,
+                // 🚨 Carried, or the move silently un-declares the video (#59).
+                // Losing a `personal` declaration fails safe — undeclared is
+                // also refused — but losing a commercial one silently stops
+                // that video being enrichable in its new home, with no sign of
+                // why. The declaration is the operator's statement either way.
+                contentKind: asset.contentKind,
                 releaseDate: asset.releaseDate,
                 enrichmentState: asset.enrichmentState,
                 enrichmentSource: asset.enrichmentSource,

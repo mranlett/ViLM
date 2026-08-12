@@ -121,6 +121,22 @@ public enum VideoBatchPolicy {
     /// records constantly, and a verdict from last month is not evidence about
     /// today.
     public static func skipReason(for asset: Asset) -> String? {
+        // 🚨 The privacy boundary first, before any other reason (#59). Not
+        // because the order changes what runs — both skip — but because it
+        // changes what the operator is TOLD. "already matched" would hide the
+        // fact that a video is undeclared, which is the thing they need to act
+        // on, and would make the count of undeclared videos unreadable.
+        //
+        // ⚠️ This is the REPORTING half. It is not the boundary: a loop that
+        // declines to select something is a property of that loop. The refusal
+        // itself is `PluginRegistry.videoProviders(for:)`, which hands back no
+        // provider at all — see `ProviderBoundary`.
+        if let refusal = ProviderBoundary.refusal(for: asset.contentKind) {
+            switch refusal {
+            case .personalContent: return "your own video — never sent"
+            case .undeclared: return "not declared yet"
+            }
+        }
         switch asset.enrichmentState {
         case .matched: return "already matched"
         case .unmatchable: return "you ruled this one out"

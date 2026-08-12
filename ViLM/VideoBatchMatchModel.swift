@@ -285,8 +285,19 @@ final class VideoBatchMatchModel: ObservableObject {
     private var matchedSourceId: String?
 
     private func examine(_ asset: Asset, in libraryURL: URL,
-                         provider: any VideoMetadataProvider,
+                         provider hoisted: any VideoMetadataProvider,
                          store: LibraryStore) async -> VideoBatchOutcome {
+        // 🚨 The provider is re-obtained PER ASSET through the boundary (#59),
+        // not taken from the one hoisted for the run. A run-level provider is
+        // exactly the shape the spec warns about — "a skipped iteration is not
+        // an exclusion" — because it stays valid for every item regardless of
+        // what that item is. Asking again per asset means personal and
+        // undeclared content cannot obtain one at all.
+        guard let provider = PluginEnvironment.registry.videoProviders(for: asset).first else {
+            return .skipped(reason: PluginEnvironment.registry
+                .refusalForVideoLookup(of: asset)?.reason ?? "no provider installed")
+        }
+        _ = hoisted
         // 1 — fingerprint. Exact, and the only route allowed to write.
         let fileURL = libraryURL.appendingPathComponent(asset.relativePath)
         if let hash = try? await VideoPerceptualHash.compute(contentsOf: fileURL),

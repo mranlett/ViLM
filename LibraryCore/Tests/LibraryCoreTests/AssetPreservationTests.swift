@@ -50,6 +50,7 @@ final class AssetPreservationTests: XCTestCase {
             seasonNumber: 2,
             episodeNumber: 7,
             episode: "Late Checkout",
+            contentKind: .film,
             releaseDate: "2019-04-12",
             enrichmentState: .matched,
             enrichmentSource: "TestSource",
@@ -70,7 +71,7 @@ final class AssetPreservationTests: XCTestCase {
     /// look at the copy sites below before the change can land.
     func testFieldCountIsPinned() {
         let count = Mirror(reflecting: fullyPopulated()).children.count
-        XCTAssertEqual(count, 25, """
+        XCTAssertEqual(count, 26, """
             Asset gained or lost a stored property (now \(count)).
 
             A new field must be carried by EVERY path that rebuilds an asset.
@@ -219,7 +220,7 @@ final class AssetPreservationTests: XCTestCase {
 
     func testRecordingAMatchKeepsTheSourceIdAndUrl() {
         let recorded = VideoEnrichmentReview.recordingOutcome(
-            Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene),
             state: .matched, source: "TestSource",
             sourceId: "scene-999", sourceUrl: "https://example.com/scene/999")
 
@@ -280,7 +281,7 @@ final class AssetPreservationTests: XCTestCase {
     /// match that can never be fetched by id (Plugin Architecture D10.6).
     func testAUrlWithoutAnIdIsNotRecorded() {
         let asset = VideoEnrichmentReview.recordingOutcome(
-            Asset(relativePath: "a.mp4", fileName: "a.mp4"),
+            Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene),
             state: .matched, source: "TestSource",
             sourceId: nil, sourceUrl: "https://example.com/scene/1")
 
