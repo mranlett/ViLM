@@ -11,6 +11,22 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 
 # File Naming & Metadata Storage Strategy
 
+> 🔨 **IMPLEMENTATION IN PROGRESS — 2 of 4 steps, as of 2026-08-13.** Status stays **Approved**; it becomes Implemented when the mover ships and the operator has verified a real run on device.
+> 
+> | Step | State | Commit |
+> | --- | --- | --- |
+> | 1 · Name generator — four grammars, pure | ✅ done | `9ba4652` |
+> | 2 · Dry-run plan | ✅ done | `3a0b306` |
+> | 3 · The mover — atomic rename, reversible | ⬜ next | |
+> | 4 · Relocation rides matching (N2) | ⬜ | |
+> 
+> ⚠️ **All of it is verified against fixtures only.** Nothing has run against the real library — the drive has been detached throughout, and the snapshots available predate `content_kind` (v43), so they cannot exercise any of this.
+> 
+> **What shipped:** `ContentNaming` (all four grammars, F7b skipping, the truncation hierarchy, the three-performer rule), `PathComponentName` (T18b — the sanitiser did not exist; `ProfileImageNaming.safeId` handles only `:` and `/`, well short of what an ExFAT volume read on Windows needs), and `LibraryStore.relocationPlan()` (F3 asserted by snapshotting the database and the directory, collisions found before the run, cast resolved from edges **and** tag strings).
+> 
+> 🚨 **First action when this resumes: run the plan against the attached drive.** `unfilableByReason` answers the question nothing else can — how many of the ~100 videos declared Episodic lack a season or episode number, and are therefore reported rather than filed under F7b. That number decides how much of the library the first real run can move.
+> 
+> ⚠️ **The plan has no screen yet.** Step 3 needs one regardless: a plan the operator cannot read is not a safety property, so the mover starts with the view that shows it.
 > ⭐ **CONSOLIDATED 2026-08-12.** A second spec, *Kodi-Compliant Library Naming*, was written against GitHub #17 without checking this database first. It substantially duplicated this page and contradicted it in one place. **That page is archived; this one is authoritative**, and everything it contributed is folded in below. #17 points here.
 > 
 > This page keeps its parent link to *The Library Graph*, so building it closes the epic's T18, T18b, T23 and T24 as well as this spec's own F-criteria.
@@ -201,6 +217,10 @@ The Epic owns T18 (a generated path matches the grammar, and personal content ne
 - **F5 — Reversibility.** The recorded old→new full-path mapping restores the original layout exactly.
 - **F6 — Length ceiling.** A name that would exceed 255 bytes truncates deterministically at a field boundary and still parses.
 - **F7 — Grammar selection.** Each content kind selects its own grammar, and an undeclared kind selects none — the file is skipped, not guessed at.
+- **F7b — 🚨 A DECLARED kind whose grammar cannot be satisfied is also skipped, and reported with the field that is missing.** F7 covered undeclared only. The gap showed up the moment content was declared for real (2026-08-13): the Episodic grammar treats the series name and `SxxEyy` as structural — the truncation table lists them as never dropped — but only **173 of 2,077** videos carry an episode number and **113** a season. About 100 videos are now declared Episodic, so some of them cannot produce `S01E02` at all.
+  ✅ **DECIDED 2026-08-13 — skip and report.** Consistent with everything else here: a video quietly filed under an invented episode number is worse than one visibly waiting, and the report doubles as the work list for adding the numbers. The file stays in the root, exactly as an undeclared one does.
+  ⚠️ Not the same as inventing a *default*. Defaulting the season to 01 is a common convention and was considered; the episode number has no such convention, and half a guess still produces a wrong path.
+  ⭐ Film and Scene need no equivalent rule. Their at-risk field is the trailing release date — absent on 705 videos — and the grammar already handles that: a missing final segment truncates the name rather than leaving a placeholder, so `Title` alone is legal.
 - **F9 — Personal content never routes to a studio folder.** A `personal` asset carrying a studio — matched, mis-tagged, or read from a filename — is placed in the personal folder. Asserted for each of those three origins separately, because each is a different way the studio got there and only the last is obviously suspect.
 - **F10 — An undeclared asset stays in the root and stays usable.** With `contentKind == nil` the relocation produces no move, no error and no partial path; the asset remains playable, browsable and enrichable. Asserted so that "skipped" can never quietly become "broken".
 - **F11 — A ruled-out studio routes to the unfiled folder, not to a folder of its own.** A studio in `unmatchable` state produces no `Studio Name/` directory, which is what keeps the verified lexicon and the folder tree in agreement.
