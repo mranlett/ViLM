@@ -76,9 +76,7 @@ struct ActorLibraryImportView: View {
                     }
                 }
         }
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 420)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 420)
     }
 
     @ViewBuilder

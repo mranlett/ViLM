@@ -95,9 +95,7 @@ struct EditVideoView: View {
             }
             .task { await loadDuration() }
         }
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 540)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 540)
     }
 
     // MARK: - Trim

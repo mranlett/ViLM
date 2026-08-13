@@ -200,9 +200,7 @@ struct ActorFilterBuilderView: View {
                 }
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 400, minHeight: 600)
-        #endif
+        .macSheet(minWidth: 400, minHeight: 600)
     }
     
 

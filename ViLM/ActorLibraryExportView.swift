@@ -48,9 +48,7 @@ struct ActorLibraryExportView: View {
                     }
                 }
         }
-        #if os(macOS)
-        .frame(minWidth: 420, minHeight: 280)
-        #endif
+        .macSheet(minWidth: 420, minHeight: 280)
     }
 
     @ViewBuilder

@@ -56,9 +56,7 @@ struct PreferenceLeaderboardView: View {
                 }
                 .task { load() }
         }
-        #if os(macOS)
-        .frame(minWidth: 460, minHeight: 560)
-        #endif
+        .macSheet(minWidth: 460, minHeight: 560)
     }
 
     @ViewBuilder

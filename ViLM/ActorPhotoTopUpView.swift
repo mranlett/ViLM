@@ -95,9 +95,7 @@ struct ActorPhotoTopUpView: View {
                                     onApply: setPool)
                 }
         }
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 560)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 560)
     }
 
     @ViewBuilder

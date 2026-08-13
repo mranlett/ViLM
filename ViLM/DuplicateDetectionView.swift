@@ -105,9 +105,7 @@ struct DuplicateDetectionView: View {
         // Size the window on macOS only — on iPhone a fixed minWidth forces
         // the sheet wider than the screen, clipping content and the toolbar
         // buttons (same class as the move-page overflow fix).
-        #if os(macOS)
-        .frame(minWidth: 560, minHeight: 420)
-        #endif
+        .macSheet(minWidth: 560, minHeight: 420)
     }
 
     @ViewBuilder

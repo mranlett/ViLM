@@ -92,9 +92,7 @@ struct ActorSyncView: View {
                 }
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 540)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 540)
         .task { await load() }
     }
 

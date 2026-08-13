@@ -59,9 +59,7 @@ struct SourceGapView: View {
                 }
                 .task { start() }
         }
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 560)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 560)
     }
 
     @ViewBuilder

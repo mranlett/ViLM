@@ -137,9 +137,7 @@ struct LibraryTransferView: View {
         // Size the window on macOS only. On iPhone a fixed minWidth forces the
         // content wider than the (compact) screen, clipping the left/right
         // edges; the sheet should just fill the available width instead.
-        #if os(macOS)
-        .frame(minWidth: 520, minHeight: 520)
-        #endif
+        .macSheet(minWidth: 520, minHeight: 520)
         .onDisappear { stopOtherScope() }
         // A swipe-dismiss mid-operation shouldn't be possible; and if the view
         // is torn down anyway, each batch operation holds its own security-

@@ -92,4 +92,40 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertEqual(original.status, .reviewed, "rescanning must not clobber review status")
         XCTAssertEqual(original.tags, ["actor:Jane Doe"], "rescanning must not clobber tags")
     }
+
+    // MARK: - 🚨 T34 / #63 — every container is asserted, one at a time
+
+    /// The Epic's T34, and the reason it says "asserted per extension":
+    ///
+    /// > an unrecognised file is not skipped visibly — it never enters the
+    /// > library at all.
+    ///
+    /// There is no count, no report, no "skipped" state. A container missing
+    /// from the list is indistinguishable from a file that is not on disk, so
+    /// the only way to know the list is right is to assert each entry.
+    func testEveryIndexableContainerIsActuallyIndexed() async throws {
+        let extensions = Array(LibraryScanner.indexableExtensions).sorted()
+        XCTAssertTrue(extensions.contains("mkv"), "the container #63 was filed for")
+
+        for ext in extensions {
+            try createFile(at: "clip.\(ext)")
+        }
+        try await scanner.scan(at: libraryURL)
+
+        let indexed = Set(try store.fetchAllAssets().map { ($0.fileName as NSString).pathExtension.lowercased() })
+        for ext in extensions {
+            XCTAssertTrue(indexed.contains(ext), "\(ext) is in the list but was not indexed")
+        }
+    }
+
+    /// ⚠️ The other half. A list that indexed everything would also pass the
+    /// test above, and would fill the library with subtitles and artwork.
+    func testFilesOutsideTheListAreStillIgnored() async throws {
+        for name in ["cover.jpg", "subs.srt", "notes.txt", "clip.mp4.part", "archive.zip"] {
+            try createFile(at: name)
+        }
+        try await scanner.scan(at: libraryURL)
+        XCTAssertTrue(try store.fetchAllAssets().isEmpty,
+                      "something outside the container list was indexed")
+    }
 }

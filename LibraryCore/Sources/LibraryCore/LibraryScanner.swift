@@ -5,6 +5,25 @@
 import Foundation
 
 public class LibraryScanner {
+
+    /// Containers the scanner will catalogue.
+    ///
+    /// 🚨 `.mkv` was missing until 2026-08-12 (#63), and the way it was missing
+    /// is the point: an unrecognised file is not skipped VISIBLY. There is no
+    /// count, no report, no "skipped" state — the file simply never enters the
+    /// library, which is indistinguishable from it not being there.
+    ///
+    /// ⭐ So this list is deliberately GENEROUS. Some of these containers
+    /// AVFoundation cannot decode, so a thumbnail or a fingerprint may fail —
+    /// that path already degrades to a placeholder rather than an error. A
+    /// catalogued file the app cannot preview is visible and fixable; an
+    /// unindexed one is neither.
+    static let indexableExtensions: Set<String> = [
+        // AVFoundation-native
+        "mp4", "mov", "m4v",
+        // Common containers. Indexed even where playback may not work.
+        "mkv", "avi", "wmv", "webm", "ts", "m2ts", "mpg", "mpeg",
+    ]
     private let store: LibraryStore
     
     public init(store: LibraryStore) {
@@ -27,8 +46,7 @@ public class LibraryScanner {
         while let fileURL = enumerator?.nextObject() as? URL {
             let ext = fileURL.pathExtension.lowercased()
             
-            // Supported formats from your spec
-            if ["mp4", "mov", "m4v"].contains(ext) {
+            if LibraryScanner.indexableExtensions.contains(ext) {
                 // Create a path relative to the drive root for portability
                 let rootPath = rootURL.standardizedFileURL.path
                 let filePath = fileURL.standardizedFileURL.path

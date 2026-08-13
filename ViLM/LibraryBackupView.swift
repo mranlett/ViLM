@@ -151,9 +151,7 @@ struct LibraryBackupView: View {
         // security-scope claims (ScopedOperation), so releasing ours above
         // can't cut off in-flight file access (DEFECT_INVENTORY H5).
         .interactiveDismissDisabled(isBuilding || isRestoring)
-        #if os(macOS)
-        .frame(minWidth: 480, minHeight: 460)
-        #endif
+        .macSheet(minWidth: 480, minHeight: 460)
     }
 
     @ViewBuilder
