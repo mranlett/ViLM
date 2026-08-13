@@ -205,4 +205,68 @@ final class ProviderBoundaryTests: XCTestCase {
         }
         XCTAssertNil(try store.fetchAllAssets().first?.contentKind)
     }
+
+    // MARK: - Correcting a bulk declaration
+
+    /// ⚠️ The hole T25's refusal left. Refusing outright meant a wrong bulk
+    /// declaration could only be undone one video at a time — across a whole
+    /// library, no correction at all.
+    func testAnExplicitOverwriteCorrectsAnEarlierBulkDeclaration() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let ids = try (1...3).map { n -> UUID in
+            let a = Asset(relativePath: "\(n).mp4", fileName: "\(n).mp4", contentKind: .scene)
+            try store.insertAsset(a); return a.id
+        }
+        // Default still refuses, so the guard is not weakened.
+        XCTAssertThrowsError(try store.declareContentKind(.film, forAssetIds: ids))
+        XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .scene })
+
+        XCTAssertEqual(try store.declareContentKind(.film, forAssetIds: ids,
+                                                    overwritingExisting: true), 3)
+        XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .film })
+    }
+
+    /// 🚨 The one an overwrite must never touch. Correcting scene→film in bulk
+    /// is housekeeping; turning `personal` into `scene` cannot be taken back,
+    /// and here it would arrive as a side effect of an action aimed elsewhere.
+    func testAnOverwriteStillRefusesToReclassifyPersonalContent() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let mine = Asset(relativePath: "mine.mp4", fileName: "mine.mp4", contentKind: .personal)
+        let other = Asset(relativePath: "other.mp4", fileName: "other.mp4", contentKind: .scene)
+        try store.insertAsset(mine)
+        try store.insertAsset(other)
+
+        XCTAssertThrowsError(try store.declareContentKind(
+            .film, forAssetIds: [mine.id, other.id], overwritingExisting: true)) {
+            XCTAssertEqual($0 as? DeclarationRefusal, .personalInSelection(count: 1))
+        }
+
+        let after = try store.fetchAllAssets()
+        XCTAssertEqual(after.first { $0.id == mine.id }?.contentKind, .personal)
+        XCTAssertEqual(after.first { $0.id == other.id }?.contentKind, .scene,
+                       "all or nothing — the refusal must not half-apply")
+    }
+
+    /// An overwrite still fills in the undeclared ones alongside the corrections.
+    func testAnOverwriteAlsoDeclaresTheUndeclared() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let declared = Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene)
+        let blank = Asset(relativePath: "b.mp4", fileName: "b.mp4")
+        try store.insertAsset(declared)
+        try store.insertAsset(blank)
+
+        XCTAssertEqual(try store.declareContentKind(.episodic,
+                                                    forAssetIds: [declared.id, blank.id],
+                                                    overwritingExisting: true), 2)
+        XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .episodic })
+    }
 }

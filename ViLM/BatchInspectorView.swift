@@ -11,6 +11,10 @@ struct BatchInspectorView: View {
     let libraryURL: URL?
     
     @State private var isShowingTagEntry = false
+
+    /// Set when a bulk declaration was refused because part of the selection
+    /// already answered. Holds what was asked for, so the offer can repeat it.
+    @State private var pendingOverwrite: (kind: ContentKind, count: Int)?
     @State private var newTagValue = ""
     @State private var activeCategory = "tag"
 
@@ -124,6 +128,39 @@ struct BatchInspectorView: View {
                 }
             }
 
+            // ⚠️ The refusal is an OFFER, not a dead end. Refusing outright made
+            // a wrong bulk declaration correctable only one video at a time,
+            // which across a whole library is no correction at all.
+            if let pending = pendingOverwrite {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(pending.count) of these already say what they are.")
+                        .font(.caption)
+                    Button("Change all \(pending.count) to \(pending.kind.displayName)") {
+                        applyContentKind(pending.kind, overwriting: true)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Text("Videos marked Personal are never changed this way — open those "
+                         + "individually.")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.12))
+                .cornerRadius(8)
+            }
+
+            // ⭐ Says what each kind MEANS, not just what it protects. The kind
+            // picks the filing grammar, so this is the decision that determines
+            // where the file ends up on disk — and the privacy line alone left
+            // that invisible.
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Scene — filed under its studio, named with the performers and date.")
+                Text("Film — its own folder, named with the title and year.")
+                Text("Episodic — filed under its series and season.")
+                Text("Personal — kept separate, and never sent anywhere.")
+            }
+            .font(.caption2)
+            .foregroundColor(.secondary)
+
             Text("Titles are only sent to an external source once you say a video is not "
                  + "your own. Personal videos are never sent — and neither is anything "
                  + "still undeclared.")
@@ -137,7 +174,8 @@ struct BatchInspectorView: View {
     /// T25 requires all or nothing, and it also requires refusing a selection
     /// that is already declared — re-declaring in bulk is how a video marked
     /// `personal` would silently become `scene`.
-    private func applyContentKind(_ kind: ContentKind) {
+    private func applyContentKind(_ kind: ContentKind, overwriting: Bool = false) {
+        pendingOverwrite = nil
         let ids = selectedAssets.map(\.id)
         // Grouped by store: a federated selection can span libraries, and one
         // transaction cannot cross two databases.
@@ -149,14 +187,21 @@ struct BatchInspectorView: View {
         }
         do {
             for (store, group) in byStore.values {
-                try store.declareContentKind(kind, forAssetIds: group)
+                try store.declareContentKind(kind, forAssetIds: group,
+                                             overwritingExisting: overwriting)
             }
             for index in assets.indices where ids.contains(assets[index].id) {
                 assets[index].contentKind = kind
             }
             NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
         } catch let refusal as DeclarationRefusal {
-            AppErrorReporter.report(refusal.reason)
+            // An already-declared selection becomes an offer; everything else
+            // is reported and stops there.
+            if case let .alreadyDeclared(count) = refusal {
+                pendingOverwrite = (kind: kind, count: count)
+            } else {
+                AppErrorReporter.report(refusal.reason)
+            }
         } catch {
             AppErrorReporter.report("Couldn't declare those: \(error.localizedDescription)")
         }

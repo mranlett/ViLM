@@ -101,15 +101,26 @@ public enum DeclarationRefusal: Error, Equatable {
     case alreadyDeclared(count: Int)
     /// A selected asset is not in this library.
     case missing(count: Int)
+    /// The selection includes videos declared `personal`, and an overwrite was
+    /// asked for.
+    ///
+    /// 🚨 Refused even with the overwrite flag set. Correcting `scene` to `film`
+    /// in bulk is harmless housekeeping; turning `personal` into `scene` is the
+    /// one change in this area that cannot be taken back, and it would arrive as
+    /// a side effect of an action aimed at something else entirely.
+    case personalInSelection(count: Int)
 
     public var reason: String {
         switch self {
         case let .alreadyDeclared(count):
-            return "\(count) of these already say what they are. Nothing was changed — "
-                 + "narrow the selection, or change those individually, so a bulk action "
-                 + "cannot overwrite a video you marked as your own."
+            return "\(count) of these already say what they are, so nothing was changed. "
+                 + "Use “Change all” if you meant to replace them."
         case let .missing(count):
             return "\(count) of these are no longer in the library. Nothing was changed."
+        case let .personalInSelection(count):
+            return "\(count) of these are marked as your own videos, and a bulk change "
+                 + "will not overwrite that. Nothing was changed — open those individually "
+                 + "if you really mean to reclassify them."
         }
     }
 }
@@ -124,12 +135,24 @@ public extension LibraryStore {
     /// here, because a partly-declared selection looks exactly like a finished
     /// one.
     ///
+    /// - Parameter overwritingExisting: replace declarations already present.
+    ///   ⚠️ Off by default, and the default is the safe one — a bulk action must
+    ///   not silently reclassify something the operator already answered. But
+    ///   refusing outright made a wrong bulk declaration correctable only one
+    ///   video at a time, which at 2,000 videos is no correction at all. So the
+    ///   refusal is now an offer: it reports the count, and the caller may come
+    ///   back having meant it.
+    ///
+    ///   🚨 `personal` is never overwritten, flag or no flag. See
+    ///   `DeclarationRefusal.personalInSelection`.
     /// - Returns: how many assets were declared.
     @discardableResult
-    func declareContentKind(_ kind: ContentKind, forAssetIds ids: [UUID]) throws -> Int {
+    func declareContentKind(_ kind: ContentKind, forAssetIds ids: [UUID],
+                            overwritingExisting: Bool = false) throws -> Int {
         try performInTransaction { db in
             var assets: [Asset] = []
             var alreadyDeclared = 0
+            var personal = 0
             var missing = 0
 
             for id in ids {
@@ -137,7 +160,23 @@ public extension LibraryStore {
                     missing += 1
                     continue
                 }
-                if asset.contentKind != nil { alreadyDeclared += 1 } else { assets.append(asset) }
+                switch asset.contentKind {
+                case .none:
+                    assets.append(asset)
+                case .personal:
+                    // Counted separately whichever mode we are in: with the flag
+                    // it is the refusal, without it it is just one of the
+                    // already-declared.
+                    personal += 1
+                    alreadyDeclared += 1
+                case .some:
+                    alreadyDeclared += 1
+                    if overwritingExisting { assets.append(asset) }
+                }
+            }
+
+            if overwritingExisting && personal > 0 {
+                throw DeclarationRefusal.personalInSelection(count: personal)
             }
 
             // ⭐ The TRANSACTION is what makes this all-or-nothing — throwing
@@ -149,7 +188,7 @@ public extension LibraryStore {
             // refusal is cheaper and reads as the intent rather than relying on
             // a rollback the next reader has to know about.
             if missing > 0 { throw DeclarationRefusal.missing(count: missing) }
-            if alreadyDeclared > 0 {
+            if !overwritingExisting && alreadyDeclared > 0 {
                 throw DeclarationRefusal.alreadyDeclared(count: alreadyDeclared)
             }
 
