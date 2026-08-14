@@ -71,6 +71,44 @@ public struct RelocationPlan: Equatable, Sendable {
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.reason < $1.reason }
     }
 
+    /// Whether this plan could run, and what stops it.
+    ///
+    /// ⭐ A DECISION, not a sentence. `canRun` answers yes-or-no, which is not
+    /// enough to tell an operator what to do next — "blocked by collisions" and
+    /// "nothing is declared yet" are both `false` and are entirely different
+    /// news. The wording belongs to whatever screen shows it; the reasoning
+    /// belongs here, where it can be tested.
+    public enum Readiness: Equatable, Sendable {
+        /// Nothing stands in the way of these moves.
+        case ready(moves: Int)
+        /// 🚨 Two or more videos want one path. Nothing may run until settled:
+        /// one file would silently overwrite the other.
+        case blocked(collisions: Int)
+        /// Everything examined is already where it belongs.
+        case nothingToDo
+        /// Nothing can move because every video is waiting on something.
+        case allWaiting(count: Int)
+    }
+
+    public var readiness: Readiness {
+        // ⚠️ Collisions first, and unconditionally. A plan with movable files
+        // AND a collision is still blocked — reporting the movable count would
+        // read as permission to run.
+        if !collisions.isEmpty { return .blocked(collisions: collisions.count) }
+        if !moves.isEmpty { return .ready(moves: moves.count) }
+        if !unfilable.isEmpty { return .allWaiting(count: unfilable.count) }
+        return .nothingToDo
+    }
+
+    /// How many videos are waiting only because nobody has said what they are.
+    ///
+    /// ⭐ Worth separating from every other reason: it is the one that is
+    /// answered in bulk, by a person, in a single pass — and on a library
+    /// nobody has declared yet it accounts for all of them.
+    public var undeclaredCount: Int {
+        unfilable.filter { if case .undeclared = $0.skip { return true } else { return false } }.count
+    }
+
     public func headline() -> String {
         var parts = ["\(moves.count) to move"]
         if alreadyInPlace > 0 { parts.append("\(alreadyInPlace) already in place") }

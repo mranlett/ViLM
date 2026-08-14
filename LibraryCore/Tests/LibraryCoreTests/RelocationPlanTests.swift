@@ -182,3 +182,65 @@ final class RelocationPlanTests: XCTestCase {
         XCTAssertFalse(plan.canRun, "an empty plan is not a runnable one")
     }
 }
+
+// MARK: - Readiness — the decision the plan screen shows (#17 step 3)
+//
+// ⭐ These exist because the first draft of the screen worked this out in the
+// view, in a private function no test could reach — the same shape as the
+// defect logged on 2026-08-14, where state in a view body was unreachable.
+// The wording stays in the view; the reasoning moved here.
+
+extension RelocationPlanTests {
+
+    private func plan(moves: Int = 0, unfilable: [NamingSkip] = [],
+                      collisions: Int = 0, inPlace: Int = 0) -> RelocationPlan {
+        RelocationPlan(
+            moves: (0..<moves).map {
+                PlannedMove(assetId: UUID(), from: "a\($0).mp4", to: "b\($0).mp4", title: "T\($0)")
+            },
+            alreadyInPlace: inPlace,
+            unfilable: unfilable.map {
+                UnfilableVideo(assetId: UUID(), path: "x.mp4", title: "X", skip: $0)
+            },
+            collisions: (0..<collisions).map {
+                PathCollision(target: "clash\($0).mp4", assetIds: [UUID(), UUID()],
+                              titles: ["One", "Two"])
+            })
+    }
+
+    func testAPlanWithMovesAndNoCollisionsIsReady() {
+        XCTAssertEqual(plan(moves: 3).readiness, .ready(moves: 3))
+    }
+
+    /// 🚨 A collision blocks even when files could otherwise move. Reporting
+    /// the movable count here would read as permission to run.
+    func testACollisionBlocksEvenWhenThereAreMovableFiles() {
+        XCTAssertEqual(plan(moves: 5, collisions: 1).readiness, .blocked(collisions: 1))
+    }
+
+    func testAPlanWithNothingLeftToDoSaysSo() {
+        XCTAssertEqual(plan(inPlace: 12).readiness, .nothingToDo)
+    }
+
+    /// The state of a library nobody has declared: no collisions, no moves,
+    /// and everything waiting. Distinct from "nothing to do", which would
+    /// wrongly tell the operator they were finished.
+    func testAPlanWhereEverythingIsWaitingIsNotMistakenForNothingToDo() {
+        let waiting = plan(unfilable: [.undeclared, .undeclared, .noUsableName])
+        XCTAssertEqual(waiting.readiness, .allWaiting(count: 3))
+        XCTAssertNotEqual(waiting.readiness, .nothingToDo)
+    }
+
+    /// ⭐ The one reason answered in bulk, counted separately so the screen can
+    /// name it rather than leaving the operator to read a table.
+    func testUndeclaredIsCountedApartFromEveryOtherReason() {
+        let mixed = plan(unfilable: [.undeclared, .undeclared,
+                                     .episodicNeeds("episode number"), .noUsableName])
+        XCTAssertEqual(mixed.undeclaredCount, 2)
+        XCTAssertEqual(mixed.unfilable.count, 4)
+    }
+
+    func testUndeclaredCountIsZeroWhenNothingIsUndeclared() {
+        XCTAssertEqual(plan(unfilable: [.noUsableName]).undeclaredCount, 0)
+    }
+}
