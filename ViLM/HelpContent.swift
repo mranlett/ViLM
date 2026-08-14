@@ -37,6 +37,7 @@ enum HelpContent {
         studioGallery,
         videoDetails,
         actorProfile,
+        headToHead,
         playlists,
         openLibraries,
         settings,
@@ -277,6 +278,34 @@ enum HelpContent {
         ]
     )
 
+    static let headToHead = HelpTopic(
+        id: "headToHead",
+        title: "Head to Head",
+        summary: "A quick game that works out what you actually like by asking the easiest possible question: which of these two? Open it from the Actors Gallery to rank performers, or from All Assets to rank videos. Answering \"how many stars is this\" is slow and inconsistent; answering \"this one\" takes a second, and enough of those add up to a ranking.",
+        items: [
+            .init(label: "Playing",
+                  description: "Two contenders appear side by side. Tap a picture to look through their other pictures — a performer's gallery, or a video's other frames — and tap Choose under the one you prefer."),
+            .init(label: "Watching a video contender",
+                  description: "The play button on a video's frame turns that side into a real player you can scrub through, and both sides can play at once so you can compare the action rather than two still frames. It is always silent — nothing ever starts on its own and nothing is ever audible, because two soundtracks at once compares nothing. The button beside it takes you back to the stills, which is where each side starts."),
+            .init(label: "Full screen",
+                  description: "The expand button in the corner of any contender opens it full screen — a video as a full player, a picture as a pinch-zoomable photo you can swipe through. On iPhone and iPad it fills the screen; on a Mac it opens as a large window. Closing it puts you back exactly where you were."),
+            .init(label: "Too close to call",
+                  description: "A real answer, not a skip. It records that these two belong at the same level, which is better information than a coin-flip choice you didn't mean."),
+            .init(label: "Neither",
+                  description: "Takes both out of the game without rating them — for contenders that simply don't belong in a ranking. Undo brings them back."),
+            .init(label: "Undo",
+                  description: "Steps back over the last answer and puts the pair up again, reversing the score change. Mis-taps happen at this pace, which is why there's no confirmation on anything else."),
+            .init(label: "Who's playing / What's playing",
+                  description: "Narrows the game to a pool — gender, country, hair colour or traits for performers; studio, series, tags, rating or cast for videos — using the same filters as the gallery. It only changes who you SEE: there's one ranking, not a separate one per filter, so a filtered session and an unfiltered one build the same ladder."),
+            .init(label: "Standings",
+                  description: "The ranking so far, with stars worked out from how each contender sits among the others. Anything with fewer than ten comparisons is listed as \"still settling\" and earns no star — a score from three answers isn't worth presenting like a score from thirty."),
+            .init(label: "It never changes your ratings",
+                  description: "The game keeps its own score, entirely separate from the star rating you set by hand. Your ratings are read once, to give a new contender a sensible starting point, and are never written to."),
+            .init(label: "Stopping",
+                  description: "Any time. There's no run length and nothing pending — every answer is saved as you give it, and picking the game up weeks later carries on from where the ranking stood."),
+        ]
+    )
+
     static let settings = HelpTopic(
         id: "settings",
         title: "Settings",
@@ -292,6 +321,14 @@ enum HelpContent {
                   description: "Re-scans your library folder for videos you've added or removed since the last time the app looked, and flags any video whose file has gone missing."),
             .init(label: "Move Videos Between Libraries",
                   description: "Moves videos between the open library and a second one you pick (e.g. a portable copy), a few at a time — handy when the destination drive can't hold everything at once. Pick the other library folder, choose which direction to move, and the tool shows the destination's free space and blocks a batch that won't fit. The source's videos appear as thumbnail cards with an A–Z jump strip at the top; tap to select any number, across letters, then move them together. Each video is copied and verified byte-for-byte before its original is removed, so nothing is lost mid-transfer. It also finds videos that exist in both libraries — confirmed truly identical by reading their full contents, not just size — and shows each with a thumbnail so you can tell what it is; for each you choose which copy to keep (the other is deleted), or leave it on Skip to decide later. Applying only acts on the ones you've decided; skipped duplicates stay in the list. Each moved video brings everything with it: all its metadata, tags, and scene markers, plus the profile data and photos of every actor it features (merged into the destination the same way the Actor Library merge tools do — existing actors are enriched, photos are added and never removed). So a moved video's actor info is always current, with no need to run a separate actor merge."),
+            .init(label: "Never Worked Together",
+                  description: "Finds pairs of performers who have worked for several of the same studios but have never appeared in the same video — a connection nothing in either performer's own record can show, only the path through a studio. Sharing one studio is almost universal and means nothing, so you choose how many they must share; the list shrinks sharply as you raise it. Pairs are ordered by how much of each performer's working life the other accounts for, since three studios out of four is a much closer connection than three out of forty. Tap either name to open that performer."),
+            .init(label: "Studio Signatures",
+                  description: "Works out when in a performer's career each studio tends to work with them, by combining a video's studio and cast with its release date and the performer's recorded career start. A studio whose appearances are mostly somebody's first two years is a house that starts careers; one whose median is a decade in is a late-career or redistribution label. Most studios are neither, and they're listed too, so the unusual ones read as unusual. It needs five such appearances before it will call anything a signature, and it says how many studios and appearances it had to leave out."),
+            .init(label: "Tag Relationships",
+                  description: "Looks at which of your tags travel together and tells you two different things. A pair that each nearly always bring the other is probably one idea that picked up two names, and is a candidate for merging. A tag that almost never appears without a second one, where that second appears freely on its own, is a specific thing inside a general one — the shape of a hierarchy, which tags don't have yet. Both directions are shown as percentages so you can disagree with the reading. It changes nothing: whether one tag really belongs under another is about meaning, and counting can't settle it."),
+            .init(label: "Relocation Plan",
+                  description: "Shows exactly where every video WOULD be filed under the naming conventions, and moves nothing. Videos that can't be filed yet are grouped by what they're waiting on — most often that you haven't said what kind of thing they are, which you do in All Assets with “What are these?”. It also finds any two videos that would end up with the same name, which has to be settled before a rename can run, because one file would otherwise overwrite the other. Working out the plan never touches a file; renaming is separate work and won't start until the plan is clean."),
             .init(label: "File Name Audit",
                   description: "Compares each video's actual filename to what its metadata (actors, series, tags) suggests it should be named, and lets you rename files in bulk to match."),
             .init(label: "Find Duplicates",

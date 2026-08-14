@@ -128,6 +128,10 @@ struct ContentView: View {
     @State private var isShowingStudioSpelling = false
     @State private var isShowingStudioAudit = false
     @State private var isShowingGraphAudit = false
+    @State private var isShowingRelocationPlan = false
+    @State private var isShowingTagRelationships = false
+    @State private var isShowingStudioSignatures = false
+    @State private var isShowingTwoHop = false
     @State private var isShowingStaleMatches = false
     @State private var isShowingSameIdentity = false
     @State private var isShowingSeriesTitles = false
@@ -376,6 +380,40 @@ struct ContentView: View {
                         // bug — correct on a Mac, a no-op on a phone.
                         pendingAuditVideo = { openAsset(assetID) }
                     }
+                }
+            }
+            // #17 — reuses the audit sheets' deferred-navigation pattern: the
+            // video to open is stored and run in `onDismiss`, because
+            // navigating behind a sheet is invisible until it closes.
+            .sheet(isPresented: $isShowingRelocationPlan, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
+                if let url = selectedLibraryURL {
+                    RelocationPlanView(libraryURL: url) { assetID in
+                        pendingAuditVideo = { openAsset(assetID) }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingTwoHop, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
+                if let url = selectedLibraryURL {
+                    TwoHopDiscoveryView(libraryURL: url) { actorName in
+                        // Stored, not run: this sheet is still on screen.
+                        pendingAuditVideo = { openSidebarItem(.actor(actorName)) }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingStudioSignatures) {
+                if let url = selectedLibraryURL {
+                    StudioSignaturesView(libraryURL: url)
+                }
+            }
+            .sheet(isPresented: $isShowingTagRelationships) {
+                if let url = selectedLibraryURL {
+                    TagRelationshipsView(libraryURL: url)
                 }
             }
             .sheet(isPresented: $isShowingSeriesTitles) {
@@ -812,6 +850,10 @@ struct ContentView: View {
                 onStudioConflicts: { isShowingStudioConflicts = true },
                 onStudioAudit: { isShowingStudioAudit = true },
                 onGraphAudit: { isShowingGraphAudit = true },
+                onRelocationPlan: { isShowingRelocationPlan = true },
+                onTagRelationships: { isShowingTagRelationships = true },
+                onStudioSignatures: { isShowingStudioSignatures = true },
+                onTwoHop: { isShowingTwoHop = true },
                 onStaleMatches: { isShowingStaleMatches = true },
                 onSameIdentity: { isShowingSameIdentity = true },
                 onSeriesTitles: { isShowingSeriesTitles = true },

@@ -38,6 +38,14 @@ struct SettingsView: View {
     var onStudioConflicts: (() -> Void)?
     var onStudioAudit: (() -> Void)?
     var onGraphAudit: (() -> Void)?
+    /// #17 — what a rename would do, read before anything moves.
+    var onRelocationPlan: (() -> Void)?
+    /// What the tag vocabulary implies about itself.
+    var onTagRelationships: (() -> Void)?
+    /// When in a career each studio works.
+    var onStudioSignatures: (() -> Void)?
+    /// Performers connected by a studio but never by a video.
+    var onTwoHop: (() -> Void)?
 
     /// Matches the source says are gone or moved. Beside the other audits, but
     /// its own tool: unlike them it OFFERS actions, and folding it into a
@@ -211,6 +219,13 @@ struct SettingsView: View {
                     toolButton("Impossible Data",
                                icon: "exclamationmark.magnifyingglass", action: onGraphAudit)
                         .disabled(session.isFederated)
+                    // ⚠️ Single-library, like Identity Upgrade. A path belongs
+                    // to the library that holds it, and planning a rename
+                    // across an attached pair would propose moving files
+                    // between two catalogues that each think they own them.
+                    toolButton("Relocation Plan",
+                               icon: "folder.badge.gearshape", action: onRelocationPlan)
+                        .disabled(session.isFederated)
                     // Reads only what previous fetches recorded — no network,
                     // so it opens instantly and works offline.
                     toolButton("Gone at the Source",
@@ -221,6 +236,25 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Titles in the Series Field",
                                icon: "textformat.abc.dottedunderline", action: onSeriesTitles)
+                        .disabled(session.isFederated)
+                }
+
+                // ⭐ Not "Find Problems". Nothing in here is wrong — these
+                // answer questions about the library that no single record can,
+                // and filing them beside the repair tools would teach the
+                // operator to read every finding as a defect.
+                Section(
+                    header: Text("Explore the Graph"),
+                    footer: Text("Questions no single record can answer, worked out by joining several. They describe your library rather than correcting it, and change nothing.")
+                ) {
+                    toolButton("Tag Relationships",
+                               icon: "tag.circle", action: onTagRelationships)
+                        .disabled(session.isFederated)
+                    toolButton("Studio Signatures",
+                               icon: "chart.xyaxis.line", action: onStudioSignatures)
+                        .disabled(session.isFederated)
+                    toolButton("Never Worked Together",
+                               icon: "arrow.triangle.branch", action: onTwoHop)
                         .disabled(session.isFederated)
                 }
 
