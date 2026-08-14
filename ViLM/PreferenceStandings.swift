@@ -26,24 +26,42 @@ enum PreferenceStandings {
     /// ⚠️ A library that cannot be opened costs its contenders their history,
     /// not the caller its answer. They come back unscored, which is the same
     /// state as never having played and is the honest thing to show.
-    static func load(for profiles: [EntityProfile],
+    ///
+    /// ⭐ Takes ids and a way to resolve their owner rather than profiles,
+    /// because D1 ranks videos too and they are owned by a different resolver.
+    /// The grouping, the one-read-per-library rule and the failure behaviour
+    /// are the part worth sharing, and none of it depends on what a contender
+    /// is.
+    static func load(ids: [String],
                      subject: PreferenceSubject,
+                     owner resolveOwner: (String) -> URL?,
                      fallback: URL?) -> [String: PreferenceRecord] {
         var byOwner: [URL: [String]] = [:]
-        for profile in profiles {
-            guard let owner = LibrarySession.shared.url(forProfile: profile.id) ?? fallback
-            else { continue }
-            byOwner[owner, default: []].append(profile.id)
+        for id in ids {
+            guard let owner = resolveOwner(id) ?? fallback else { continue }
+            byOwner[owner, default: []].append(id)
         }
 
         var out: [String: PreferenceRecord] = [:]
-        for (owner, ids) in byOwner {
-            guard let records = try? LibraryStore(at: owner).preferenceRecords(subject: subject)
+        for (library, contenderIds) in byOwner {
+            guard let records = try? LibraryStore(at: library).preferenceRecords(subject: subject)
             else { continue }
-            for id in ids {
+            for id in contenderIds {
                 if let record = records[id] { out[id] = record }
             }
         }
         return out
+    }
+
+    /// Standings for performers, whose owner is resolved by IDENTITY.
+    ///
+    /// ⚠️ Not merely a convenience. A performer is folded across libraries by
+    /// identity while a video is owned by the asset map, and stating that once
+    /// here is what stops a caller reaching for the wrong resolver.
+    static func load(for profiles: [EntityProfile],
+                     subject: PreferenceSubject,
+                     fallback: URL?) -> [String: PreferenceRecord] {
+        load(ids: profiles.map(\.id), subject: subject,
+             owner: { LibrarySession.shared.url(forProfile: $0) }, fallback: fallback)
     }
 }

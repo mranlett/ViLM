@@ -1,17 +1,12 @@
 // HeadToHeadView.swift
-// Head to Head — two contenders, and one question (#34).
+// Head to Head — two performers, and one question (#34).
 //
 // TRACKED and PUBLIC. Names no source.
 //
-// ⭐ The design constraints here are from the spec and are not decoration:
-//
-//   • The next pair is PREFETCHED. A wait between taps ends a session faster
-//     than anything else, so the model chooses the following pair before it is
-//     needed.
-//   • No score is shown mid-game. The moment it feels like a test it stops
-//     being a game. The session tally is a count of taps, not a judgement.
-//   • Endless and stoppable (D5). There is no run length and nothing pending,
-//     so leaving at any point loses nothing.
+// ⭐ The chrome around the two cards — the refusal, the secondary answers, the
+// undo and the tally — is `HeadToHeadBoard`, shared with the video game (#38).
+// What lives here is what is specific to judging a PERFORMER: the photo and its
+// gallery, what the library knows them for, and the actor-shaped pool.
 //
 // ⚠️ Gesture split, at the operator's direction: tapping a PHOTO browses that
 // contender's gallery; an explicit Choose button commits. It costs one tap per
@@ -53,6 +48,13 @@ struct HeadToHeadView: View {
     /// The still being shown full size.
     @State private var enlarged: Asset?
 
+    /// The contender whose photo is being shown full screen.
+    ///
+    /// ⭐ Added with the video game's playback work: the operator asked to
+    /// expand pictures as well as videos, and a performer's photo is the
+    /// picture this half of the game is judged on.
+    @State private var enlargedPhoto: HeadToHeadModel.Side?
+
     /// 🚨 The game's OWN pool, not the actor grid's saved default.
     ///
     /// The grid already remembers a default filter, and reusing it would mean
@@ -76,7 +78,7 @@ struct HeadToHeadView: View {
 
     var body: some View {
         NavigationStack {
-            content
+            board
                 .navigationTitle("Head to Head")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -108,10 +110,26 @@ struct HeadToHeadView: View {
                 // anywhere dismisses — this is a look, not a screen to
                 // navigate, and the game's pace depends on getting back fast.
                 .sheet(item: $enlarged) { asset in
-                    enlargedStill(asset)
+                    StillBrowser(asset: asset) { enlarged = nil }
+                }
+                // Full screen on a phone, a sheet on the desktop — the same
+                // rule the video card's expand follows.
+                .fullScreenCoverOnPhone(isPresented: Binding(
+                    get: { enlargedPhoto != nil },
+                    set: { if !$0 { enlargedPhoto = nil } }
+                )) {
+                    if let side = enlargedPhoto, let profile = side.profile {
+                        FullScreenPhotoBrowser(
+                            libraryURL: side.libraryURL,
+                            entityId: side.id,
+                            primaryPhotoUrl: profile.photoUrl,
+                            identifiers: photoIdentifiers(for: side),
+                            initialIdentifier: currentPhotoIdentifier(for: side),
+                            onClose: { enlargedPhoto = nil })
+                    }
                 }
                 .sheet(isPresented: $isShowingStandings) {
-                    PreferenceLeaderboardView(entityProfiles: entityProfiles,
+                    PreferenceLeaderboardView(contenders: .actors(entityProfiles),
                                               libraryURL: libraryURL)
                 }
                 .sheet(isPresented: $isShowingPool) {
@@ -123,54 +141,21 @@ struct HeadToHeadView: View {
                                onApply: setPool)
                 }
         }
-        #if os(macOS)
-        .frame(minWidth: 720, minHeight: 560)
-        #endif
+        // ⚠️ `.macSheet`, not a raw frame. This screen carried one since #34
+        // and escaped the standard's automated check only because it is
+        // presented through a computed property the scan cannot see — which is
+        // the check's own blind spot, not a licence.
+        .macSheet(minWidth: 720, minHeight: 560)
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch model.state {
-        case .loading:
-            centred { ProgressView("Gathering contenders…") }
-
-        case .unplayable(let reason):
-            // T12 — a refusal that says why, rather than an empty board.
-            centred {
-                Image(systemName: "person.2.slash")
-                    .font(.system(size: 40)).foregroundStyle(.secondary)
-                Text("Nothing to compare").font(.title3.bold())
-                Text(reason)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-        case .failed(let message):
-            centred {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 36)).foregroundStyle(.orange)
-                Text(message).font(.callout).multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-        case .playing(let left, let right):
-            VStack(spacing: 12) {
-                poolBanner
-                // ⚠️ Horizontal on both platforms. Two contenders stacked
-                // vertically on a phone cannot be compared without scrolling,
-                // and a comparison you have to scroll to make is not a rapid
-                // visual judgement.
-                HStack(alignment: .top, spacing: 12) {
-                    contender(left, choosing: .left)
-                    contender(right, choosing: .right)
-                }
-                .padding(.horizontal, 12)
-
-                secondaryAnswers
-                footer
-            }
-            .padding(.vertical, 12)
+    private var board: some View {
+        HeadToHeadBoard(model: model,
+                        poolIsFiltered: !pool.isEmpty,
+                        poolBannerText: "Playing \(model.poolCount) of your performers",
+                        poolBannerSymbol: "person.3.fill",
+                        emptySymbol: "person.2.slash",
+                        onOpenPool: { isShowingPool = true }) { side, outcome in
+            contender(side, choosing: outcome)
         }
     }
 
@@ -224,24 +209,25 @@ struct HeadToHeadView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The still, full size, with every contact-sheet frame behind it.
-    ///
-    /// ⭐ Tap advances. A contact sheet is ONE composite image, so the frames
-    /// are sliced out of it with `ContactSheetLayout` — the inverse of the
-    /// geometry that composed it — rather than re-extracted from the video,
-    /// which would mean an AVFoundation pass per look.
-    ///
-    /// ⚠️ The poster frame comes FIRST. It is the image the operator tapped,
-    /// and opening onto a different one would read as the wrong video.
-    @ViewBuilder
-    private func enlargedStill(_ asset: Asset) -> some View {
-        StillBrowser(asset: asset) { enlarged = nil }
-    }
-
     /// ⚠️ Bounded. A performer with two hundred videos would otherwise build
     /// two hundred thumbnail views inside a card the operator scrolls past in
     /// a second.
     private var stripLimit: Int { 12 }
+
+    /// The browser addresses photos by token: "primary", then each gallery url.
+    ///
+    /// ⚠️ Built from `Side.images`, which is what the card itself is paging
+    /// through — so the full-screen browser opens on the picture actually on
+    /// screen rather than on the first one.
+    private func photoIdentifiers(for side: HeadToHeadModel.Side) -> [String] {
+        ["primary"] + side.images.dropFirst().compactMap { $0 }
+    }
+
+    private func currentPhotoIdentifier(for side: HeadToHeadModel.Side) -> String {
+        let identifiers = photoIdentifiers(for: side)
+        guard !identifiers.isEmpty else { return "primary" }
+        return identifiers[side.galleryIndex % identifiers.count]
+    }
 
     private func contender(_ side: HeadToHeadModel.Side,
                            choosing outcome: PreferenceOutcome) -> some View {
@@ -264,16 +250,31 @@ struct HeadToHeadView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { model.browse(side) }
 
-                // ⭐ Only when there IS more to see. A control that does
-                // nothing teaches the operator to ignore the control.
-                if side.hasMoreThanOneImage {
-                    Label("\(side.galleryIndex % side.images.count + 1)/\(side.images.count)",
-                          systemImage: "photo.on.rectangle")
-                        .font(.caption2)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(8)
+                HStack(spacing: 6) {
+                    // ⭐ Only when there IS more to see. A control that does
+                    // nothing teaches the operator to ignore the control.
+                    if side.hasMoreThanOneImage {
+                        Label("\(side.galleryIndex % side.images.count + 1)/\(side.images.count)",
+                              systemImage: "photo.on.rectangle")
+                            .font(.caption2)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+
+                    // The same expand affordance, in the same corner, as the
+                    // video card's — one gesture to learn across both games.
+                    Button {
+                        enlargedPhoto = side
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption)
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Full screen")
                 }
+                .padding(8)
             }
 
             // Names shown — the judgement is about the performer.
@@ -303,14 +304,14 @@ struct HeadToHeadView: View {
                     // of the evidence: there it is the provider's scenes, here
                     // it is YOUR library.
                     Button {
-                        if expandedVideos.contains(side.profile.id) {
-                            expandedVideos.remove(side.profile.id)
+                        if expandedVideos.contains(side.id) {
+                            expandedVideos.remove(side.id)
                         } else {
-                            expandedVideos.insert(side.profile.id)
+                            expandedVideos.insert(side.id)
                         }
                     } label: {
                         HStack(spacing: 3) {
-                            Image(systemName: expandedVideos.contains(side.profile.id)
+                            Image(systemName: expandedVideos.contains(side.id)
                                   ? "chevron.down" : "chevron.right")
                                 .font(.system(size: 9))
                             Text(side.knownFor.videoCount == 1
@@ -325,83 +326,12 @@ struct HeadToHeadView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
 
-            if expandedVideos.contains(side.profile.id) {
+            if expandedVideos.contains(side.id) {
                 videoStrip(for: side)
             }
 
-            Button {
-                model.choose(outcome)
-            } label: {
-                Text("Choose").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            // ⚠️ Large and reachable. This is the control pressed on every
-            // single comparison, and it is the one the whole session's pace
-            // depends on.
-            .controlSize(.large)
+            HeadToHeadChooseButton { model.choose(outcome) }
         }
-    }
-
-    // MARK: - The other two answers
-
-    private var secondaryAnswers: some View {
-        HStack(spacing: 16) {
-            // D6 — a draw is an ANSWER. Forcing a choice between two
-            // contenders rated equally injects noise into every score they
-            // touch.
-            Button("Too close to call") { model.choose(.draw) }
-                .buttonStyle(.bordered)
-
-            // D6 — and "neither" means something different: neither belongs in
-            // the ranking. No confirmation; undo is the safety net.
-            Button("Neither", role: .destructive) { model.retireBoth() }
-                .buttonStyle(.bordered)
-        }
-        .font(.callout)
-    }
-
-    /// ⚠️ Always visible when a pool is set. D1b's warning is that a filtered
-    /// session quietly produces a ladder that cannot be compared with an
-    /// unfiltered one; the mitigation the spec asks for is to SAY SO rather
-    /// than to prevent it.
-    @ViewBuilder
-    private var poolBanner: some View {
-        if !pool.isEmpty {
-            Button { isShowingPool = true } label: {
-                Label("Playing \(model.poolCount) of your performers", systemImage: "person.3.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    private var footer: some View {
-        HStack {
-            Button {
-                model.undo()
-            } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!model.canUndo && !model.canUndoRetirement)
-
-            Spacer()
-
-            // D5 — a tally, not a target. "14 of 20" would make stopping at
-            // seven feel like waste, which is the opposite of what a
-            // low-friction elicitation tool wants.
-            Text(model.comparedThisSession == 1
-                 ? "1 compared this session"
-                 : "\(model.comparedThisSession) compared this session")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-    }
-
-    private func centred<C: View>(@ViewBuilder _ body: () -> C) -> some View {
-        VStack(spacing: 10) { body() }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -446,102 +376,5 @@ private struct PoolPicker: View {
                                allUniqueTags: allUniqueTags,
                                criteria: $criteria)
             .onDisappear { onApply(criteria) }
-    }
-}
-
-/// The poster frame plus every contact-sheet frame, one at a time.
-///
-/// 🚨 Slices the sheet rather than re-extracting frames. A contact sheet is a
-/// single composite JPEG already on disk; pulling twelve frames out of the
-/// video again would mean an AVFoundation pass every time someone glanced at a
-/// contender, on a screen whose whole point is speed.
-///
-/// ⚠️ Loaded off the main actor and only when opened. Twelve full-size crops
-/// per contender, built eagerly for both sides of every pair, is exactly the
-/// kind of work that makes a game feel heavy.
-private struct StillBrowser: View {
-    let asset: Asset
-    let onClose: () -> Void
-
-    @State private var frames: [CGImage] = []
-    @State private var index = 0
-    @State private var isLoading = true
-
-    private var total: Int { frames.count }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView()
-                } else if frames.isEmpty {
-                    // ⚠️ Says why rather than showing an empty black screen.
-                    // A video with no contact sheet yet is the common case for
-                    // anything added recently.
-                    ContentUnavailableView("No stills yet",
-                                           systemImage: "photo.on.rectangle",
-                                           description: Text("This video has no contact sheet. Generate one from the video's own page and its frames will appear here."))
-                } else {
-                    Image(decorative: frames[index], scale: 1)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // ⭐ Tap anywhere advances, wrapping. This is a look,
-                        // not a screen to navigate — the game's pace depends
-                        // on getting through it without aiming at controls.
-                        .contentShape(Rectangle())
-                        .onTapGesture { index = (index + 1) % total }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.opacity(0.92))
-            .navigationTitle(total > 1 ? "\(index + 1) of \(total)" : "")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", action: onClose)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                Text(ActorKnownFor.displayTitle(asset))
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal).padding(.bottom, 8)
-            }
-        }
-        .macSheet(minWidth: 720, minHeight: 480)
-        .task { await load() }
-    }
-
-    private func load() async {
-        let posterURL = LibrarySession.shared.thumbnailURL(for: asset.id)
-        let sheetURL = LibrarySession.shared.contactSheetURL(for: asset.id)
-
-        let loaded: [CGImage] = await Task.detached(priority: .userInitiated) {
-            var out: [CGImage] = []
-            // The poster first — it is the image that was tapped.
-            if let posterURL, let poster = Self.image(at: posterURL) { out.append(poster) }
-            if let sheetURL, let sheet = Self.image(at: sheetURL) {
-                let size = CGSize(width: sheet.width, height: sheet.height)
-                for rect in ContactSheetLayout.pixelCells(forSheetOfSize: size) {
-                    // ⚠️ `cropping` returns nil for a rect outside the image,
-                    // which is the correct answer for a sheet laid out
-                    // differently from today's constants — skip, never crash.
-                    if let cell = sheet.cropping(to: rect) { out.append(cell) }
-                }
-            }
-            return out
-        }.value
-
-        frames = loaded
-        isLoading = false
-    }
-
-    private static func image(at url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }

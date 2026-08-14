@@ -1,5 +1,5 @@
 // PreferenceLeaderboardView.swift
-// Head to Head — the standings (#35).
+// Head to Head — the standings (#35, #38).
 //
 // TRACKED and PUBLIC. Names no source.
 //
@@ -18,12 +18,29 @@
 //   • A filtered pool is stated. Scores between contenders that have never met
 //     are not really comparable, and the spec's chosen mitigation is to say so
 //     rather than to pretend otherwise.
+//
+// ⭐ One board for both subjects (D1). What changes is the picture beside a row
+// and the noun in the footer; the ranking, the threshold and the derived stars
+// are the same rules and are computed once, here.
 
 import SwiftUI
 import LibraryCore
 
 struct PreferenceLeaderboardView: View {
-    let entityProfiles: EntityProfileIndex
+    /// Who is being ranked, and therefore how a row is drawn.
+    enum Contenders {
+        case actors(EntityProfileIndex)
+        case videos([Asset])
+
+        var subject: PreferenceSubject {
+            switch self {
+            case .actors: return .actor
+            case .videos: return .video
+            }
+        }
+    }
+
+    let contenders: Contenders
     let libraryURL: URL?
 
     @Environment(\.dismiss) private var dismiss
@@ -34,12 +51,26 @@ struct PreferenceLeaderboardView: View {
     struct Standing: Identifiable {
         let id: String
         let name: String
-        let profile: EntityProfile
+        let kind: Kind
         let libraryURL: URL?
         let comparisons: Int
         /// Nil while provisional — D8. Absent rather than low, because "not yet
         /// known" and "known to be poor" are different claims.
         let stars: Int?
+
+        enum Kind {
+            case actor(EntityProfile)
+            case video(Asset)
+        }
+    }
+
+    /// The noun the footers use, so a board of videos does not talk about
+    /// performers.
+    private var subjectNoun: (singular: String, plural: String) {
+        switch contenders {
+        case .actors: return ("performer", "performers")
+        case .videos: return ("video", "videos")
+        }
     }
 
     var body: some View {
@@ -85,7 +116,7 @@ struct PreferenceLeaderboardView: View {
                         // ⚠️ Stated, not implied. Two contenders that have never
                         // met are only loosely comparable however tidy the list
                         // looks.
-                        Text("Stars come from where each performer sits among the others, and are recalculated every time this opens. They are never written to a performer's own rating.")
+                        Text("Stars come from where each \(subjectNoun.singular) sits among the others, and are recalculated every time this opens. They are never written to a \(subjectNoun.singular)'s own rating.")
                     }
                 }
 
@@ -116,15 +147,7 @@ struct PreferenceLeaderboardView: View {
                 .foregroundStyle(position == nil ? .tertiary : .secondary)
                 .frame(width: 28, alignment: .trailing)
 
-            ProfileImageView(libraryURL: standing.libraryURL,
-                             entityId: standing.id,
-                             photoUrl: standing.profile.photoUrl) { image in
-                Color.clear.overlay(image.resizable().scaledToFill(), alignment: .top)
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15))
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            picture(standing)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(standing.name).font(.body).lineLimit(1)
@@ -147,9 +170,49 @@ struct PreferenceLeaderboardView: View {
         }
     }
 
+    /// ⚠️ A video's still keeps its 16:9 shape rather than being squared off
+    /// like a portrait. A cropped frame is much harder to recognise, and
+    /// recognition is the only thing this picture is for.
+    @ViewBuilder
+    private func picture(_ standing: Standing) -> some View {
+        switch standing.kind {
+        case .actor(let profile):
+            ProfileImageView(libraryURL: standing.libraryURL,
+                             entityId: standing.id,
+                             photoUrl: profile.photoUrl) { image in
+                Color.clear.overlay(image.resizable().scaledToFill(), alignment: .top)
+            } placeholder: {
+                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15))
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        case .video(let asset):
+            VideoThumbnailView(asset: asset, libraryURL: standing.libraryURL)
+                .frame(width: 72, height: 41)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
     private func load() {
-        let contenders = entityProfiles.actors
-        let records = PreferenceStandings.load(for: contenders, subject: .actor,
+        let entries: [(id: String, name: String, kind: Standing.Kind, owner: URL?)]
+        switch contenders {
+        case .actors(let profiles):
+            entries = profiles.actors.map {
+                ($0.id, $0.name, .actor($0),
+                 LibrarySession.shared.url(forProfile: $0.id) ?? libraryURL)
+            }
+        case .videos(let assets):
+            entries = assets.map {
+                ($0.id.uuidString, ActorKnownFor.displayTitle($0), .video($0),
+                 LibrarySession.shared.url(for: $0.id) ?? libraryURL)
+            }
+        }
+
+        let owners = Dictionary(entries.map { ($0.id, $0.owner) }) { first, _ in first }
+        let records = PreferenceStandings.load(ids: entries.map(\.id),
+                                               subject: contenders.subject,
+                                               owner: { owners[$0] ?? nil },
                                                fallback: libraryURL)
 
         // ⭐ Retired contenders are excluded entirely. "Neither" means they do
@@ -159,11 +222,11 @@ struct PreferenceLeaderboardView: View {
         let scores = played.mapValues(\.preferenceScore)
         let stars = PreferenceScoring.derivedStars(scores)
 
-        let byId = Dictionary(contenders.map { ($0.id, $0) }) { first, _ in first }
+        let byId = Dictionary(entries.map { ($0.id, $0) }) { first, _ in first }
         func standing(_ id: String, _ record: PreferenceRecord) -> Standing? {
-            guard let profile = byId[id] else { return nil }
-            return Standing(id: id, name: profile.name, profile: profile,
-                            libraryURL: LibrarySession.shared.url(forProfile: id) ?? libraryURL,
+            guard let entry = byId[id] else { return nil }
+            return Standing(id: id, name: entry.name, kind: entry.kind,
+                            libraryURL: entry.owner,
                             comparisons: record.comparisons,
                             stars: stars[id])
         }

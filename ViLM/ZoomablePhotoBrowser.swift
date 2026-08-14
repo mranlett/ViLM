@@ -15,6 +15,9 @@
 
 import SwiftUI
 import AVFoundation
+// `FullScreenPhotoBrowser` resolves on-disk photo names through
+// `ProfileImageNaming`, which is domain logic.
+import LibraryCore
 
 /// Pinch-to-zoom for a single full-screen photo. Deliberately scoped to
 /// zoom-in-place (no panning): the pager's own swipe-to-advance uses a
@@ -283,5 +286,199 @@ struct VideoFrameBrowser: View {
         guard times.indices.contains(index) else { return "" }
         let total = Int(times[index].rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// Full-screen photo viewer for an entity's own photos, with endless
+/// wrap-around swiping and pinch-zoom.
+///
+/// ⚠️ Lived as a private type inside `ProfileGraphHeaderView` until Head to
+/// Head needed it too (#38 follow-on: expand a contender's picture to full
+/// screen). Moved here rather than copied — it belongs beside
+/// `RemotePhotoBrowser` and `VideoFrameBrowser`, which answer the same question
+/// for a candidate's photos and for a video's frames.
+struct FullScreenPhotoBrowser: View {
+    let libraryURL: URL?
+    let entityId: String
+    let primaryPhotoUrl: String?
+    let identifiers: [String]      // "primary" + gallery URLs
+    let initialIdentifier: String
+    let onClose: () -> Void
+
+    @State private var index: Int = 0
+    // Full-size images preloaded up front and keyed by identifier, so the
+    // pager's neighbouring pages render their photo as they slide in
+    // instead of showing the black background until they become active.
+    @State private var images: [String: Image] = [:]
+
+    var body: some View {
+        NavigationStack {
+            WrappingPhotoPager(count: identifiers.count, index: $index) { i in
+                photoPage(for: identifiers[i])
+            }
+            .background(Color.black)
+            .ignoresSafeArea(edges: .bottom)
+            .navigationTitle(identifiers.count > 1 ? "\(index + 1) of \(identifiers.count)" : "")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { onClose() }
+                }
+            }
+            .onAppear {
+                index = identifiers.firstIndex(of: initialIdentifier) ?? 0
+            }
+            .task { await preloadImages() }
+        }
+        // Larger than the shared default because this is the one sheet
+        // whose entire purpose is looking at a photograph — sizing it like
+        // a settings pane would defeat the point of opening it.
+        .macSheet(minWidth: 900, minHeight: 700)
+    }
+
+    @ViewBuilder
+    private func photoPage(for identifier: String) -> some View {
+        ZoomablePhoto {
+            if let image = images[identifier] {
+                image
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Fallback for anything not yet on disk (e.g. a gallery URL not
+                // downloaded yet); ProfileImageView will fetch it.
+                let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+                let photoUrl = identifier == "primary" ? primaryPhotoUrl : identifier
+                ProfileImageView(libraryURL: libraryURL, entityId: entityId, photoUrl: photoUrl, isGallery: isGallery) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                } placeholder: {
+                    ProgressView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        // Fresh zoom state per photo — otherwise the pager's fixed three
+        // HStack slots would carry over a stale scale as `index` changes
+        // which photo occupies a given slot.
+        .id(identifier)
+    }
+
+    // Resolves the on-disk file for an identifier (no I/O), matching the
+    // naming scheme ProfileImageView writes with.
+    private func fileURL(for identifier: String) -> URL? {
+        guard let libraryURL else { return nil }
+        let dir = libraryURL.appendingPathComponent(".catalog/profiles")
+        let isGallery = identifier != "primary" && identifier != primaryPhotoUrl
+        let fileName = ProfileImageNaming.fileName(for: entityId, token: identifier, isGallery: isGallery)
+        return dir.appendingPathComponent(fileName)
+    }
+
+    private func preloadImages() async {
+        // Load the initially-shown photo first so it appears fastest, then
+        // the rest so neighbours are ready before the first swipe.
+        let start = identifiers.firstIndex(of: initialIdentifier) ?? 0
+        let ordered = (0..<identifiers.count).map { identifiers[(start + $0) % identifiers.count] }
+        for identifier in ordered {
+            if images[identifier] != nil { continue }
+            guard let url = fileURL(for: identifier),
+                  FileManager.default.fileExists(atPath: url.path) else { continue }
+            // Decode off the main thread, but build the SwiftUI Image on the
+            // main actor (its initializer is main-actor isolated).
+            let platformImage = await Task.detached { () -> PlatformImage? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return PlatformImage(data: data)
+            }.value
+            if let platformImage { images[identifier] = Image(platformImage: platformImage) }
+        }
+    }
+}
+
+/// A video's own stills, full screen: the poster frame plus every
+/// contact-sheet cell, swipeable and pinch-zoomable.
+///
+/// 🚨 Slices the contact sheet rather than re-extracting frames. A contact
+/// sheet is a single composite JPEG already on disk; pulling twelve frames out
+/// of the video again would mean an AVFoundation pass every time someone
+/// glanced at a contender, on a screen whose whole point is speed.
+///
+/// ⭐ `frames` is passed in when the caller already has them — Head to Head
+/// slices them once for the card and hands the same array over, so expanding a
+/// contender is instant and decodes nothing twice. Callers with no frames
+/// (the actor game's video strip) leave it empty and it loads its own.
+///
+/// ⚠️ Zoom and paging come from `ZoomablePhoto` and `WrappingPhotoPager`, the
+/// same two the photo browsers use. This screen previously advanced on a plain
+/// tap and could not zoom at all, which was fine while it was a glance and is
+/// not fine now that the operator judges videos here.
+struct StillBrowser: View {
+    let asset: Asset
+    var frames: [CGImage] = []
+    var initialIndex: Int = 0
+    let onClose: () -> Void
+
+    @State private var loaded: [CGImage] = []
+    @State private var index = 0
+    @State private var isLoading = true
+
+    private var shown: [CGImage] { frames.isEmpty ? loaded : frames }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading && shown.isEmpty {
+                    ProgressView()
+                } else if shown.isEmpty {
+                    // ⚠️ Says why rather than showing an empty black screen. A
+                    // video with no contact sheet yet is the common case for
+                    // anything added recently.
+                    ContentUnavailableView("No stills yet",
+                                           systemImage: "photo.on.rectangle",
+                                           description: Text("This video has no contact sheet. Generate one from the video's own page and its frames will appear here."))
+                } else {
+                    WrappingPhotoPager(count: shown.count, index: $index) { i in
+                        ZoomablePhoto {
+                            Image(decorative: shown[i], scale: 1)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        // Fresh zoom state per frame — the pager's three fixed
+                        // slots would otherwise carry a stale scale across a
+                        // page change.
+                        .id(i)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+            .ignoresSafeArea(edges: .bottom)
+            .navigationTitle(shown.count > 1 ? "\(index + 1) of \(shown.count)" : "")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onClose)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text(ActorKnownFor.displayTitle(asset))
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal).padding(.bottom, 8)
+            }
+        }
+        .macSheet(minWidth: 900, minHeight: 600)
+        .onAppear { index = min(max(initialIndex, 0), max(shown.count - 1, 0)) }
+        .task {
+            guard frames.isEmpty else { isLoading = false; return }
+            loaded = await ContactSheetFrames.load(for: asset.id)
+            isLoading = false
+        }
     }
 }
