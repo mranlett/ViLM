@@ -121,6 +121,19 @@ Design decisions worth keeping:
 - **Implausible ages are flagged only when EVERY possible age is outside the band**, the same conservatism as the age filter — an approximate age spans two values, and flagging a borderline one sends the operator to check a record that is fine.
 - **It reports and does not repair, and unlike Studio Health it does not route either.** There is no fix tool because the audit cannot know which of the two records is wrong. Tapping a row opens the video and lets the operator decide.
 - A finding names the **performer as well as the video**: the video is fine for everyone else in its cast.
+### Section C, as built — "Tag Relationships" (2026-08-14)
+[#66](https://github.com/mranlett/ViLM/issues/66). `TagCooccurrence` in `LibraryCore`, surfaced as **Settings → Tag Relationships**. This is the co-occurrence idea above, and it delivers what that paragraph promised: the evidence for whether tag parentage is worth building.
+🚨 **The analysis splits into TWO findings, and keeping them apart is the whole design.** They call for opposite actions:
+| Finding | Shape | Argues for |
+| --- | --- | --- |
+| **Containment** | A almost never appears without B; B appears freely without A | A `tag_parent` edge. Both tags are correct and both stay |
+| **Merge** | Each nearly always brings the other | One idea under two names. One should go |
+The paragraph above treats them as one observation — *"either duplicates awaiting a merge or a parent and child"* — and a screen that reported them together would invite the wrong action on half its findings.
+**Measured on the drive library:** 2,077 videos, 42 tags in use, 4,558 edges → **6 containment candidates, 0 merges**. Each of the six is a narrow tag on 15–110 videos, ~95% contained in one of **two** broad tags (706 and 821 videos). ⭐ That is a two-parent hierarchy waiting to be declared — a far more specific answer than "tags co-occur", and exactly the input `tag_parent` needs.
+⭐ **Zero merges is a finding too.** It says the vocabulary is clean, which matches the archived *Tag Intelligence* conclusion that all tags are classified and nothing is pending.
+⚠️ **Thresholds are arguments with measured defaults**, not constants buried in the algorithm: ≥10 shared videos, ≥0.9 forward, <0.5 back. Loosening containment to 0.8 gives 11 findings and 0.7 gives 22, at which point the list stops being evidence and becomes a correlation table.
+**It reports and repairs nothing**, like Impossible Data — whether a broad tag is genuinely the parent of a narrow one is a judgement about meaning that counting cannot make. Both directions are shown as percentages so the reading can be disagreed with.
+🚨 **Mutation testing found a gap worth recording.** Deleting the independence bound left all 8 original tests passing, because a mutual pair is caught by the merge branch first and never reaches containment — the bound was decorative as far as the suite could tell. A middle-zone fixture (0.95 forward, 0.61 back: a heavy overlap, neither hierarchy nor merge) now kills that mutant. Ten tests; the implementation was also cross-checked against an independent SQL query over the same data, which agreed exactly.
 **Not built from section E:** graph-shaped duplicate detection, which wanted same-cast + same-studio + same-duration. `Asset` carries no duration, so that check has no input without going through `VideoDuplicateAnalyzer`'s own machinery. Roster implausibility was left out as too noisy for a first pass.
 ## Evidence
 Schema read at the current migration on 2026-08-06. Edge counts carried from the graph verification recorded in the previous session's handoff. `AgeAtRelease` usage established by reading its call sites: `InspectorView` and `AssetGridView`, both display; `AssetFilterCriteria` has no age field, and `ActorFilterCriteria`'s `minAge`/`maxAge` filter on a performer's age **today**, not at release.
@@ -139,3 +152,30 @@ Nothing in 143 passing plugin tests pinned it either way, which is how it surviv
 - **`ProposedCredit`**** is ****`ExpressibleByStringLiteral`**, so a plain name still reads as one and every fixture naming a performer and nothing else is unchanged.
 **1,190 core tests + 153 plugin tests, 0 failures.** Both platforms build. D9 clean.
 ⭐ **Billing is carried but never inferred.** The source states it or it stays nil — the order a list happened to arrive in says nothing about billing, and deriving it would manufacture a fact.
+---
+## Sections B and D, as built — 2026-08-14
+Two more of this spike's proposals shipped the same day as the tag work, both under a new **Settings → Explore the Graph** section.
+⚠️ **That section exists because of a mistake worth recording.** The first two of these were filed under *Find Problems*, beside Impossible Data and the repair tools. Nothing they report is wrong — they describe the library rather than correcting it — and shelving them with the repairs teaches the operator to read every finding as a defect.
+### Section B — Studio Signatures ([#67](https://github.com/mranlett/ViLM/issues/67))
+The operator's own question: *"studios feature different actors at different times."*
+⭐ **The doubt that prompted the measurement was the useful part.** He expected too few data points per actor to support this. Measured: **1,299 of 1,353 actors (96%) carry a career start year**, giving **3,052 placeable appearances** and **119 studios** above a five-appearance floor. The career-stage spread is wide — 682 appearances in a first two years, 922 at 2–5, 608 at 6–10, 805 beyond 10 — so studios genuinely differentiate.
+**Result: 7 discovery houses, 21 late-career labels, 91 established.**
+🚨 **Most studios are ordinary, and the screen says so.** "Established" is listed as the plain majority it is, so the two ends read as unusual rather than as the whole picture. A screen where every studio has a striking character is a screen nobody believes.
+🚨 **The median, never the mean.** This library contains a performer credited on a video released **forty-one years before** their recorded career start. One such record drags a mean into nonsense while barely moving a median — and the 35 impossible appearances are excluded AND counted, with the screen pointing at Impossible Data. A signature quietly computed from contradictory records is worse than no signature.
+⚠️ Observations and distinct performers are both shown: twenty appearances by one performer is not twenty pieces of evidence. 169 studios below the floor are stated too.
+### Section D — Never Worked Together ([#68](https://github.com/mranlett/ViLM/issues/68))
+*"Performers who share a studio but have never shared a video."*
+🚨 **The threshold turned out to BE the feature**, which this spike did not anticipate. The counts fall off a cliff:
+| Must share | Findings |
+| --- | --- |
+| 1 studio | **35,458** — 93% of everybody, meaningless |
+| 2 | 2,048 |
+| **3** | **285** ← default |
+| 4 | 48 |
+| 5 | 12 |
+⭐ **So the floor is exposed in the UI rather than buried.** Any fixed value is a judgement, and presenting one slice as the answer would be dishonest when the next value gives a sixth as many.
+⭐ **Ranked by exclusivity, not by count.** Three studios out of four is a much closer connection than three out of forty; the overlap orders the list and both raw counts are shown. The strongest real pair shares 3 of 4 and 3 — 75%. **No pair reaches 100%**, which is the realistic answer.
+⚠️ **Co-starring is read from the video regardless of whether that video carries a studio.** A pair who appeared together in an unattributed video have still appeared together; reading co-stars only from studio-bearing videos would have offered pairs the operator has plainly seen on screen together.
+### What all three have in common
+⭐ **Every one was measured against the real library BEFORE its screen was designed**, and in each case the measurement changed the design: the tag thresholds, the studio evidence floor and the median, and the two-hop floor being a control rather than a constant. This spike ordered the work by cost; the ordering that actually mattered was measure-then-build.
+⚠️ **All measurements were taken as counts and ratios only — never the library's vocabulary, titles or names.** The analysis lives in a public repository and its test fixtures use invented names throughout.

@@ -217,7 +217,7 @@ The Epic owns T18 (a generated path matches the grammar, and personal content ne
 - **F5 — Reversibility.** The recorded old→new full-path mapping restores the original layout exactly.
 - **F6 — Length ceiling.** A name that would exceed 255 bytes truncates deterministically at a field boundary and still parses.
 - **F7 — Grammar selection.** Each content kind selects its own grammar, and an undeclared kind selects none — the file is skipped, not guessed at.
-- **F7b — 🚨 A DECLARED kind whose grammar cannot be satisfied is also skipped, and reported with the field that is missing.** F7 covered undeclared only. The gap showed up the moment content was declared for real (2026-08-13): the Episodic grammar treats the series name and `SxxEyy` as structural — the truncation table lists them as never dropped — but only **173 of 2,077** videos carry an episode number and **113** a season. About 100 videos are now declared Episodic, so some of them cannot produce `S01E02` at all.
+- **F7b — 🚨 A DECLARED kind whose grammar cannot be satisfied is also skipped, and reported with the field that is missing.** F7 covered undeclared only. The gap showed up the moment content was declared for real (2026-08-13): the Episodic grammar treats the series name and `SxxEyy` as structural — the truncation table lists them as never dropped — but only **173 of 2,077** videos carry an episode number and **113** a season. About 100 videos are now declared Episodic **on the phone library** — corrected 2026-08-14. The **drive** library is entirely undeclared: 0 of 2,077 carry a `contentKind`, measured against the catalogue itself. So the ~100 Episodic figure and the 173/113 season-and-episode figures describe two DIFFERENT libraries, and only the latter pair is the drive.
   ✅ **DECIDED 2026-08-13 — skip and report.** Consistent with everything else here: a video quietly filed under an invented episode number is worse than one visibly waiting, and the report doubles as the work list for adding the numbers. The file stays in the root, exactly as an undeclared one does.
   ⚠️ Not the same as inventing a *default*. Defaulting the season to 01 is a common convention and was considered; the episode number has no such convention, and half a guess still produces a wrong path.
   ⭐ Film and Scene need no equivalent rule. Their at-risk field is the trailing release date — absent on 705 videos — and the grammar already handles that: a missing final segment truncates the name rather than leaving a placeholder, so `Title` alone is legal.
@@ -238,3 +238,25 @@ The Epic owns T18 (a generated path matches the grammar, and personal content ne
 | **D6** — "do not rename before release dates exist" | **Reversed 2026-08-04**: release date is unobtainable from filenames, so waiting is cancelling. Superseded again by N2, where relocation rides matching and the date is present by construction. |
 ## Evidence
 Measured 2026-08-03 against an attached library of 2,101 video files; character legality measured on the ExFAT volume itself. Related: *The Library Graph* (D5, D8, T18, T18b, T23, T24), *Filename Parsing & Bulk Rename Utility*, and *Actor & Tag Browsing* (R2, the age filter's release-date dependency).
+---
+## Step 3, part one — the plan screen, 2026-08-14
+**Settings → Relocation Plan.** Read-only. It shows where every video *would* be filed, what is waiting on what, and what would collide — and it moves nothing.
+🚨 **There is deliberately no Run button yet.** The mover, with its interruption safety (F4) and its reversibility (F5), is the next piece of work. A disabled button would imply the machinery exists; the screen says plainly that renaming has not been built and will not start until the plan is clean.
+### What it says about the drive library today
+|  |  |
+| --- | --- |
+| Headline | **0 to move · 2,077 cannot be filed yet** |
+| Reason, for every single one | *Not declared yet — say what it is and it can be filed* |
+| Collisions | 0 |
+⭐ **This is F7 working, not failing.** An undeclared kind selects no grammar and the file is skipped rather than guessed at. The planner is doing the right thing with nothing to work from.
+⚠️ **So the blocker for step 3 was never the mover — it is declaration**, which is deliberately a human act. The screen therefore names the one thing that would unblock the most files rather than leaving the operator to read a table: when *everything* is waiting on the same reason, it says so and points at **All Assets → What are these?**
+### 🚨 A measurement error corrected, and it was not a data loss
+The F7b note above said about 100 videos were declared Episodic. The drive has **zero**, and every other number in that passage — 173 episode numbers, 113 seasons, 2,077 assets — matches the drive exactly, which made it look like declarations had been lost.
+**They had not.** Confirmed by the Human Operator: the ~100 Episodic declarations were made on the **phone** library. Two libraries, two sets of figures, one passage that attributed both to the drive. The passage is corrected above.
+⚠️ **Worth keeping as a warning about this project's own evidence.** Nearly every measurement in these specs is quoted as a bare number with no library named. Where two libraries disagree, an unlabelled number is a coin flip — and this one had already been used to size the work.
+### Design decisions worth keeping
+- **Collisions are listed FIRST and block unconditionally.** A plan with movable files *and* a collision is still blocked; reporting the movable count first would read as permission to run.
+- **Unfilable videos are grouped by reason and counted**, because *"1,900 need declaring"* is a task and 1,900 rows is not. Examples are listed separately and open the video.
+- **`alreadyInPlace`**** is shown even though it is inert** — so that a plan with no moves is never mistaken for a library that was never examined.
+- **Single-library, like Identity Upgrade.** A path belongs to the library holding it; planning across an attached pair would propose moving files between two catalogues that each think they own them.
+- ⭐ **The readiness decision lives in ****`RelocationPlan`****, under test — only the wording is in the view.** The first draft worked it out in a private view function no test could reach, which is exactly the defect logged on 2026-08-14 in the same week. Six tests now cover it, including the one distinction that matters most on this library: *everything waiting* must never be reported as *nothing to do*.

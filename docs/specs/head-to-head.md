@@ -3,7 +3,7 @@
 
 ---
 spec: "Head to Head — Preference by Comparison"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P3
 notion: https://app.notion.com/p/Head-to-Head-Preference-by-Comparison-3b6adccaf428810abaa6c59fe3318f28
@@ -35,6 +35,21 @@ What differs per subject is only **how a contender is presented**:
 | Actor | Primary photo | Their gallery |
 | Video | Contact-sheet frame | The other frames |
 ⚠️ **A video never autoplays here.** The game is a rapid visual judgement; audio and playback belong to the player, and a video that starts talking mid-session ends the session.
+### 🔴 D1a — REVISED 2026-08-14: playback is allowed, on purpose, when the operator asks for it
+✅ **Decided by the Human Operator after using the screen.** In his words: the ask to the player is *"which video do you like better"*, and **that may be difficult to judge from the screenshots**. User-initiated, muted playback is *"a great way to give them the insight they need to play the game"*.
+⭐ **This is a correction to the design, not a concession.** D1 reasoned from the mechanic (a rapid visual judgement) and concluded stills were sufficient. That was wrong about the SUBJECT: a performer can be judged from a photograph because a photograph is what a performer looks like, but a video is a moving thing and a frame is a sample of it. Two contact sheets can look alike and the videos behind them not be alike at all. The elicitation only works if the question can actually be answered.
+**What is reversed:** exactly one thing — that the screen contains no player.
+**What survives, and is now enforced by construction rather than by absence:**
+| Constraint | How it holds |
+| --- | --- |
+| 🚨 **Never autoplays** | A player exists only after the play button is pressed, for the one side pressed. Nothing starts on its own, ever. |
+| 🚨 **Never audible** | Silent always, chosen over an unmute control: two contenders can play at once and two soundtracks compare nothing. Muted AND zero-volume, so clearing one flag later still cannot make the screen audible. |
+| ⭐ **Stills remain the resting state** | Every side opens on stills, which are already decoded and cost nothing. Playback is opt-in per side, and the player is destroyed the moment the pair advances — a video decoding behind a screen nobody is looking at is the battery cost the iOS epic exists to prevent. |
+| **The player still owns playback** | This is a preview for judging, not a viewing surface. Scrubbing comes from the native transport controls rather than a hand-built scrubber. |
+⭐ **Both sides can play at once**, which is the point — comparing motion against motion is the thing stills could not do. Comparing a playing video against a still is also allowed: forcing both sides into one mode would take away a reasonable way to look.
+### D1b — Full screen, on the operator's request
+Any contender expands: a video to a full player, a picture to a pinch-zoomable, swipeable photo. Full screen on iOS, a large window on macOS.
+⚠️ **One player surface per player, ever.** The expanded view shows the SAME `AVPlayer` so position and play state carry across, which means the inline card must render no player while expanded — AVKit does not tolerate two player views bound to one player, and the failure is a frozen frame or playback stolen back on dismissal.
 ## D1b — The game starts by choosing WHO is in it
 Added at the operator's direction. Before playing, pick the pool: gender, country, hair colour and traits for actors; studio, series, tags and cast for videos — whatever is relevant to the medium.
 ⭐ **This needs almost no new work.** `ActorFilterCriteria` and `AssetFilterCriteria` already exist, are already shared across screens, and already carry exactly these dimensions. The game gets a filter step by reusing the builder, not by inventing one.
@@ -101,10 +116,10 @@ Traceability: Notion spec → GitHub issue → code → device verification. A r
 | Schema: preferenceScore + count (D3) | [#32](https://github.com/mranlett/ViLM/issues/32) | 🟡 Implemented — `12d8f21`, migration v35. A TABLE, not columns — seven places rebuild an EntityProfile field-by-field and each would drop a defaulted argument |
 | Store: record and undo a comparison (D2, D7) | [#33](https://github.com/mranlett/ViLM/issues/33) | 🟡 Implemented — `0ec94e9`. Undoing a first-ever comparison DELETES the row rather than writing the seed back |
 | The game screen (D1, D5, D6, D7) | [#34](https://github.com/mranlett/ViLM/issues/34) | 🟡 Implemented — `279447b`. ⚠️ Awaiting device verification: layout, thumb reach and whether browse-then-choose feels right are what a build cannot confirm |
-| Leaderboard + derived stars (D2, D8) | [#35](https://github.com/mranlett/ViLM/issues/35) | ⚪ Not started |
-| Choose the pool (D1b) | [#36](https://github.com/mranlett/ViLM/issues/36) | ⚪ Not started |
-| Apply as ratings (D3) | [#37](https://github.com/mranlett/ViLM/issues/37) | ⚪ Not started |
-| Videos as a subject (D1) | [#38](https://github.com/mranlett/ViLM/issues/38) | ⚪ Not started |
+| Leaderboard + derived stars (D2, D8) | [#35](https://github.com/mranlett/ViLM/issues/35) | ✅ Done — closed 2026-08-12 after device confirmation |
+| Choose the pool (D1b) | [#36](https://github.com/mranlett/ViLM/issues/36) | ✅ Done — closed 2026-08-12 after device confirmation |
+| Apply as ratings (D3) | [#37](https://github.com/mranlett/ViLM/issues/37) | 🔴 REJECTED after playing, not deferred — see 2026-08-11 below |
+| Videos as a subject (D1) | [#38](https://github.com/mranlett/ViLM/issues/38) | 🟡 Implemented 2026-08-14 — awaiting device verification. See the 2026-08-14 section |
 ⚠️ #31 was built BEFORE the spec was sliced, which is the wrong order. The issue was opened and closed after the fact so the work is traceable; recorded here rather than tidied away.
 ⭐ Sequenced for **top tier first**, per the open question below: 32 → 33 → 34 → 35 is the shortest path to something playable that produces a usable ranking. 36–38 follow.
 ## Test strategy (Constitution Art. III)
@@ -175,9 +190,83 @@ Delivered except D1's video subject. Status stays **Approved** rather than Imple
 | issue | state |
 | --- | --- |
 | #34 game screen, #39–#43 what-else-are-they-in | closed |
-| #35 leaderboard, #36 choose the pool — built and wired, STILL OPEN pending device confirmation | not closed |
+| #35 leaderboard, #36 choose the pool | closed 2026-08-12 after device confirmation |
 | #37 "apply these as ratings" (D3) | 🔴 **rejected** |
-| #38 run the game over videos (D1) | deferred, still open |
+| #38 run the game over videos (D1) | 🟡 built 2026-08-14 — see below. Open, awaiting device verification |
 **D3 was rejected after playing, not deferred.** A rating is a judgement about a video; a preference score is a relative ranking built from comparisons. Pushing one into the other overwrites deliberate ratings with a derived number whose derivation nobody could audit afterwards. The leaderboard already delivers what D3 was for — seeing where a performer stands — without touching hand-entered data.
 **Since shipping:** the video count under each contender is now a disclosure matching *Known for* in the actor disambiguation sheet — a strip of stills from your own library, tapping through every contact-sheet frame full size.
 ⭐ #43's read-only promise is now asserted by test rather than by inspection: a whole-library comparison before and after a session. It is a negative property, so nothing on screen would have looked different had it been broken.
+---
+## Implementation state — 2026-08-14 — D1 is complete
+**#38 is built: the same game now runs over videos.** Status stays **Approved** rather than Implemented, for one reason only — the screen has not been confirmed on a device, and a row is Done only when the Human Operator has confirmed it.
+### One session engine, not two
+`PreferenceContender` and `recordComparison` were already subject-agnostic, so nothing about scoring changed. `HeadToHeadModel` now carries a `subject` and a `Side.Kind` — actor or video — and everything from `advance()` down is written in contender ids, knowing nothing about which it is ranking.
+⚠️ **A second model for videos was the obvious alternative and was rejected.** Undo is the subtle part — a first-ever comparison must DELETE a row rather than write the seed back — and two copies of that would drift apart.
+| New | What it is |
+| --- | --- |
+| `VideoHeadToHeadView` | The video card: frame, title, studio and year, cast disclosure |
+| `HeadToHeadBoard` | The chrome both games share: refusal, draw, neither, undo, tally, pool banner |
+| `ContactSheetFrames` | The frame slicer, extracted from the still browser so both callers use one |
+### 🚨 Nothing here touches AVFoundation
+D1 says a video never autoplays, and the implementation makes that structural rather than a promise: a contender's frames are sliced out of the contact sheet already on disk — poster first, then the twelve cells — so the screen has no path to playback at all.
+### Measured against the drive library, 2026-08-14
+|  |  |
+| --- | --- |
+| Videos eligible — a still on disk | **2,077 of 2,077** |
+| Frames per contender | 13 (poster plus a 4×3 sheet), sheets 1320×572 at ~350KB |
+| Videos with a hand rating to seed from (D9) | 10 |
+| Video standings before this | **0** — against **59** actor standings, untouched |
+⭐ **The eligibility gate never bites on this library, and that is the right result rather than a wasted check.** Every video already has a still, so the pool is the whole catalogue; a library with no contact sheets generated would otherwise have filled the game with black rectangles.
+⭐ **The two ladders are provably separate in the real database**, not only in a fixture: 59 actor standings sat there while the video subject started from zero.
+⚠️ Eligibility is ONE directory listing per library, not a `fileExists` per video. Two thousand videos would be four thousand stat calls on a screen whose whole point is that it opens instantly.
+### D1b, honoured with its own key
+The video pool is stored under `headToHeadVideoPoolStr`, **not** the video grid's saved default. Reusing the grid's filter would mean that browsing "unreviewed videos" silently changed what is in the game — two intents, two settings, which is the same rule the actor game follows. Unfiltered by default.
+### Tests — six new, both mutation-checked
+- 🚨 **T5 / #43 for the second subject.** The whole asset table is compared before and after a session. The read-only promise is a property of the FEATURE, not of the actor screen, and a video session writing a rating would be exactly as invisible.
+- A video choice lands on the video ladder, and the actor ladder stays empty.
+- **T8** — a video with no still is not offered, and the refusal names what is missing.
+- **T12** — a library with no stills is refused with a reason rather than entered and stuck.
+- **T11 / D1b** — the video pool narrows the field using the grid's own matcher.
+- **T9** — a hand-set rating seeds a video's first score, and is not written to.
+Mutations run: making every video eligible regardless of stills kills **3** tests; a video session writing to the actor ladder kills **3**. 61 app tests, 1,930 domain tests, both platforms build, D9 clean.
+⚠️ **One property is NOT covered by test and is stated rather than hidden:** which library a video standing is written to under federation. A single-library fixture resolves every contender to the primary, so the routing is asserted by reading rather than by running.
+### ⬜ What a build cannot answer, and Matt must
+The same list #34 carried, in a new shape: whether a 16:9 frame reads well at half-width on a phone, whether tapping through thirteen frames is the right pace, and whether title plus studio plus cast is enough to tell two similar-looking scenes apart.
+### Also closed while here
+**Head to Head had no in-app help entry at all** — a gap since #34, invisible to the help-coverage test because that test governs Settings tools only. One topic now covers both subjects.
+---
+## 2026-08-14, later — D1a: the contenders can be played
+[#65](https://github.com/mranlett/ViLM/issues/65) · built the same day #38 landed, after the operator used the screen.
+⭐ **The insight that produced it is worth keeping separate from the change it caused.** The screen was working exactly as specified and the specification was wrong about one thing: *"which video do you like better"* is a question a contact sheet frequently cannot answer. Nothing was broken; the elicitation simply could not always be performed. That is a failure mode a build cannot report and a test cannot catch — only using it finds it.
+| Delivered |  |
+| --- | --- |
+| `ContenderVideoSurface` | Stills ⇄ player per side; play, back-to-stills and expand in one corner overlay |
+| Side by side | Each side has its own player and its own mode, including one playing against one still |
+| Full screen | Any contender expands — a video to a player, a picture to a pinch-zoomable swipeable photo |
+| `StillBrowser` | Upgraded to zoom and paging, reusing the existing photo-browser components |
+| The actor game | Gained the same expand affordance, in the same corner |
+⚠️ **`FullScreenPhotoBrowser`**** was moved, not copied.** It had been a private nested type inside the profile header; the game needed the same behaviour, and a second implementation of pinch-zoom is two implementations to keep in step. It now sits beside the other full-screen browsers — the same reasoning that produced that file in the first place.
+### 🚨 Two traps found while building, recorded because neither is visible afterwards
+- **The mute setting is shared.** `VideoPlaybackController` mirrors every `isMuted` change into `UserDefaults`, so the real player remembers the operator's preference. Muting a preview through it would have reached out and silenced the actual player the next time a video was opened — a setting changed by a screen that never asked about it. The game owns a raw `AVPlayer` instead.
+- **One player surface per player.** The expanded view deliberately shares the card's `AVPlayer` so position and play state carry across, which means the card must render no player while expanded. AVKit does not tolerate two player views bound to one player, and it fails as a frozen frame or as playback stolen back on dismissal — both of which read as a bug in the game rather than in the arrangement.
+### ⬜ Open, for the device
+- Whether transport controls are usable at half-width on a phone, or whether scrubbing only really works expanded.
+- Whether two videos playing at once informs the judgement or merely crowds it.
+- ⚠️ The app configures no `AVAudioSession` anywhere, so on iOS a muted preview may still pause music already playing. Deliberately not changed on speculation: the category is app-global and the real player would inherit whatever the game set.
+---
+## ✅ Implemented — device-verified 2026-08-14
+**Status moved from Approved to Implemented.** It had stayed Approved since 2026-08-11 for one reason: D1's video subject. That is delivered, and the Human Operator has now confirmed the game on **both Mac and iPhone**, including the D1a playback fix.
+| Issue |  |
+| --- | --- |
+| #31–#34, #39–#43 | closed earlier |
+| #35 leaderboard, #36 pool | closed 2026-08-12 after device confirmation |
+| #37 apply-as-ratings | 🔴 **rejected** after playing — not deferred |
+| **#38 videos as a subject (D1)** | ✅ closed 2026-08-14, verified on Mac and iPhone |
+| **#65 playback and full screen (D1a)** | ✅ closed 2026-08-14, verified on iPhone |
+⭐ **Both remaining pieces of this spec came from USING it, not from building it.** D1a exists because a contact sheet frequently cannot answer *"which video do you like better"* — invisible until somebody played it. The wrong-video-keeps-playing defect was found the same way, minutes after shipping, having passed 62 tests and two platform builds.
+⚠️ **What that says about the traceability rule is worth keeping.** *A row is Done only once the Human Operator has confirmed it on a device* reads like ceremony until it produces a design change and a defect in one afternoon. Neither was reachable by any check that runs without a person.
+### What this spec now produces, for whoever consumes it next
+- A **single global preference score** per subject, on the node, with a comparison count beside it.
+- **Two ladders that never mix** — asserted in test, and observed in the real database: 59 actor standings sat untouched while the video subject started from zero.
+- **Derived stars only above ten comparisons**, recomputed on read and never written to `rating`.
+🚨 **The recommendation work this unlocks still has its gate, and the gate is data, not code.** *What this unlocks* below proposes preference propagating across the graph. It needs contenders above the confidence threshold to propagate FROM, and the spec's own warning applies: it should not be built — and certainly not judged — before then, or it will be dismissed as inaccurate when it is merely early. **Playing more is the prerequisite**, and that is now a pleasant task rather than a chore, which was the entire point.
