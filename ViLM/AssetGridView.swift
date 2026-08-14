@@ -71,6 +71,11 @@ struct AssetsGridView: View {
     @Binding var pendingSortAscending: Bool?
     
     @State private var isShowingFilterBuilder = false
+    /// #38 — the game, over videos. ⭐ Here rather than in Settings, for the
+    /// same reason the actor grid carries it: Head to Head is something the
+    /// operator plays, not a repair tool, and this is where the contenders
+    /// already are.
+    @State private var isShowingHeadToHead = false
     @State private var isShowingSaveCollection = false
     @State private var newCollectionName = ""
 
@@ -631,6 +636,10 @@ struct AssetsGridView: View {
             FilterBuilderView(assets: assets, criteria: $filterCriteria,
                               actorProfiles: entityProfiles)
         }
+        .sheet(isPresented: $isShowingHeadToHead) {
+            VideoHeadToHeadView(assets: assets, entityProfiles: entityProfiles,
+                                akaMap: akaMap, libraryURL: libraryURL)
+        }
         .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
         .sheet(isPresented: $isShowingHelp) {
             HelpView(initialTopicID: currentHelpTopicID)
@@ -724,6 +733,10 @@ struct AssetsGridView: View {
                         Button(action: { isShowingSaveCollection = true }) {
                             Label("Save Collection", systemImage: "folder.badge.plus")
                         }
+                    }
+
+                    Button(action: { isShowingHeadToHead = true }) {
+                        Label("Head to Head", systemImage: "square.split.2x1")
                     }
 
                     Menu {
