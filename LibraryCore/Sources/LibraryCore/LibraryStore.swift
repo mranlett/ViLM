@@ -288,26 +288,41 @@ public class LibraryStore {
         return new
     }
 
-    /// Performers recorded twice, found by their own alias lists.
+    /// Which videos are filed under each performer PROFILE, by id.
     ///
-    /// ⚠️ Counts videos across BOTH representations. A profile reachable only
-    /// through `video_performer` edges would otherwise read as having none, and
-    /// "0 videos" is the strongest argument for merging one away — so getting
-    /// it wrong argues for deleting the wrong half.
-    public func auditAliasSplits() throws -> [AliasSplitCandidate] {
-        // ⭐ Filtered by the type COLUMN. A prefix test returns zero rows on a
-        // re-keyed library, which would not fail — it would silently report
-        // that the library has no alias splits at all.
-        let profiles = try fetchAllEntityProfiles().filter { $0.type == "actor" }
+    /// ⚠️ Unions BOTH representations. A profile reachable only through
+    /// `video_performer` edges would otherwise read as having none, and "0
+    /// videos" is the strongest argument for merging one away — so getting it
+    /// wrong argues for deleting the wrong half. A SET, not a running total: a
+    /// performer carried by both a tag string and an edge on the same video
+    /// counts once, and adding the two sources would double every migrated
+    /// profile.
+    ///
+    /// 🚨 **No AKA folding, deliberately** — and this is the property the merge
+    /// screen depends on. `ActorCredits` folds an alias into its owner, which is
+    /// right when asking "what is this person in". It is wrong here: the
+    /// alias-split screen exists precisely because one profile's NAME is another
+    /// profile's alias, so folding would credit the alias's films to the
+    /// claimant and show the operator two identical filmographies for the two
+    /// records they are being asked to tell apart.
+    ///
+    /// ⭐ Extracted so the merge screen's filmography strip (#64) is drawn from
+    /// the very same union that produced the video count printed beside it. A
+    /// strip that showed five films under the words "7 videos" is the
+    /// contradiction this codebase keeps having to repair.
+    ///
+    /// - Parameter actorProfiles: the library's actor profiles, when the caller
+    ///   already holds them. Fetched otherwise.
+    public func videoIdsByPerformerProfile(
+        actorProfiles: [EntityProfile]? = nil) throws -> [String: Set<String>] {
+
+        let profiles = try actorProfiles
+            ?? fetchAllEntityProfiles().filter { $0.type == "actor" }
 
         let edges: [(String, String)] = try dbQueue.read { db in
             try Row.fetchAll(db, sql: "SELECT video_id, performer_id FROM video_performer")
                 .map { ($0["video_id"], $0["performer_id"]) }
         }
-        // ⚠️ A SET of video ids per profile, not a running total. A performer
-        // carried by both a tag string and an edge on the same video must count
-        // once — adding the two sources would double every migrated profile and
-        // make the merge look far more valuable than it is.
         var byProfile: [String: Set<String>] = [:]
         for (videoId, performerId) in edges {
             byProfile[performerId, default: []].insert(videoId)
@@ -324,7 +339,16 @@ public class LibraryStore {
                 byProfile[id, default: []].insert(asset.id.uuidString)
             }
         }
-        let counts = byProfile.mapValues(\.count)
+        return byProfile
+    }
+
+    /// Performers recorded twice, found by their own alias lists.
+    public func auditAliasSplits() throws -> [AliasSplitCandidate] {
+        // ⭐ Filtered by the type COLUMN. A prefix test returns zero rows on a
+        // re-keyed library, which would not fail — it would silently report
+        // that the library has no alias splits at all.
+        let profiles = try fetchAllEntityProfiles().filter { $0.type == "actor" }
+        let counts = try videoIdsByPerformerProfile(actorProfiles: profiles).mapValues(\.count)
 
         // ⭐ The duplicate the source already resolved. Read from the match
         // rows the upstream-deletions work already writes — no extra fetch, no

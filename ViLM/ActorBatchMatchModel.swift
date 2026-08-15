@@ -100,6 +100,15 @@ final class ActorBatchMatchModel: ObservableObject {
             // rather than per actor — it is a whole-table query.
             let awaitingEnrichment = (try? store.entityIdsAwaitingEnrichment()) ?? []
 
+            // 🚨 The privacy boundary for names (#62). Read ONCE per library —
+            // it is a pass over every asset — and consulted per performer down
+            // in `examine`, which is where a name search is actually built.
+            //
+            // ⚠️ An unreadable library yields an EMPTY map, and an empty map
+            // refuses everyone. That is the intended direction: "we could not
+            // ask" must not read the same as "nobody objected".
+            let exposures = (try? store.performerExposures()) ?? [:]
+
             for profile in profiles {
                 if cancelled { break }
                 current = displayName(profile)
@@ -112,7 +121,8 @@ final class ActorBatchMatchModel: ObservableObject {
                 }
 
                 let outcome = await examine(profile, in: libraryURL,
-                                            provider: provider, store: store)
+                                            provider: provider, store: store,
+                                            exposures: exposures)
                 report.record(outcome)
 
                 switch outcome {
@@ -232,7 +242,8 @@ final class ActorBatchMatchModel: ObservableObject {
 
     private func examine(_ profile: EntityProfile, in libraryURL: URL,
                          provider: any ActorMetadataProvider,
-                         store: LibraryStore) async -> ActorBatchOutcome {
+                         store: LibraryStore,
+                         exposures: [String: PerformerExposure.Refusal?]) async -> ActorBatchOutcome {
         let name = displayName(profile)
         guard !name.isEmpty else { return .skipped(reason: "no name") }
 
@@ -251,9 +262,27 @@ final class ActorBatchMatchModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines), !known.isEmpty {
             resolvedId = known
         } else {
+            // 🚨 THE privacy boundary for names (#62), and it is placed on this
+            // branch alone — deliberately. The branch above sends an opaque
+            // source id and no name at all, which is the same reasoning that
+            // left the video fetch-by-id paths out of #59. Gating the whole of
+            // `examine` would be stricter than the boundary needs and would
+            // stop enriching performers whose identity is already established.
+            //
+            // ⚠️ The provider is re-asked HERE, per performer, rather than
+            // reusing the one hoisted for the run. A run-level provider stays
+            // valid for every item regardless of what that item is, and a loop
+            // that merely declines to call it is "a skipped iteration" — a
+            // property of this caller, not a boundary (D10.3).
+            guard let searchProvider = PluginEnvironment.registry
+                .actorProviders(forPerformer: name, in: exposures).first else {
+                let refusal = PerformerExposure.refusal(forPerformer: name, in: exposures)
+                return .skipped(reason: refusal?.shortReason ?? "name not sent")
+            }
+
             let candidates: [PluginCandidate]
             do {
-                candidates = try await provider.search(name: name)
+                candidates = try await searchProvider.search(name: name)
             } catch {
                 return .failed(friendly(error))
             }

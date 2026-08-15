@@ -69,24 +69,60 @@ final class ContentNamingTests: XCTestCase {
                        "Harbour Nights/Season 01/Harbour Nights - S01E02 - Late Checkout.mkv")
     }
 
-    /// 🚨 F7b, and the reason it exists. Only 173 of 2,077 videos carry an
-    /// episode number, and about 100 are now declared episodic — so this is not
-    /// a hypothetical branch, it is most of them.
+    /// 🚨 F7b, and the reason it exists. Measured on the phone library: of 288
+    /// videos declared episodic, 71 lack an episode number and 19 a series
+    /// name. Not a hypothetical branch.
+    ///
+    /// ⚠️ The season is deliberately NOT in this list any more — see the test
+    /// below. These two are what the F7b argument actually protects: neither
+    /// has a convention to fall back on, and half a guess still produces a
+    /// wrong path.
     func testAnEpisodeMissingItsNumbersIsReportedNotInvented() {
         let noEpisode = ContentNaming.path(
             for: asset(kind: .episodic, series: "Harbour Nights", season: 1),
             in: context())
         XCTAssertEqual(noEpisode, .skipped(.episodicNeeds("episode number")))
 
-        let noSeason = ContentNaming.path(
-            for: asset(kind: .episodic, series: "Harbour Nights", episodeNumber: 2),
-            in: context())
-        XCTAssertEqual(noSeason, .skipped(.episodicNeeds("season number")))
-
         let noSeries = ContentNaming.path(
             for: asset(kind: .episodic, season: 1, episodeNumber: 2),
             in: context())
         XCTAssertEqual(noSeries, .skipped(.episodicNeeds("series name")))
+    }
+
+    /// ⭐ The season default — decided 2026-08-15, reversing F7b's original
+    /// call. 204 of 288 declared-episodic videos were missing ONLY a season,
+    /// so the rule that bundled season with episode was rejecting two hundred
+    /// files over the one field that has a real convention.
+    func testAMissingSeasonIsFiledAsSeasonOneRatherThanRejected() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .episodic, file: "x.mkv", series: "Harbour Nights",
+                       episodeNumber: 2, episode: "Late Checkout"),
+            in: context())
+        XCTAssertEqual(path(outcome),
+                       "Harbour Nights/Season 01/Harbour Nights - S01E02 - Late Checkout.mkv")
+    }
+
+    /// 🚨 The half of the decision that is easy to lose. The default fills the
+    /// PATH; it must never be written back to the asset, because the library
+    /// has not been told what season this is and storing 1 would turn a filing
+    /// convention into a claim about the work.
+    func testAssumingASeasonDoesNotChangeTheAsset() {
+        let subject = asset(kind: .episodic, file: "x.mkv", series: "Harbour Nights",
+                            episodeNumber: 2)
+        _ = ContentNaming.path(for: subject, in: context())
+        XCTAssertNil(subject.seasonNumber,
+                     "the assumed season must not leak into the record")
+        XCTAssertTrue(ContentNaming.assumesSeason(for: subject),
+                      "and the assumption must be reportable, so the dry run can state it")
+    }
+
+    /// ⚠️ A stated season still wins. The default is a fallback, not a rewrite.
+    func testAStatedSeasonIsNotOverwrittenByTheDefault() {
+        let subject = asset(kind: .episodic, file: "x.mkv", series: "Harbour Nights",
+                            season: 3, episodeNumber: 2)
+        XCTAssertEqual(path(ContentNaming.path(for: subject, in: context())),
+                       "Harbour Nights/Season 03/Harbour Nights - S03E02.mkv")
+        XCTAssertFalse(ContentNaming.assumesSeason(for: subject))
     }
 
     /// The episode title is the one droppable segment; series and marker are not.

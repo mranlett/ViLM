@@ -180,6 +180,13 @@ struct RelocationPlanView: View {
                                         .font(.caption.monospaced())
                                         .lineLimit(2).truncationMode(.middle)
                                 }
+                                // ⚠️ Marked on the row, not only totalled above.
+                                // Agreeing to "204 assumed seasons" in aggregate
+                                // is not the same as being able to see WHICH.
+                                if move.assumedSeason {
+                                    Label("Season 01 assumed", systemImage: "questionmark.circle")
+                                        .font(.caption2).foregroundStyle(.orange)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -194,7 +201,13 @@ struct RelocationPlanView: View {
                     label("Would be renamed", count: plan.moves.count,
                           icon: "arrow.right.doc.on.clipboard", tint: .accentColor)
                 } footer: {
-                    Text("Every one of these is shown before anything runs, and the old path is recorded so the whole layout can be put back.")
+                    // 🚨 The assumption is stated in the dry run, where it can
+                    // still be disagreed with. A season nobody declared, applied
+                    // to two hundred files and noticed afterwards, is exactly
+                    // the quiet wrongness this screen exists to prevent.
+                    Text(plan.assumedSeasonCount > 0
+                         ? "Every one of these is shown before anything runs, and the old path is recorded so the whole layout can be put back.\n\n\(plan.assumedSeasonCount) of them have no season recorded and will be filed under Season 01. That is a filing convention, not a claim — nothing is written to the video itself, so stating a real season later changes only where it goes."
+                         : "Every one of these is shown before anything runs, and the old path is recorded so the whole layout can be put back.")
                 }
             }
 

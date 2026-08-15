@@ -26,7 +26,23 @@ public struct PlannedMove: Equatable, Sendable, Identifiable {
     /// What to call it in the report.
     public let title: String
 
+    /// This file is being filed under a season it never stated (F7b, 2026-08-15).
+    ///
+    /// ⚠️ Carried per move rather than only totalled, so the plan screen can
+    /// mark the individual rows. The operator agreeing to "204 assumed seasons"
+    /// in aggregate is not the same as being able to see which 204.
+    public var assumedSeason: Bool = false
+
     public var id: UUID { assetId }
+
+    public init(assetId: UUID, from: String, to: String, title: String,
+                assumedSeason: Bool = false) {
+        self.assetId = assetId
+        self.from = from
+        self.to = to
+        self.title = title
+        self.assumedSeason = assumedSeason
+    }
 }
 
 /// One file that cannot be filed, and why.
@@ -57,6 +73,14 @@ public struct RelocationPlan: Equatable, Sendable {
     public let collisions: [PathCollision]
 
     public var isEmpty: Bool { moves.isEmpty && collisions.isEmpty }
+
+    /// How many moves file a video under a season it never stated.
+    ///
+    /// 🚨 Stated in the dry run, not discovered afterwards. The season default
+    /// (F7b, decided 2026-08-15) is what makes episodic content filable at all,
+    /// and it applies to the large majority of it — a number the operator
+    /// approves is a decision, the same number found later is a surprise.
+    public var assumedSeasonCount: Int { moves.filter(\.assumedSeason).count }
 
     /// ⚠️ A plan with collisions must not run. Reported as a property rather
     /// than left for each caller to remember.
@@ -155,7 +179,8 @@ public extension LibraryStore {
             case let .path(target):
                 guard target != asset.relativePath else { inPlace += 1; continue }
                 moves.append(.init(assetId: asset.id, from: asset.relativePath,
-                                   to: target, title: title))
+                                   to: target, title: title,
+                                   assumedSeason: ContentNaming.assumesSeason(for: asset)))
                 byTarget[target, default: []].append((asset.id, title))
             }
         }

@@ -101,6 +101,23 @@ public enum NamingOutcome: Equatable, Sendable {
 
 public enum ContentNaming {
 
+    /// The season an episodic video is filed under when it states none.
+    ///
+    /// ⚠️ A FILING convention, not a fact about the work — see `episodic(_:_:_:)`
+    /// for why it is never written back to the asset. Named rather than
+    /// inlined so `assumesSeason(for:)` and the tests refer to one value.
+    public static let assumedSeason = 1
+
+    /// Whether filing this asset would assume a season it has not stated.
+    ///
+    /// ⭐ Exposed so the dry run can count it. The plan has to be able to say
+    /// "204 of these will be filed under Season 01, which they do not claim" —
+    /// a silent assumption applied to two hundred files is precisely the quiet
+    /// wrongness this project keeps having to repair.
+    public static func assumesSeason(for asset: Asset) -> Bool {
+        asset.contentKind == .episodic && asset.seasonNumber == nil
+    }
+
     /// The performer cap in a scene filename. Three, per the operator's rule.
     ///
     /// ⚠️ A NAMING constraint only. A path has a length limit; the sidecar does
@@ -153,9 +170,37 @@ public enum ContentNaming {
     ///
     /// 🚨 F7b. The series name and `SxxEyy` are structural — the truncation
     /// rules list them as never dropped — so a video missing either cannot be
-    /// filed here and is reported instead. Defaulting the season to 01 was
-    /// considered and rejected: the episode number has no such convention, and
-    /// half a guess still produces a wrong path.
+    /// filed here and is reported instead.
+    ///
+    /// ## ⭐ The season default — DECIDED 2026-08-15, reversing an earlier call
+    ///
+    /// F7b originally rejected a default with: *"the episode number has no such
+    /// convention, and half a guess still produces a wrong path."* That
+    /// reasoning **bundles two fields the data separates.** Measured on the
+    /// phone library, of 288 videos declared episodic:
+    ///
+    /// - **204 are missing ONLY a season number** — series and episode present
+    /// - 71 are missing an episode number
+    /// - 19 are missing a series name
+    /// - **1** could be filed at all
+    ///
+    /// The episode objection is sound and still stands — those 71 are reported,
+    /// not guessed. It simply does not reach the 204, where the only assumed
+    /// field is the one with a genuine convention. The default takes episodic
+    /// filings from 1 to 205. The earlier decision was taken against an
+    /// estimate of "about 100 declared episodic"; this one is taken against the
+    /// count.
+    ///
+    /// 🚨 **The default fills the PATH, never the record.** `asset.seasonNumber`
+    /// is left `nil`, because the library has not been told what season this is
+    /// and writing 1 into it would turn a filing convention into a claim about
+    /// the work — inference wearing a declaration's clothes, which is the exact
+    /// thing `ContentKind` refuses to do. A season can be stated later and
+    /// nothing has to be un-guessed.
+    ///
+    /// ⚠️ And it is COUNTED. `RelocationPlan` reports how many moves assumed a
+    /// season, so 204 files landing in `Season 01` is something the operator
+    /// reads in the dry run rather than discovers afterwards.
     private static func episodic(_ asset: Asset, _ c: NamingContext, _ ext: String) -> NamingOutcome {
         guard let series = asset.videoName?.trimmed, !series.isEmpty else {
             return .skipped(.episodicNeeds("series name"))
@@ -163,9 +208,7 @@ public enum ContentNaming {
         guard let episode = asset.episodeNumber else {
             return .skipped(.episodicNeeds("episode number"))
         }
-        guard let season = asset.seasonNumber else {
-            return .skipped(.episodicNeeds("season number"))
-        }
+        let season = asset.seasonNumber ?? Self.assumedSeason
 
         let marker = String(format: "S%02dE%02d", season, episode)
         // The episode title is the one droppable segment here.

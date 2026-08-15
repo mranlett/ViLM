@@ -21,34 +21,11 @@ public enum ActorVideoCounts {
     public static func build(assets: [Asset],
                              profiles: EntityProfileIndex) -> [String: Int] {
 
-        // aka -> the actors who list it. Several actors may list the same alias,
-        // so the value is a set rather than a single owner.
-        //
-        // ⭐ Three separate id assumptions used to live in this loop: filtering
-        // by `hasPrefix("actor:")`, deriving the canonical name with
-        // `dropFirst`, and iterating a dictionary keyed by id. After the re-key
-        // the filter matches nothing, so the whole AKA map would come out empty
-        // and every alias would silently stop crediting its owner.
-        var akaOwners: [String: Set<String>] = [:]
-        for profile in profiles.actors {
-            let canonical = profile.name
-            for aka in profile.akas where !aka.isEmpty {
-                akaOwners[aka, default: []].insert(canonical)
-            }
-        }
-
-        var counts: [String: Int] = [:]
-        for asset in assets {
-            var credited = Set<String>()
-            for name in asset.actors {
-                // The literal name always credits: an actor with no profile row
-                // still has videos.
-                credited.insert(name)
-                if let owners = akaOwners[name] { credited.formUnion(owners) }
-            }
-            for actor in credited { counts[actor, default: 0] += 1 }
-        }
-        return counts
+        // ⭐ The crediting rule itself lives in `ActorCredits` — this used to
+        // carry its own copy, as did `ActorKnownFor`, and a third consumer
+        // (`PerformerExposure`, #62) is what made three copies of a subtle rule
+        // untenable. Counting is all that is left here.
+        ActorCredits.byActor(assets: assets, profiles: profiles).mapValues(\.count)
     }
 
     /// The previous per-actor computation, kept so a test can assert the fast

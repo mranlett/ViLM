@@ -67,25 +67,11 @@ public enum ActorKnownFor {
                              profiles: EntityProfileIndex,
                              limit: Int = 3) -> [String: Summary] {
 
-        var akaOwners: [String: Set<String>] = [:]
-        for profile in profiles.actors {
-            let canonical = profile.name
-            for aka in profile.akas where !aka.isEmpty {
-                akaOwners[aka, default: []].insert(canonical)
-            }
-        }
-
-        var byActor: [String: [Asset]] = [:]
-        for asset in assets {
-            var credited = Set<String>()
-            for name in asset.actors {
-                credited.insert(name)
-                if let owners = akaOwners[name] { credited.formUnion(owners) }
-            }
-            for actor in credited { byActor[actor, default: []].append(asset) }
-        }
-
-        return byActor.mapValues { videos in
+        // ⭐ Shares `ActorCredits` with `ActorVideoCounts`, which is what makes
+        // the agreement above structural rather than something a test has to
+        // keep watch over. The test remains, now pinning that neither caller
+        // re-derives the rule.
+        ActorCredits.byActor(assets: assets, profiles: profiles).mapValues { videos in
             Summary(titles: bestTitles(from: videos, limit: limit),
                     videoCount: videos.count,
                     videos: refs(from: videos))
@@ -98,7 +84,11 @@ public enum ActorKnownFor {
     /// titles above them led the operator to expect. An untitled video is still
     /// listed — it is one of the videos the count counted — under whatever
     /// `displayTitle` can produce for it.
-    static func refs(from videos: [Asset]) -> [VideoRef] {
+    /// ⭐ Public so a caller that determined the video set by a DIFFERENT rule
+    /// can still present it in the same order and under the same titles — the
+    /// merge screen (#64) selects per profile without AKA folding, and the
+    /// ordering and naming should not fork just because the selection did.
+    public static func refs(from videos: [Asset]) -> [VideoRef] {
         videos
             .sorted { orderedBefore(($0.releaseDate, displayTitle($0)),
                                     ($1.releaseDate, displayTitle($1))) }

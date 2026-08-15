@@ -30,7 +30,38 @@ final class ActorEnrichmentModel: ObservableObject {
         case noMatches
         /// A match was found and it proposes nothing we do not already have.
         case nothingToApply
+        /// The privacy boundary declined to send this performer's name (#62).
+        ///
+        /// ⚠️ Its own case, NOT `failed`. Nothing went wrong — the library
+        /// declined to send a name, which is the feature working. `noMatches`
+        /// above carries the same distinction ("not an error"), and a refusal
+        /// dressed as a failure invites the operator to retry it.
+        case refusedByBoundary(PerformerExposure.Refusal)
         case failed(String)
+    }
+
+    /// Whether this performer's name may be sent at all (#62).
+    ///
+    /// 🚨 Starts at `.checking`, and `.checking` REFUSES. The exposure is an
+    /// asset scan, so it necessarily arrives after the model does — and treating
+    /// "not established yet" as permission would send the name in precisely the
+    /// window where nothing can vouch for it. Same asymmetry as everywhere else
+    /// in this boundary: fail-open cannot be taken back.
+    enum Exposure: Equatable {
+        case checking
+        case allowed
+        case refused(PerformerExposure.Refusal)
+    }
+
+    @Published private(set) var exposure: Exposure = .checking
+
+    /// Records what the library says about this performer.
+    ///
+    /// ⚠️ Takes the refusal rather than computing it: the model has no store and
+    /// deliberately no library access, and the exposure map is one pass over
+    /// every asset — the caller holds it.
+    func recordExposure(_ refusal: PerformerExposure.Refusal?) {
+        exposure = refusal.map(Exposure.refused) ?? .allowed
     }
 
     @Published private(set) var phase: Phase = .idle
@@ -166,6 +197,22 @@ final class ActorEnrichmentModel: ObservableObject {
     // MARK: - Flow
 
     func search(name: String) async {
+        // 🚨 THE privacy boundary for names (#62), and it sits above the
+        // request rather than inside it. Every path into this model's network
+        // use — the sheet's opening search and the operator's re-spelled retry
+        // — funnels through here, so there is no route that builds a search and
+        // checks afterwards.
+        //
+        // ⚠️ `.checking` refuses along with `.refused`. See `Exposure`.
+        guard case .allowed = exposure else {
+            if case let .refused(refusal) = exposure {
+                phase = .refusedByBoundary(refusal)
+            } else {
+                phase = .refusedByBoundary(.noVideos)
+            }
+            return
+        }
+
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             phase = .failed("This actor has no name to search for.")

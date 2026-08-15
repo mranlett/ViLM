@@ -126,8 +126,41 @@ public final class PluginRegistry: @unchecked Sendable {
     ///
     /// The enrichment action is absent when this is empty, goes straight to
     /// search when it has one entry, and shows a source picker when it has more.
+    ///
+    /// ⚠️ Presence checks only — "is anything installed at all", for showing or
+    /// hiding an action. It hands back a usable provider, so anything that
+    /// actually SEARCHES BY NAME must come through `actorProviders(forPerformer:in:)`
+    /// instead. Same division as `installedVideoProviders()` below.
     public func installedActorProviders() -> [any ActorMetadataProvider] {
         installed.compactMap { $0 as? any ActorMetadataProvider }
+    }
+
+    /// Actor providers that may be used **for this performer**.
+    ///
+    /// 🚨 The privacy boundary for names (#62), and the sibling of
+    /// `videoProviders(for:)`. A performer whose videos are all personal, all
+    /// undeclared, or absent entirely gets an empty list — there is no provider
+    /// to call, so no path exists that constructs a search and checks afterwards.
+    ///
+    /// ⚠️ Takes the exposure map rather than computing it, because it is one
+    /// pass over every asset in the library and a batch run would otherwise pay
+    /// for it per performer. The caller builds it once with
+    /// `PerformerExposure.build` and **re-asks here for every performer** — a
+    /// provider hoisted once for a run stays valid for every item regardless of
+    /// what that item is, which is precisely the "a skipped iteration is not an
+    /// exclusion" failure D10.3 names.
+    public func actorProviders(forPerformer name: String,
+                               in exposures: [String: PerformerExposure.Refusal?])
+    -> [any ActorMetadataProvider] {
+        refusalForActorLookup(ofPerformer: name, in: exposures) == nil
+            ? installedActorProviders() : []
+    }
+
+    /// The same gate, phrased for a caller that wants to explain itself.
+    public func refusalForActorLookup(ofPerformer name: String,
+                                      in exposures: [String: PerformerExposure.Refusal?])
+    -> PerformerExposure.Refusal? {
+        PerformerExposure.refusal(forPerformer: name, in: exposures)
     }
 
     public func installedVideoProviders() -> [any VideoMetadataProvider] {

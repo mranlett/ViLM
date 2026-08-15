@@ -38,6 +38,38 @@ struct AliasSplitMergeView: View {
     /// Candidates the operator has explicitly set aside this session.
     @State private var dismissed: Set<String> = []
 
+    // MARK: - The visual evidence (#64)
+    //
+    // ⭐ Resolved HERE rather than carried on `AliasSplitCandidate.Claimant`,
+    // which was the choice the issue recommended and the right one: the audit's
+    // job is deciding WHICH pairs to offer, and what a face looks like has no
+    // bearing on that. Putting photos in the finding would make a pure,
+    // testable function depend on the photo store.
+    //
+    // ⚠️ Loaded in the SAME detached pass as the audit. A second read on the
+    // main actor would stall the sheet on a 2,000-asset library.
+
+    /// Each claimant's OWN films, by profile id, newest first.
+    ///
+    /// 🚨 Keyed by profile id and selected WITHOUT AKA folding — see
+    /// `LibraryStore.videoIdsByPerformerProfile`. The obvious choice,
+    /// `ActorKnownFor.build`, folds an alias into its owner, and on this screen
+    /// that is exactly backwards: the two records being compared are an alias
+    /// and its claimant, so folding would draw the same filmography under both
+    /// and destroy the comparison the operator opened this screen to make.
+    ///
+    /// ⭐ It also comes from the same union as the video count printed beside
+    /// the name, so the strip can never contradict that number.
+    @State private var filmsByProfile: [String: [ActorKnownFor.VideoRef]] = [:]
+    /// Profiles by id, for photos. Claimants carry an id; crediting carries a name.
+    @State private var profilesById: [String: EntityProfile] = [:]
+    /// Assets by id, so a `VideoRef` can become something showable.
+    @State private var assetsById: [UUID: Asset] = [:]
+
+    /// The video whose stills are open, and the profile whose gallery is.
+    @State private var enlargedVideo: Asset?
+    @State private var enlargedPhotoId: String?
+
     private var visible: [AliasSplitCandidate] {
         candidates.filter { !dismissed.contains($0.id) }
     }
@@ -85,6 +117,27 @@ struct AliasSplitMergeView: View {
                     Text("Every video, photo and alias moves across. This cannot be undone, and two performers merged by mistake cannot be separated again.")
                 }
                 .task { await load() }
+                // The video's own stills, exactly as Head to Head shows them —
+                // tap a film, then page through its contact-sheet frames.
+                .sheet(item: $enlargedVideo) { asset in
+                    StillBrowser(asset: asset) { enlargedVideo = nil }
+                }
+                // Full screen on a phone, a sheet on the desktop — the rule
+                // every other photo expansion in the app follows.
+                .fullScreenCoverOnPhone(isPresented: Binding(
+                    get: { enlargedPhotoId != nil },
+                    set: { if !$0 { enlargedPhotoId = nil } }
+                )) {
+                    if let id = enlargedPhotoId, let profile = profilesById[id] {
+                        FullScreenPhotoBrowser(
+                            libraryURL: libraryURL,
+                            entityId: id,
+                            primaryPhotoUrl: profile.photoUrl,
+                            identifiers: ["primary"] + profile.galleryUrls,
+                            initialIdentifier: "primary",
+                            onClose: { enlargedPhotoId = nil })
+                    }
+                }
         }
         .macFormSheet(minWidth: 620, minHeight: 540)
     }
@@ -198,35 +251,180 @@ struct AliasSplitMergeView: View {
         }
     }
 
+    /// One claimant: face, name, the settling facts, and their filmography.
+    ///
+    /// 🚨 #64 — deciding *"are these two the same person?"* is a visual
+    /// judgement, and this screen used to offer none of the visual evidence. It
+    /// asked for an identification while withholding the two things an
+    /// identification is actually made from, both of which the library already
+    /// held. A birth year is far weaker evidence than a face and a filmography.
     @ViewBuilder
     private func row(_ claimant: AliasSplitCandidate.Claimant, note: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(claimant.displayName).fontWeight(.medium)
-                if claimant.isMatched {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.caption2).foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                face(for: claimant)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(claimant.displayName).fontWeight(.medium)
+                        if claimant.isMatched {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption2).foregroundStyle(.green)
+                        }
+                        Spacer()
+                        Text("\(claimant.videoCount) video\(claimant.videoCount == 1 ? "" : "s")")
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    // The two facts that most often settle it: whether a lookup
+                    // has confirmed the profile, and whether the birth years
+                    // agree.
+                    Text([note, claimant.birthYear.map { "born \($0)" }]
+                            .compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
-                Spacer()
-                Text("\(claimant.videoCount) video\(claimant.videoCount == 1 ? "" : "s")")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
-            // The two facts that most often settle it: whether a lookup has
-            // confirmed the profile, and whether the birth years agree.
-            Text([note, claimant.birthYear.map { "born \($0)" }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                .font(.caption2).foregroundStyle(.secondary)
+
+            videoStrip(for: claimant)
         }
     }
+
+    /// The claimant's photo, tappable into their gallery.
+    ///
+    /// ⚠️ The chevron badge appears only when there IS more than one picture. A
+    /// control that does nothing teaches the operator to ignore the control —
+    /// the same rule the Head to Head card's gallery counter follows.
+    @ViewBuilder
+    private func face(for claimant: AliasSplitCandidate.Claimant) -> some View {
+        let profile = profilesById[claimant.id]
+        let galleryCount = 1 + (profile?.galleryUrls.count ?? 0)
+
+        Button {
+            enlargedPhotoId = claimant.id
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                ProfileImageView(libraryURL: libraryURL,
+                                 entityId: claimant.id,
+                                 photoUrl: profile?.photoUrl) { image in
+                    Color.clear.overlay(image.resizable().scaledToFill(), alignment: .top)
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay(Image(systemName: "person.fill")
+                            .font(.system(size: 20)).foregroundStyle(.secondary))
+                }
+                .frame(width: 54, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                if galleryCount > 1 {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 8))
+                        .padding(3)
+                        .background(.thinMaterial, in: Circle())
+                        .padding(2)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(profile == nil)
+    }
+
+    /// The films in YOUR library for this claimant, as stills.
+    ///
+    /// ⭐ Selected by PROFILE ID from the same union that produced the count
+    /// beside the name, so the strip can never disagree with it. Re-selecting
+    /// here by name would fork the rule and drift from it.
+    @ViewBuilder
+    private func videoStrip(for claimant: AliasSplitCandidate.Claimant) -> some View {
+        let all = filmsByProfile[claimant.id] ?? []
+        let shown = all.prefix(stripLimit)
+
+        if !shown.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(Array(shown), id: \.id) { ref in
+                        if let asset = assetsById[ref.id] {
+                            Button {
+                                enlargedVideo = asset
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    VideoThumbnailView(
+                                        asset: asset,
+                                        libraryURL: LibrarySession.shared.url(for: asset.id))
+                                        .frame(width: 80, height: 45)
+                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    Text(ref.title)
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .frame(width: 80, alignment: .leading)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    // ⚠️ Whatever is cut is COUNTED and said out loud. A strip
+                    // that quietly stops reads as a performer with fewer videos
+                    // than the line above it just claimed.
+                    if all.count > stripLimit {
+                        Text("+\(all.count - stripLimit)")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .frame(height: 45)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// ⚠️ Bounded, for the same reason Head to Head bounds its strip: a
+    /// performer with two hundred videos would otherwise build two hundred
+    /// thumbnail views inside a row the operator scrolls past in a second.
+    private var stripLimit: Int { 12 }
 
     private func load() async {
         do {
             let url = libraryURL
-            let found = try await Task.detached(priority: .userInitiated) {
-                try LibraryStore(at: url).auditAliasSplits()
+            // ⚠️ ONE detached pass for the audit AND the evidence (#64). Two
+            // passes would read the same 2,000 assets twice, and a second read
+            // landing after the first would repaint the list under the
+            // operator's finger.
+            let loaded = try await Task.detached(priority: .userInitiated) {
+                () -> (candidates: [AliasSplitCandidate],
+                       films: [String: [ActorKnownFor.VideoRef]],
+                       profiles: [String: EntityProfile],
+                       assets: [UUID: Asset]) in
+                let store = try LibraryStore(at: url)
+                let found = try store.auditAliasSplits()
+                let assets = try store.fetchAllAssets()
+                let profiles = try store.fetchAllEntityProfiles()
+                let assetsById = Dictionary(assets.map { ($0.id, $0) },
+                                            uniquingKeysWith: { a, _ in a })
+
+                // Only the profiles actually on screen — a library with 1,300
+                // performers has a handful of candidates, and ordering the
+                // other 1,290 filmographies would be work nobody looks at.
+                let onScreen = Set(found.flatMap { [$0.alias.id] + $0.claimants.map(\.id) })
+                let byProfile = try store.videoIdsByPerformerProfile()
+                let films = byProfile
+                    .filter { onScreen.contains($0.key) }
+                    .mapValues { ids in
+                        ActorKnownFor.refs(from: ids
+                            .compactMap { UUID(uuidString: $0) }
+                            .compactMap { assetsById[$0] })
+                    }
+
+                return (found, films,
+                        Dictionary(profiles.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+                        assetsById)
             }.value
             await MainActor.run {
-                self.candidates = found
+                self.candidates = loaded.candidates
+                self.filmsByProfile = loaded.films
+                self.profilesById = loaded.profiles
+                self.assetsById = loaded.assets
                 self.isLoading = false
             }
         } catch {

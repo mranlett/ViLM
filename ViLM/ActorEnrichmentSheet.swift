@@ -176,6 +176,12 @@ struct ActorEnrichmentSheet: View {
                     // operator last typed for this actor.
                     if searchTerm.isEmpty { searchTerm = actorName }
                     await loadLocalStudios()
+                    // 🚨 BEFORE the search, always (#62). The model refuses
+                    // while the exposure is unknown, so ordering these the
+                    // other way round would not leak a name — it would simply
+                    // refuse every lookup. The sequencing is what makes the
+                    // boundary usable, not what makes it safe.
+                    await loadExposure()
                     await model.search(name: actorName)
                 }
         }
@@ -287,6 +293,17 @@ struct ActorEnrichmentSheet: View {
                 // as "nothing to do" — and there is something to do: the
                 // identity still has to be recorded.
                 description: Text("\(model.provider.displayName) has nothing this profile is missing.\n\nConfirm still records WHICH record this is, which is what takes this actor off the missing-identity list.")
+            )
+
+        // 🚨 #62. Reads as a decision the library made, not as a failure —
+        // a lock, not a warning triangle, and no retry offered. Retrying is
+        // exactly the wrong instinct: the way past this is to declare the
+        // videos, and the message says so.
+        case .refusedByBoundary(let refusal):
+            ContentUnavailableView(
+                "Name Not Sent",
+                systemImage: "lock.fill",
+                description: Text(refusal.reason)
             )
 
         case .failed(let message):
@@ -462,6 +479,31 @@ struct ActorEnrichmentSheet: View {
             (try? LibraryStore(at: libraryURL).studios(forActor: name)) ?? []
         }.value
         localStudios = found
+    }
+
+    /// Ask the library whether this performer's name may be sent (#62).
+    ///
+    /// 🚨 The opposite failure policy to `loadLocalStudios` above, and
+    /// deliberately so. A studio hint that cannot be read is an aid the operator
+    /// loses; an exposure that cannot be read is a permission nobody granted. So
+    /// an unreadable library REFUSES here, where it merely degrades there.
+    ///
+    /// ⚠️ A sheet with no `libraryURL` also refuses. There is no library to ask,
+    /// and "nobody told me which library" is not consent.
+    private func loadExposure() async {
+        guard let libraryURL else {
+            model.recordExposure(.noVideos)
+            return
+        }
+        let name = actorName
+        let refusal = await Task.detached(priority: .userInitiated) {
+            () -> PerformerExposure.Refusal? in
+            guard let exposures = try? LibraryStore(at: libraryURL).performerExposures() else {
+                return .noVideos
+            }
+            return PerformerExposure.refusal(forPerformer: name, in: exposures)
+        }.value
+        model.recordExposure(refusal)
     }
 
     private func loadWorks(_ candidate: PluginCandidate) async {
