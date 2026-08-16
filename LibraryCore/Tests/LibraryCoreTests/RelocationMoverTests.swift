@@ -449,6 +449,98 @@ final class RelocationMoverTests: XCTestCase {
         XCTAssertTrue(exists("second.mp4"), "the refused run must not have moved anything")
     }
 
+    // MARK: - 🚨 N2 · relocation rides matching
+
+    /// The happy path: one confirmed match, one file filed, and the new path
+    /// handed back so the caller can keep its own copy of the record in step.
+    func testN2AMatchedVideoIsFiledImmediately() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+
+        let outcome = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-1")
+
+        guard case let .moved(to) = outcome else { return XCTFail("expected a move, got \(outcome)") }
+        XCTAssertTrue(exists(to))
+        XCTAssertFalse(exists("old name.mp4"))
+        XCTAssertEqual(try reloaded(asset.id)?.relativePath, to)
+    }
+
+    /// 🚨 The trap this returns a path to avoid. The caller persists whatever
+    /// comes back from `apply()`; if that asset still carried the OLD path it
+    /// would be written straight over the row the move just updated, and the
+    /// file would then read as missing — a match that loses its own video.
+    func testN2TheNewPathIsReportedSoACallerCannotWriteTheOldOneBack() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+
+        guard case let .moved(to) = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-1") else {
+            return XCTFail("expected a move")
+        }
+        XCTAssertNotEqual(to, asset.relativePath)
+        XCTAssertEqual(to, try reloaded(asset.id)?.relativePath,
+                       "the reported path and the stored path must be the same string")
+    }
+
+    /// F10 — an undeclared video is not a failure. It stays in the root, stays
+    /// usable, and says why rather than reporting an error the operator would
+    /// go looking for a cause of.
+    func testN2AnUndeclaredVideoIsReportedAsNotFilableRatherThanFailed() throws {
+        let asset = try addFile("old name.mp4", kind: nil)
+        guard case .notFilable = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-1") else {
+            return XCTFail("expected notFilable")
+        }
+        XCTAssertTrue(exists("old name.mp4"))
+        XCTAssertEqual(try reloaded(asset.id)?.relativePath, "old name.mp4")
+    }
+
+    /// 🚨 T23 restated for this path: a move that cannot happen never costs the
+    /// match. It is REPORTED, not thrown — throwing would tempt a caller into
+    /// rolling back the very thing that has to survive.
+    func testN2AFailedMoveIsReportedAndNeverThrows() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+        try store.recordMatch(NodeMatch(nodeId: asset.id.uuidString, source: "Example Source",
+                                        sourceId: "abc123", method: .fingerprint),
+                              isVideo: true)
+        // Occupy the target so the move cannot proceed.
+        let plan = try store.relocationPlan(limitedTo: [asset.id])
+        guard let target = plan.moves.first?.to else { return XCTFail("no move planned") }
+        let occupied = dir.appendingPathComponent(target)
+        try FileManager.default.createDirectory(at: occupied.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data("someone else".utf8).write(to: occupied)
+
+        guard case .failed = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-1") else {
+            return XCTFail("expected failed")
+        }
+
+        XCTAssertEqual(try store.videoMatches(source: "Example Source")
+                        .filter { $0.nodeId == asset.id.uuidString }.count, 1,
+                       "the match must survive a failed move")
+        XCTAssertTrue(exists("old name.mp4"), "and the file must stay where it is")
+    }
+
+    /// ⚠️ A scoped plan sees only its own asset, so a video already where it
+    /// belongs must report that rather than proposing a move to itself.
+    func testN2AVideoAlreadyInPlaceIsNotMovedAgain() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+        _ = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-1")
+
+        let second = RelocationMover(store: store).relocateAfterMatch(
+            assetId: asset.id, libraryURL: dir, runId: "match-2")
+        XCTAssertEqual(second, .alreadyInPlace)
+    }
+
     // MARK: - Refusals
 
     func testAPlanWithCollisionsRefusesToRun() throws {

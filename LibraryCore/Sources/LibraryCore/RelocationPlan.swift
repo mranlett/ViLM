@@ -145,9 +145,22 @@ public struct RelocationPlan: Equatable, Sendable {
 public extension LibraryStore {
 
     /// The whole plan, computed without touching the filesystem.
+    ///
+    /// - Parameter limitedTo: plan only these assets (N2 — relocation rides
+    ///   matching, so one confirmed match needs one video's answer, not two
+    ///   thousand).
+    ///
+    ///   🚨 A scoped plan CANNOT see collisions with videos outside the scope.
+    ///   That is a deliberate trade and not an oversight: the whole-library plan
+    ///   remains the place collisions are found before a bulk run, and the mover
+    ///   still refuses a target that is already occupied on disk. So a scoped
+    ///   move is refused rather than overwriting — it just learns later than the
+    ///   dry run would have told it.
     func relocationPlan(personalFolder: String = "Personal",
-                        unfiledFolder: String = "Unfiled") throws -> RelocationPlan {
+                        unfiledFolder: String = "Unfiled",
+                        limitedTo: Set<UUID>? = nil) throws -> RelocationPlan {
         let assets = try fetchAllAssets()
+            .filter { limitedTo?.contains($0.id) ?? true }
         let profiles = try fetchAllEntityProfiles()
         var byId: [String: EntityProfile] = [:]
         for p in profiles { byId[p.id] = p }

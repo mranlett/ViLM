@@ -221,6 +221,58 @@ public struct RelocationMover {
         return a == b
     }
 
+    // MARK: - N2 — relocation rides matching
+
+    /// What became of a single video offered for relocation at match time.
+    public enum MatchRelocation: Equatable, Sendable {
+        /// Moved. Carries the new path so the caller can keep its own copy of
+        /// the record in step — 🚨 without this the caller writes the asset it
+        /// was holding and puts the OLD path straight back over the new one.
+        case moved(to: String)
+        /// The grammar cannot file it yet — undeclared, or a field missing.
+        /// Not a failure: the file stays where it is and stays usable (F10).
+        case notFilable(NamingSkip)
+        /// Already where it belongs.
+        case alreadyInPlace
+        /// Tried and could not. ⚠️ Reported, never thrown — see below.
+        case failed(String)
+    }
+
+    /// Relocates ONE video, immediately after its match was confirmed (N2).
+    ///
+    /// ⭐ Per the Epic's D8, this is the moment a video's metadata is at its
+    /// best and an operator is present — so resumability is free, a partly
+    /// migrated library is the normal state rather than an error, and the blast
+    /// radius of a mistake is one file instead of the library.
+    ///
+    /// 🚨 **Never throws for a filesystem problem.** T23 says a failed move must
+    /// never cost a match, and the match is already committed by the time this
+    /// runs. Throwing here would tempt a caller into rolling back the very
+    /// thing that must survive; a `.failed` case cannot be mistaken for a
+    /// reason to undo the match.
+    ///
+    /// ⚠️ Deliberately NOT called from unattended batch runs. N2's justification
+    /// is that an operator is present to see what happened — which is true of a
+    /// confirmation and false of a hundred videos matched overnight. Those stay
+    /// with the whole-library plan, where the moves are read before they run.
+    public func relocateAfterMatch(assetId: UUID, libraryURL: URL,
+                                   runId: String) -> MatchRelocation {
+        do {
+            let plan = try store.relocationPlan(limitedTo: [assetId])
+
+            if let skip = plan.unfilable.first(where: { $0.assetId == assetId }) {
+                return .notFilable(skip.skip)
+            }
+            guard let move = plan.moves.first(where: { $0.assetId == assetId }) else {
+                return .alreadyInPlace
+            }
+            try perform(move, libraryURL: libraryURL, runId: runId)
+            return .moved(to: move.to)
+        } catch {
+            return .failed((error as? LocalizedError)?.errorDescription ?? "\(error)")
+        }
+    }
+
     // MARK: - F5 — putting it back
 
     /// Reverses a completed run, newest move first.

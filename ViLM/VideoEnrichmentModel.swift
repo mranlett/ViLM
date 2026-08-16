@@ -823,7 +823,44 @@ final class VideoEnrichmentModel: ObservableObject {
             }
         }
 
-        return VideoEnrichmentReview.recordingOutcome(merged, state: .matched,
+        // 🚨 N2 — relocation rides matching. LAST, and deliberately so: every
+        // write above is committed before a single byte moves on disk, so a
+        // failed move cannot cost the match (T23). This is the moment the
+        // Epic's D8 names — the metadata is at its best and an operator is
+        // present — which is why the file is filed now rather than waiting for
+        // a bulk pass over the whole library.
+        var relocated = merged
+        if let url = LibrarySession.shared.url(for: asset.id),
+           let store = try? LibraryStore(at: url) {
+            switch RelocationMover(store: store).relocateAfterMatch(
+                assetId: asset.id, libraryURL: url,
+                runId: "match-\(UUID().uuidString)") {
+
+            case let .moved(to):
+                // 🚨 The returned asset MUST carry the new path. The caller
+                // persists whatever comes back, so returning `merged` here
+                // would write the old path straight over the row the move just
+                // updated — and the file would then read as missing.
+                relocated.relativePath = to
+                relocated.fileName = (to as NSString).lastPathComponent
+
+            case let .failed(reason):
+                // ⚠️ Surfaced, never swallowed, and never allowed to undo the
+                // match. The video keeps its identity and stays exactly where
+                // it is; only the filing did not happen.
+                AppErrorReporter.report(
+                    "Matched, but the file could not be renamed: \(reason)")
+
+            // ⭐ Silent on purpose. `notFilable` is F10 working — an undeclared
+            // video stays in the root and stays usable — and `alreadyInPlace`
+            // is a no-op. Announcing either would train the operator to dismiss
+            // a message that matters.
+            case .notFilable, .alreadyInPlace:
+                break
+            }
+        }
+
+        return VideoEnrichmentReview.recordingOutcome(relocated, state: .matched,
                                                       source: providerName,
                                                       sourceId: chosenCandidate?.id)
     }
