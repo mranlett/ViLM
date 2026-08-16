@@ -287,7 +287,20 @@ public final class VideoTransferService {
                 enrichmentUrl: asset.enrichmentUrl,
                 enrichmentCheckedAt: asset.enrichmentCheckedAt,
                 playCount: asset.playCount,
-                lastPlayedAt: asset.lastPlayedAt
+                lastPlayedAt: asset.lastPlayedAt,
+                // ⭐ The BYTES are what moved, so everything measured from them
+                // is still true in the new library and re-measuring would cost
+                // a stat call and a header parse per video for an identical
+                // answer. Dropping them would be safe — null means "not
+                // measured yet" and every reader falls back to the file — but
+                // it would silently un-do the backfill for exactly the videos
+                // the operator just took the trouble to move.
+                fileSize: asset.fileSize,
+                modifiedAt: asset.modifiedAt,
+                duration: asset.duration,
+                width: asset.width,
+                height: asset.height,
+                codec: asset.codec
             )
             let destinationStore = try LibraryStore(at: destinationLibrary)
             try destinationStore.insertAsset(newAsset)

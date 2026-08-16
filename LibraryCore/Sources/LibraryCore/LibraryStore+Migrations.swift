@@ -928,6 +928,42 @@ extension LibraryStore {
             }
         }
 
+        // 🚨 F5/F6 — six file-metadata columns, in ONE migration (#8).
+        //
+        // The audit assumed these already existed. They did not: the assets
+        // table holds identity and the operator's own judgements and nothing
+        // about the file itself, so sorting by size re-stats every file and the
+        // inspector re-parses container atoms on every hover. F5 and F6 are
+        // therefore a schema addition plus scanner work plus a backfill, not
+        // the cache tweak they were written up as.
+        //
+        // ⚠️ ONE migration although POPULATION is deliberately two stages.
+        // Stage A (size, modified date) is a stat call; Stage B (duration,
+        // dimensions, codec) opens every file and parses headers. The risk
+        // differs, so the split belongs at the population layer — two
+        // migrations would only mean two slow first launches for the same
+        // benefit.
+        //
+        // ⭐ All six NULLABLE, and null must keep behaving exactly as today by
+        // falling back to reading the file. That is what lets Stage B be
+        // deferred, made lazy, or cancelled halfway with no schema change: the
+        // columns simply stay empty and nothing is broken by their emptiness.
+        migrator.registerMigration("v46") { db in
+            try db.alter(table: "assets") { t in
+                t.add(column: "file_size", .integer)
+                t.add(column: "modified_at", .datetime)
+                t.add(column: "duration", .double)
+                t.add(column: "width", .integer)
+                t.add(column: "height", .integer)
+                t.add(column: "codec", .text)
+            }
+            // Only what sorting actually reads. An index is a write cost on
+            // every scan and a backfill touches every row, so indexing the
+            // four that nothing sorts by would be paid for and never used.
+            try db.create(index: "idx_assets_file_size", on: "assets", columns: ["file_size"])
+            try db.create(index: "idx_assets_duration", on: "assets", columns: ["duration"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

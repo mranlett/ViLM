@@ -111,6 +111,30 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
     public var playCount: Int              // Number of distinct viewing sessions
     public var lastPlayedAt: Date?         // When the video was last played
 
+    // MARK: - What the FILE is (F5/F6, #8)
+    //
+    // 🚨 ALL NULLABLE, and null means "not measured yet", never "zero". Every
+    // reader must fall back to reading the file when one of these is nil —
+    // that fallback is what lets the expensive half be deferred, made lazy, or
+    // cancelled halfway with no schema change and nothing broken.
+    //
+    // ⚠️ These describe the file on disk, not the work. That is why they can be
+    // recomputed at any time and why a stale value is a bug rather than a
+    // disagreement: unlike a title or a rating, there is exactly one right
+    // answer and the disk holds it.
+
+    /// Stage A — a stat call. Bytes.
+    public var fileSize: Int64?
+    /// Stage A — a stat call.
+    public var modifiedAt: Date?
+    /// Stage B — requires opening the file. Seconds.
+    public var duration: Double?
+    /// Stage B — the natural size, after the preferred transform.
+    public var width: Int?
+    public var height: Int?
+    /// Stage B — the video track's format, as AVFoundation reports it.
+    public var codec: String?
+
     public static let databaseTableName = "assets"
 
     public enum ReviewStatus: String, Codable, Sendable {
@@ -143,7 +167,13 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
                 enrichmentUrl: String? = nil,
                 enrichmentCheckedAt: Date? = nil,
                 playCount: Int = 0,
-                lastPlayedAt: Date? = nil) {
+                lastPlayedAt: Date? = nil,
+                fileSize: Int64? = nil,
+                modifiedAt: Date? = nil,
+                duration: Double? = nil,
+                width: Int? = nil,
+                height: Int? = nil,
+                codec: String? = nil) {
         self.id = id
         self.relativePath = relativePath
         self.fileName = fileName
@@ -173,6 +203,12 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.lookupRoute = lookupRoute
         self.enrichmentUrl = enrichmentUrl
         self.enrichmentCheckedAt = enrichmentCheckedAt
+        self.fileSize = fileSize
+        self.modifiedAt = modifiedAt
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.codec = codec
         self.playCount = playCount
         self.lastPlayedAt = lastPlayedAt
     }
@@ -208,6 +244,12 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         self.enrichmentCheckedAt = try container.decodeIfPresent(Date.self, forKey: .enrichmentCheckedAt)
         self.playCount = try container.decodeIfPresent(Int.self, forKey: .playCount) ?? 0
         self.lastPlayedAt = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
+        self.fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize)
+        self.modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
+        self.duration = try container.decodeIfPresent(Double.self, forKey: .duration)
+        self.width = try container.decodeIfPresent(Int.self, forKey: .width)
+        self.height = try container.decodeIfPresent(Int.self, forKey: .height)
+        self.codec = try container.decodeIfPresent(String.self, forKey: .codec)
         
         // Enhanced tag decoding
         var decodedTags: [String] = []
@@ -258,6 +300,12 @@ public struct Asset: Identifiable, Codable, Equatable, FetchableRecord, Persista
         case enrichmentCheckedAt = "enrichment_checked_at"
         case playCount = "play_count"
         case lastPlayedAt = "last_played_at"
+        case fileSize = "file_size"
+        case modifiedAt = "modified_at"
+        case duration
+        case width
+        case height
+        case codec
     }
 }
 
@@ -303,6 +351,12 @@ extension Asset {
         container["enrichment_checked_at"] = enrichmentCheckedAt
         container["play_count"] = playCount
         container["last_played_at"] = lastPlayedAt
+        container["file_size"] = fileSize
+        container["modified_at"] = modifiedAt
+        container["duration"] = duration
+        container["width"] = width
+        container["height"] = height
+        container["codec"] = codec
 
         // Encode tags array to JSON String for SQLite storage
         if let jsonData = try? JSONEncoder().encode(tags),
