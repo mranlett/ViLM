@@ -232,7 +232,8 @@ final class VideoBatchMatchModel: ObservableObject {
                     // is not a guess about which path was taken.
                     if let sourceId = matchedSourceId {
                         try? store.confirmVideoMatch(updated.id, source: provider.displayName,
-                                                     sourceId: sourceId, method: .fingerprint)
+                                                     sourceId: sourceId, method: .fingerprint,
+                                                     confidence: matchedConfidence)
                         // ⭐ A fingerprint match is exact, so the cast it links
                         // to is identified too — the single largest source of
                         // actor identities the app was previously discarding.
@@ -250,6 +251,7 @@ final class VideoBatchMatchModel: ObservableObject {
                 pendingCredits = []
                 pendingCast = []
                 matchedSourceId = nil
+                matchedConfidence = MatchConfidence()
                 try? await Task.sleep(nanoseconds: delay)
             }
             if cancelled { break }
@@ -283,6 +285,14 @@ final class VideoBatchMatchModel: ObservableObject {
     /// way `appliedAsset` is. Without it a batch run records "matched" and not
     /// WHAT it matched, so the next run re-fingerprints and re-guesses.
     private var matchedSourceId: String?
+
+    /// What the source said about the fingerprint that produced the match.
+    ///
+    /// ⚠️ Captured beside `matchedSourceId` and cleared with it, because they
+    /// describe the same hit. A confidence left over from the previous asset
+    /// would attach one video's evidence to another's match — which is exactly
+    /// the kind of confidently-wrong record this feature exists to surface.
+    private var matchedConfidence = MatchConfidence()
 
     private func examine(_ asset: Asset, in libraryURL: URL,
                          provider hoisted: any VideoMetadataProvider,
@@ -355,6 +365,10 @@ final class VideoBatchMatchModel: ObservableObject {
             // The fingerprint route is exact, so this id IS the match — keep it
             // whether or not the proposal had anything left to write.
             matchedSourceId = hit.id
+            // 🚨 D1/D5 — recorded at match time, from the candidate that
+            // produced it. Empty when the provider publishes none of this, in
+            // which case the match is stored exactly as it was before (C5).
+            matchedConfidence = hit.fingerprint ?? MatchConfidence()
 
             // ⚠️ ABOVE the "nothing to write" return, and not gated on the
             // studio field being applied. An imprint belongs to a network

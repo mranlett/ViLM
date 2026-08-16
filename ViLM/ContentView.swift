@@ -129,6 +129,7 @@ struct ContentView: View {
     @State private var isShowingGraphAudit = false
     @State private var isShowingRelocationPlan = false
     @State private var isShowingMeasureVideos = false
+    @State private var isShowingDoubtfulMatches = false
     @State private var isShowingTagRelationships = false
     @State private var isShowingStudioSignatures = false
     @State private var isShowingTwoHop = false
@@ -376,6 +377,16 @@ struct ContentView: View {
             }) {
                 if let url = selectedLibraryURL {
                     RelocationPlanView(libraryURL: url) { assetID in
+                        pendingAuditVideo = { openAsset(assetID) }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingDoubtfulMatches, onDismiss: {
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
+                if let url = selectedLibraryURL {
+                    LowConfidenceMatchView(libraryURL: url) { assetID in
                         pendingAuditVideo = { openAsset(assetID) }
                     }
                 }
@@ -845,6 +856,7 @@ struct ContentView: View {
                 onStudioSignatures: { isShowingStudioSignatures = true },
                 onTwoHop: { isShowingTwoHop = true },
                 onStaleMatches: { isShowingStaleMatches = true },
+                onDoubtfulMatches: { isShowingDoubtfulMatches = true },
                 onSameIdentity: { isShowingSameIdentity = true },
                 onSeriesTitles: { isShowingSeriesTitles = true },
                 onConnectGraph: { isShowingGraphConnect = true },

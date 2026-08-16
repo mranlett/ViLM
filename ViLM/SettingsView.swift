@@ -50,6 +50,11 @@ struct SettingsView: View {
     /// screen that promises none would break that screen's own footer.
     var onStaleMatches: (() -> Void)?
 
+    /// Fingerprint matches the source's own data does not strongly support.
+    /// ⚠️ Beside Gone at the Source rather than in Fix Problems: both report
+    /// evidence ABOUT the source's records, and neither repairs anything.
+    var onDoubtfulMatches: (() -> Void)?
+
     /// Two profiles claiming one record at the source — the duplicate check
     /// that needs no heuristic, and the only one that can reach a profile with
     /// no name.
@@ -235,6 +240,9 @@ struct SettingsView: View {
                     // so it opens instantly and works offline.
                     toolButton("Gone at the Source",
                                icon: "questionmark.folder", action: onStaleMatches)
+                        .disabled(session.isFederated)
+                    toolButton("Doubtful Matches",
+                               icon: "questionmark.circle", action: onDoubtfulMatches)
                         .disabled(session.isFederated)
                     toolButton("Same Person, Twice",
                                icon: "person.2.crop.square.stack", action: onSameIdentity)

@@ -137,12 +137,31 @@ public struct PluginCandidate: Equatable, Sendable, Identifiable {
     /// scenes at all.
     public let studioName: String?
 
+    /// 🚨 What the source said about the FINGERPRINT that produced this
+    /// candidate, where it came from one.
+    ///
+    /// ⭐ Distinct from `durationSeconds`, and the distinction is the point.
+    /// That is the SCENE's runtime as the source publishes it; this is the
+    /// runtime the fingerprint was taken from, plus how many people
+    /// independently submitted it and which algorithm produced it. They are
+    /// usually the same number and occasionally are not, and the case where
+    /// they differ is exactly the one worth catching.
+    ///
+    /// ⚠️ `nil` for a candidate that did not come from a fingerprint lookup,
+    /// and for any provider that does not publish this. A source supplying none
+    /// of it must leave matching exactly as it was (C5), which is why this is
+    /// optional and defaulted rather than required — a plugin built before this
+    /// existed still compiles and still behaves identically.
+    public let fingerprint: MatchConfidence?
+
     public init(id: String, title: String, subtitle: String? = nil,
                 thumbnailURL: URL? = nil, fullImageURL: URL? = nil,
                 imageURLs: [URL] = [], durationSeconds: Int? = nil,
-                releaseDate: String? = nil, studioName: String? = nil) {
+                releaseDate: String? = nil, studioName: String? = nil,
+                fingerprint: MatchConfidence? = nil) {
         self.id = id
         self.title = title
+        self.fingerprint = fingerprint
         self.durationSeconds = durationSeconds
         self.releaseDate = releaseDate
         self.studioName = studioName

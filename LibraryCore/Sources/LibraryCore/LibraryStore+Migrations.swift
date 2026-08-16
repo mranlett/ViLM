@@ -964,6 +964,32 @@ extension LibraryStore {
             try db.create(index: "idx_assets_duration", on: "assets", columns: ["duration"])
         }
 
+        // 🚨 Match Confidence D3 — confidence belongs ON THE MATCH EDGE,
+        // beside `method`, not computed for display.
+        //
+        // The submission count moves as other people contribute, so a number
+        // fetched later describes a different moment. `confidence_as_of` is
+        // what stops a stored confidence quietly becoming a claim about the
+        // wrong day — without it, "40 submissions" read next year is a
+        // statement nobody can date.
+        //
+        // ⚠️ All nullable, and null means THE SOURCE DID NOT SAY — never zero
+        // and never "no". C5 requires that a provider supplying none of this
+        // leaves every match exactly as it is today, which is only possible if
+        // absence is a state rather than a value.
+        //
+        // ⭐ On `video_match` only. A fingerprint is a property of a video
+        // file; `entity_match` is people and studios, which have no runtime and
+        // no perceptual hash.
+        migrator.registerMigration("v47") { db in
+            try db.alter(table: "video_match") { t in
+                t.add(column: "submissions", .integer)
+                t.add(column: "fingerprint_duration", .double)
+                t.add(column: "algorithm", .text)
+                t.add(column: "confidence_as_of", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

@@ -23,16 +23,50 @@ extension LibraryStore {
     public func recordMatch(_ match: NodeMatch, isVideo: Bool) throws {
         let table = isVideo ? "video_match" : "entity_match"
         let column = isVideo ? "video_id" : "entity_id"
+        // 🚨 Confidence rides on `video_match` ONLY. A fingerprint is a
+        // property of a video file; `entity_match` is people and studios,
+        // which have no runtime and no perceptual hash — writing these columns
+        // there would not compile, and pretending they applied would be worse.
+        guard isVideo else {
+            try dbQueue.write { db in
+                try db.execute(sql: """
+                    INSERT INTO \(table) (\(column), source, source_id, method, matched_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(\(column), source) DO UPDATE SET
+                        source_id = excluded.source_id,
+                        method = excluded.method,
+                        matched_at = excluded.matched_at
+                    """, arguments: [match.nodeId, match.source, match.sourceId,
+                                     match.method.rawValue, match.matchedAt])
+            }
+            return
+        }
+
+        // ⚠️ The as-of is stamped HERE, when the value is written, not carried
+        // in from a caller who might be replaying an old answer. D3 exists
+        // because the submission count moves; a confidence with someone else's
+        // timestamp is worse than one with none.
+        let confidence = match.confidence
+        let asOf: Date? = confidence.isEmpty ? nil : (confidence.asOf ?? Date())
+
         try dbQueue.write { db in
             try db.execute(sql: """
-                INSERT INTO \(table) (\(column), source, source_id, method, matched_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO \(table) (\(column), source, source_id, method, matched_at,
+                                     submissions, fingerprint_duration, algorithm,
+                                     confidence_as_of)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(\(column), source) DO UPDATE SET
                     source_id = excluded.source_id,
                     method = excluded.method,
-                    matched_at = excluded.matched_at
+                    matched_at = excluded.matched_at,
+                    submissions = excluded.submissions,
+                    fingerprint_duration = excluded.fingerprint_duration,
+                    algorithm = excluded.algorithm,
+                    confidence_as_of = excluded.confidence_as_of
                 """, arguments: [match.nodeId, match.source, match.sourceId,
-                                 match.method.rawValue, match.matchedAt])
+                                 match.method.rawValue, match.matchedAt,
+                                 confidence.submissions, confidence.fingerprintDuration,
+                                 confidence.algorithm, asOf])
         }
     }
 
@@ -106,12 +140,19 @@ extension LibraryStore {
     }
 
     /// The same for a video.
+    ///
+    /// ⚠️ `confidence` is defaulted to empty, so every existing caller records
+    /// exactly what it did before. A source that publishes nothing about its
+    /// fingerprints leaves matching untouched (C5), and that has to be true of
+    /// the call sites too — not only of the data.
     public func confirmVideoMatch(_ videoId: UUID, source: String,
-                                  sourceId: String?, method: MatchMethod) throws {
+                                  sourceId: String?, method: MatchMethod,
+                                  confidence: MatchConfidence = MatchConfidence()) throws {
         guard let sourceId, !sourceId.isEmpty else { return }
-        try recordMatch(NodeMatch(nodeId: videoId.uuidString, source: source,
-                                  sourceId: sourceId, method: method),
-                        isVideo: true)
+        var match = NodeMatch(nodeId: videoId.uuidString, source: source,
+                              sourceId: sourceId, method: method)
+        match.confidence = confidence
+        try recordMatch(match, isVideo: true)
     }
 
     /// Hands a video's match down to the performers the source linked to it.

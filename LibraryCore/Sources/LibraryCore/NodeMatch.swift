@@ -146,6 +146,18 @@ public struct NodeMatch: Codable, Equatable, Sendable, Identifiable {
     /// wrong to begin with, which is why it is not recorded as a deletion.
     public var unresolvedAt: Date?
 
+    /// 🚨 What the source said about the fingerprint behind this match.
+    ///
+    /// ⭐ D3 — it belongs HERE, on the edge, beside `method`, rather than being
+    /// recomputed for display. `MatchMethod` already encodes that some matches
+    /// are stronger than others; this is the missing measure of how strongly
+    /// the source's own data supports the one it just gave us.
+    ///
+    /// ⚠️ Every field inside is optional and absent means the source did not
+    /// say. A provider supplying none of it leaves the match exactly as it was
+    /// before this existed (C5).
+    public var confidence: MatchConfidence = MatchConfidence()
+
     /// Whether anything is wrong enough to report.
     public var isStale: Bool {
         deletedAt != nil || mergedInto != nil || unresolvedAt != nil
