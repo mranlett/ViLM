@@ -8,7 +8,6 @@ import LibraryCore
 
 struct SettingsView: View {
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
-    @State private var isShowingMediaBackfill = false
     @Environment(\.dismiss) private var dismiss
     
     var libraryURL: URL?
@@ -41,6 +40,7 @@ struct SettingsView: View {
     var onGraphAudit: (() -> Void)?
     /// #17 — what a rename would do, read before anything moves.
     var onRelocationPlan: (() -> Void)?
+    var onMeasureVideos: (() -> Void)?
     /// What the tag vocabulary implies about itself.
     var onTagRelationships: (() -> Void)?
     /// When in a career each studio works.
@@ -295,13 +295,16 @@ struct SettingsView: View {
                     toolButton("Identity Upgrade", icon: "key",
                                action: onIdentityUpgrade)
                         .disabled(session.isFederated)
-                    // F6 (#10). Self-contained rather than another callback
-                    // threaded through ContentView: it owns its own progress
-                    // and its own cancellation, and nothing outside it needs
-                    // to know when it is running.
+                    // F6 (#10). ⚠️ Presented by ContentView like every other
+                    // tool here, NOT from a sheet owned by this view. A first
+                    // attempt held the sheet locally and it flashed and closed
+                    // immediately: `toolButton` dismisses Settings and THEN
+                    // runs the action, so a sheet presented from this view dies
+                    // with its parent. The contract is documented on
+                    // `toolButton` itself.
                     toolButton("Measure Videos", icon: "ruler",
-                               action: { isShowingMediaBackfill = true })
-                        .disabled(session.isFederated || libraryURL == nil)
+                               action: onMeasureVideos)
+                        .disabled(session.isFederated)
                 }
 
                 // Reference and setup last: these are read once or
@@ -362,11 +365,7 @@ struct SettingsView: View {
             .sheet(isPresented: $isShowingHelp) {
                 HelpView(initialTopicID: HelpContent.settings.id)
             }
-            .sheet(isPresented: $isShowingMediaBackfill) {
-                if let libraryURL {
-                    MediaFactsBackfillView(libraryURL: libraryURL)
-                }
-            }
+
         }
         .macFormSheet()
     }

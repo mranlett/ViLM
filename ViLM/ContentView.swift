@@ -129,6 +129,7 @@ struct ContentView: View {
     @State private var isShowingStudioAudit = false
     @State private var isShowingGraphAudit = false
     @State private var isShowingRelocationPlan = false
+    @State private var isShowingMeasureVideos = false
     @State private var isShowingTagRelationships = false
     @State private var isShowingStudioSignatures = false
     @State private var isShowingTwoHop = false
@@ -393,6 +394,11 @@ struct ContentView: View {
                     RelocationPlanView(libraryURL: url) { assetID in
                         pendingAuditVideo = { openAsset(assetID) }
                     }
+                }
+            }
+            .sheet(isPresented: $isShowingMeasureVideos) {
+                if let url = selectedLibraryURL {
+                    MediaFactsBackfillView(libraryURL: url)
                 }
             }
             .sheet(isPresented: $isShowingTwoHop, onDismiss: {
@@ -853,6 +859,7 @@ struct ContentView: View {
                 onStudioAudit: { isShowingStudioAudit = true },
                 onGraphAudit: { isShowingGraphAudit = true },
                 onRelocationPlan: { isShowingRelocationPlan = true },
+                onMeasureVideos: { isShowingMeasureVideos = true },
                 onTagRelationships: { isShowingTagRelationships = true },
                 onStudioSignatures: { isShowingStudioSignatures = true },
                 onTwoHop: { isShowingTwoHop = true },
