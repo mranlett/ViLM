@@ -96,6 +96,21 @@ public class LibraryScanner {
                     imported = true
                 }
 
+                // F5 Stage A (#9) — the size and date, from the stat the
+                // enumerator has effectively already paid for. Recording it
+                // here is what stops a later sort re-reading every file.
+                //
+                // ⭐ Only for a new file. A known file's row is not touched by a
+                // scan; keeping it current is the backfill's job, and doing it
+                // in both places would mean a scan silently rewriting rows.
+                var measured = false
+                if !known.contains(relativePath),
+                   let facts = try? FileManager.default.attributesOfItem(atPath: fileURL.path) {
+                    asset.fileSize = (facts[.size] as? NSNumber)?.int64Value
+                    asset.modifiedAt = facts[.modificationDate] as? Date
+                    measured = asset.fileSize != nil || asset.modifiedAt != nil
+                }
+
                 // saveAsset is INSERT OR IGNORE, so re-scanning known files
                 // is a no-op. One bad row must not abandon the rest of the
                 // walk (DEFECT_INVENTORY L2) — collect failures, keep
@@ -112,9 +127,10 @@ public class LibraryScanner {
                     // that row has a different id and this updates nothing,
                     // which is the correct outcome for a file that turned out
                     // to be known after all.
-                    if imported {
+                    if imported || measured {
                         try store.updateAsset(asset)
-                        summary.importedFromSidecar += 1
+                        if imported { summary.importedFromSidecar += 1 }
+                        if measured { summary.measured += 1 }
                     }
                 } catch {
                     failedPaths.append(relativePath)
@@ -138,6 +154,9 @@ public class LibraryScanner {
 public struct ScanSummary: Equatable, Sendable {
     public var added = 0
     public var importedFromSidecar = 0
+    /// New files whose size and modified date were recorded during the walk
+    /// (F5 Stage A). Existing rows are the backfill's job, not the scan's.
+    public var measured = 0
     public init() {}
 }
 

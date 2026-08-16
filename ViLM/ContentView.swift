@@ -1520,6 +1520,22 @@ struct ContentView: View {
                     // access under this loop (DEFECT_INVENTORY H5).
                     try await ScopedOperation.run(holding: [url]) {
                         try await scanner.scan(at: url)
+
+                        // F5 Stage A (#9) — bring rows that predate the
+                        // columns up to date. The scan itself measures NEW
+                        // files; this is the catch-up for everything already
+                        // in the catalogue, and it is stat calls only —
+                        // milliseconds over a library this size, no
+                        // AVFoundation, no file opened.
+                        //
+                        // ⭐ Eager and unattended is defensible HERE and only
+                        // here. It is resumable by construction, it rewrites
+                        // nothing that is already correct, and a null result
+                        // costs nothing because every reader falls back to the
+                        // file. ⚠️ Stage B is none of those things — it opens
+                        // every file — and must not simply be added alongside
+                        // this call.
+                        _ = try? store.backfillFileMetadata(libraryURL: url)
                     }
                     let initialAssets = try store.fetchAllAssets()
 

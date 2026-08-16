@@ -915,21 +915,37 @@ struct AssetsGridView: View {
     /// tidiness — see `viewOptionsMenuContent`. Same work, same actor hops:
     /// the paths are gathered on the main actor because `LibrarySession` is
     /// main-actor state, and only the attribute reads are detached.
+    /// 🚨 F5 (#9) — the catalogue answers this now, and the disk only fills the
+    /// gaps. A measured library reaches the filesystem ZERO times to sort by
+    /// size; before this, every sort re-stat'd every file and threw the answer
+    /// away again.
+    ///
+    /// ⚠️ The fallback is deliberately kept. A library that has never been
+    /// backfilled, or one whose backfill was cancelled halfway, still sorts
+    /// correctly — degrading to the old behaviour for rows that lack a value is
+    /// the entire reason the columns are nullable. The DECISION about which
+    /// rows need reading is `FileMetadataStageA.sizes`, in LibraryCore, where a
+    /// test can count the reads; only the I/O is here.
     @MainActor
     private func loadFileSizes() async -> [Asset.ID: Int64] {
-        let paths: [(Asset.ID, String)] = assets.compactMap { asset in
-            LibrarySession.shared.videoURL(for: asset).map { (asset.id, $0.path) }
+        let stored = FileMetadataStageA.sizes(for: assets, measuring: { _ in nil }).sizes
+        let unmeasured: [(Asset.ID, String)] = assets.compactMap { asset in
+            guard stored[asset.id] == nil else { return nil }
+            return LibrarySession.shared.videoURL(for: asset).map { (asset.id, $0.path) }
         }
-        return await Task.detached(priority: .utility) {
+        guard !unmeasured.isEmpty else { return stored }
+
+        let read = await Task.detached(priority: .utility) {
             var sizes: [Asset.ID: Int64] = [:]
-            for (id, path) in paths {
+            for (id, path) in unmeasured {
                 if let attr = try? FileManager.default.attributesOfItem(atPath: path),
-                   let size = attr[.size] as? Int64 {
+                   let size = (attr[.size] as? NSNumber)?.int64Value {
                     sizes[id] = size
                 }
             }
             return sizes
         }.value
+        return stored.merging(read) { existing, _ in existing }
     }
     
     // MARK: - Sub-Expressions (Helpers to fix compiler error)
