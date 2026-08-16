@@ -837,7 +837,6 @@ struct ContentView: View {
                 onBatchMatchVideos: { isShowingBatchMatch = true },
                 onBatchMatchActors: { isShowingActorBatchMatch = true },
                 onBatchMatchStudios: { isShowingStudioBatchMatch = true },
-                onStudioConflicts: { isShowingStudioConflicts = true },
                 onStudioAudit: { isShowingStudioAudit = true },
                 onGraphAudit: { isShowingGraphAudit = true },
                 onRelocationPlan: { isShowingRelocationPlan = true },

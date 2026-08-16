@@ -33,7 +33,6 @@ struct SettingsView: View {
     var onBatchMatchVideos: (() -> Void)?
     var onBatchMatchActors: (() -> Void)?
     var onBatchMatchStudios: (() -> Void)?
-    var onStudioConflicts: (() -> Void)?
     var onStudioAudit: (() -> Void)?
     var onGraphAudit: (() -> Void)?
     /// #17 — what a rename would do, read before anything moves.
@@ -153,18 +152,18 @@ struct SettingsView: View {
                                action: onRefreshMatched)
                 }
 
+                // ⚠️ Studio repairs are NOT listed here. `Studio Health` finds
+                // them and routes to each one, which is where Repair Studio
+                // Spelling has always lived — Fix Duplicate Studios was the odd
+                // one out with a second, top-level entry that gave no
+                // indication whether it had anything to do. Measured against
+                // the real library it had none, while Studio Health reported
+                // 180 findings across four other kinds.
                 Section(
                     header: Text("Fix Problems"),
-                    footer: Text("Each finds records that are wrong rather than merely incomplete, shows them, and changes nothing until you say so.")
+                    footer: Text("Each finds records that are wrong rather than merely incomplete, shows them, and changes nothing until you say so. Studio repairs are reached from Studio Health, which knows which of them have anything to do.")
                 ) {
                     toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
-                    // `building.2.crop.circle.badge.questionmark` is not a real
-                    // SF Symbol — it logged "No symbol named …" on every render
-                    // and drew nothing, which is why this row sat oddly against
-                    // its neighbours.
-                    toolButton("Fix Duplicate Studios",
-                               icon: "building.2",
-                               action: onStudioConflicts)
                     // ⚠️ One library only, like the other profile-mutating
                     // tools. Attached, the audit reads the MAIN library alone —
                     // so a performer with twenty videos in the other library
