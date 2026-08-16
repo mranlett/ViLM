@@ -666,6 +666,7 @@ struct ContentView: View {
                 assets: assets,
                 sidebarSelection: $sidebarSelection,
                 selectedAssetIDs: $selectedAssetIDs,
+                onOpenActor: openActor,
                 libraryURL: selectedLibraryURL,
                 pendingFilter: $pendingActorFilter,
                 pendingSort: $pendingActorSort,
@@ -708,6 +709,7 @@ struct ContentView: View {
                 libraryURL: selectedLibraryURL,
                 refreshID: gridRefreshID,
                 filteredAssetContext: $filteredAssetContext,
+                onOpenAsset: openAsset,
                 onPullToRefresh: refreshLibrary,
                 entityProfiles: entityProfiles,
                 akaMap: akaMap,
@@ -1084,19 +1086,33 @@ struct ContentView: View {
     }
 
     private func settingsDidSelectActor(_ actorID: String) {
-        deferUntilSettingsDismissed {
+        deferUntilSettingsDismissed { openActor(actorID) }
+    }
+
+    /// Shows one performer's profile, from wherever the operator was.
+    ///
+    /// ⚠️ The twin of `openAsset`, and it exists for the same reason: compact
+    /// layout navigates by `navigationPath`, so setting the sidebar alone is a
+    /// no-op on a phone. Extracted from `settingsDidSelectActor` when the
+    /// standings needed it too (#69) — a second copy of this rule is how one of
+    /// the two callers quietly stops working on one platform.
+    ///
+    /// 🚨 Keyed by NAME, because `AppRoute.entityProfile` is. The standings hold
+    /// profile ids, which after the re-key are uids — so a caller must resolve
+    /// the name before it gets here, and resolve it from the stored
+    /// `display_name` rather than by parsing the id.
+    private func openActor(_ name: String) {
 #if os(iOS)
-            if horizontalSizeClass == .compact {
-                sidebarSelection = [.actorGallery]
-                selectedAssetIDs.removeAll()
-                navigationPath = [.browse, .entityProfile(category: "actor", name: actorID)]
-                return
-            }
-#endif
+        if horizontalSizeClass == .compact {
+            sidebarSelection = [.actorGallery]
             selectedAssetIDs.removeAll()
-            sidebarSelection = [.actor(actorID)]
-            columnVisibility = .all
+            navigationPath = [.browse, .entityProfile(category: "actor", name: name)]
+            return
         }
+#endif
+        selectedAssetIDs.removeAll()
+        sidebarSelection = [.actor(name)]
+        columnVisibility = .all
     }
 
     private func settingsDidSelectTag(_ tagName: String) {

@@ -28,6 +28,10 @@ import LibraryCore
 import ImageIO
 
 struct VideoHeadToHeadView: View {
+    /// Opens a video, closing the game, with the standings as its paging
+    /// context. ⚠️ Supplied by the grid that presents this — only the app's
+    /// root can navigate on both size classes (`ContentView.openAsset`).
+    var onRevealVideo: ((Asset.ID, [Asset.ID]) -> Void)?
     let assets: [Asset]
     let entityProfiles: EntityProfileIndex
     /// Aliases resolved to canonical names, so the pool's actor filters mean
@@ -95,8 +99,19 @@ struct VideoHeadToHeadView: View {
                                            fallbackLibrary: libraryURL)
                 }
                 .sheet(isPresented: $isShowingStandings) {
-                    PreferenceLeaderboardView(contenders: .videos(assets),
-                                              libraryURL: libraryURL)
+                    PreferenceLeaderboardView(
+                        contenders: .videos(assets),
+                        libraryURL: libraryURL,
+                        // ⭐ The whole shown order goes with it, so opening #3
+                        // pages on to #4 rather than into the grid's sort.
+                        onReveal: { standing, order in
+                            guard case let .video(asset) = standing.kind else { return }
+                            let ids: [Asset.ID] = order.compactMap {
+                                if case let .video(a) = $0.kind { return a.id }
+                                return nil
+                            }
+                            onRevealVideo?(asset.id, ids)
+                        })
                 }
                 .sheet(isPresented: $isShowingPool) {
                     VideoPoolPicker(initial: pool, assets: assets,

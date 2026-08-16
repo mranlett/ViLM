@@ -43,6 +43,18 @@ struct PreferenceLeaderboardView: View {
     let contenders: Contenders
     let libraryURL: URL?
 
+    /// Opens the contender behind a row: a performer's profile, or a video.
+    ///
+    /// ⭐ The board was a dead end without it (#69) — it names a leader, shows
+    /// their picture and their stars, and offered nothing to do with any of it.
+    /// The second argument is the FULL on-screen order, so a video can be
+    /// opened with the standings as its context and paging goes to the next
+    /// contender rather than into whatever the grid happened to be sorted by.
+    ///
+    /// ⚠️ Optional. Nil leaves the rows inert, so a caller that has nowhere to
+    /// send the operator does not offer a tap that does nothing.
+    var onReveal: ((Standing, [Standing]) -> Void)?
+
     @Environment(\.dismiss) private var dismiss
     @State private var ranked: [Standing] = []
     @State private var settling: [Standing] = []
@@ -138,7 +150,22 @@ struct PreferenceLeaderboardView: View {
         }
     }
 
+    /// Everything on screen, in the order it is shown.
+    private var shownOrder: [Standing] { ranked + settling }
+
+    @ViewBuilder
     private func row(_ standing: Standing, position: Int?) -> some View {
+        if let onReveal {
+            Button { onReveal(standing, shownOrder) } label: {
+                rowBody(standing, position: position).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            rowBody(standing, position: position)
+        }
+    }
+
+    private func rowBody(_ standing: Standing, position: Int?) -> some View {
         HStack(spacing: 12) {
             // ⚠️ No position for a settling contender. A number beside a
             // three-comparison score is a claim the data cannot support.

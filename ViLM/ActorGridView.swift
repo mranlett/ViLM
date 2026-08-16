@@ -11,6 +11,10 @@ struct ActorGridView: View {
     let assets: [Asset]
     @Binding var sidebarSelection: Set<SidebarItem>
     @Binding var selectedAssetIDs: Set<Asset.ID>
+    /// Opens one performer's profile, from the app's root, on either size class
+    /// (#69). ⚠️ Not done here: compact navigates by `navigationPath`, which
+    /// only `ContentView` owns — see `ContentView.openActor`.
+    var onOpenActor: ((String) -> Void)?
     let libraryURL: URL?
     @Binding var pendingFilter: ActorFilterCriteria?
     @Binding var pendingSort: ActorFilterCriteria.SortOption?
@@ -628,7 +632,12 @@ struct ActorGridView: View {
     }
 
     private var headToHeadSheet: some View {
-        HeadToHeadView(entityProfiles: entityProfiles,
+        HeadToHeadView(
+            onRevealActor: { name in
+                onOpenActor?(name)
+                isShowingHeadToHead = false
+            },
+            entityProfiles: entityProfiles,
                        assets: assets,
                        profileImageFileNames: profileImageFileNames,
                        allUniqueGenders: uniqueGenders,

@@ -23,6 +23,11 @@ import LibraryCore
 import ImageIO
 
 struct HeadToHeadView: View {
+    /// Opens a performer's profile, closing the game. ⚠️ Supplied by the grid
+    /// that presents this, because only the app's root knows how to navigate on
+    /// both size classes — see `ContentView.openActor`.
+    var onRevealActor: ((String) -> Void)?
+
     let entityProfiles: EntityProfileIndex
     let assets: [Asset]
     let profileImageFileNames: Set<String>
@@ -129,8 +134,16 @@ struct HeadToHeadView: View {
                     }
                 }
                 .sheet(isPresented: $isShowingStandings) {
-                    PreferenceLeaderboardView(contenders: .actors(entityProfiles),
-                                              libraryURL: libraryURL)
+                    PreferenceLeaderboardView(
+                        contenders: .actors(entityProfiles),
+                        libraryURL: libraryURL,
+                        // 🚨 Resolved from the profile's stored name, never by
+                        // parsing the id — the standings key by profile id, and
+                        // after the re-key those are uids with no name in them.
+                        onReveal: { standing, _ in
+                            guard case let .actor(profile) = standing.kind else { return }
+                            onRevealActor?(profile.name)
+                        })
                 }
                 .sheet(isPresented: $isShowingPool) {
                     PoolPicker(initial: pool,

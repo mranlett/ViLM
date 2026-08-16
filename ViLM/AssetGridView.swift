@@ -56,6 +56,10 @@ struct AssetsGridView: View {
     /// simply lose it.
     var pushesVideoDetail: Bool = false
     @Binding var filteredAssetContext: [Asset.ID]
+    /// Opens one video, from the app's root, on either size class (#69).
+    /// ⚠️ Not done here: compact navigates by `navigationPath`, which only
+    /// `ContentView` owns — see the note on `ContentView.openAsset`.
+    var onOpenAsset: ((Asset.ID) -> Void)?
     var onPullToRefresh: () async -> Void = {}
 
     // Loaded once at the ContentView level and shared across every screen
@@ -637,7 +641,20 @@ struct AssetsGridView: View {
                               actorProfiles: entityProfiles)
         }
         .sheet(isPresented: $isShowingHeadToHead) {
-            VideoHeadToHeadView(assets: assets, entityProfiles: entityProfiles,
+            VideoHeadToHeadView(
+                onRevealVideo: { id, order in
+                    // ⚠️ Selection FIRST, then close the sheet. A state change
+                    // made while a sheet is dismissing is the one SwiftUI is
+                    // most likely to drop.
+                    //
+                    // ⭐ The standings order becomes the paging context, so
+                    // prev/next follows the board the operator came from. The
+                    // grid restores its own order on the next refresh.
+                    filteredAssetContext = order
+                    onOpenAsset?(id)
+                    isShowingHeadToHead = false
+                },
+                assets: assets, entityProfiles: entityProfiles,
                                 akaMap: akaMap, libraryURL: libraryURL)
         }
         .modifier(NewPlaylistPrompt(pendingAssetIDs: $newPlaylistPendingIDs))
