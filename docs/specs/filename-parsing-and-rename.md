@@ -11,7 +11,9 @@ notion: https://app.notion.com/p/Filename-Parsing-Bulk-Rename-Utility-3b2adccaf4
 
 # Filename Parsing & Bulk Rename Utility
 
-> ✅ **Status: Implemented 2026-08-12 — with the rename half superseded.**
+> ✅ **Status: Implemented 2026-08-12 — with the rename half superseded, and one addition in progress (2026-08-16).**
+> 
+> ⚠️ **In progress:** reading names out of a comma-less segment (#73) — see the section at the foot of this page. The parsing half below is live; that addition is not yet built.
 > 
 > **What shipped:** the parsing side, in full. `FileNameParser` reads a filename back into fields using the library's own vocabulary rather than by position, `FileNameParseReviewView` presents each reading for confirmation, and nothing is written without it. #51 later corrected the one real defect in it — the series/episode block was being filed wholesale as a series, and it now splits into series, season, episode number and episode title by the same rule `SeriesTitleRepair` uses.
 > 
@@ -178,3 +180,47 @@ The Epic owns T18/T18b (path grammar and sanitisation), T23/T24 (move failure an
 - **P15 — A rollback restores the catalogue too.** After reversal, every asset's `relativePath` matches where its file actually is, and no fingerprint, thumbnail or contact sheet has been orphaned — the failure mode that makes a rename dangerous in the first place.
 ## Evidence
 Measured 2026-08-04 against the external-drive library: 2,101 assets, 1,172 with no actor tag, 1,154 of those with descriptive filenames, 407 colliding under the scene grammar, 1,048 with no identity metadata. Segment-shape counts measured 2026-08-03. Related: *The Library Graph* (D3, D5, D7, D8, D9), *File Naming & Metadata Storage Strategy*.
+---
+## Reading names out of a comma-less segment, 2026-08-16 (#73)
+Reported from the drive: many videos have no cast recorded, and their filenames — written before any renaming utility existed — **do not separate names with commas**.
+### Where it actually fails
+The vocabulary-over-position principle above is sound and is not what breaks. The failure is one level down, in how a segment is split. `splitList` splits on `,` and ` and `, and a segment is placed only if **every** entry is a known name:
+```javascript
+"Alice Example, Bob Example"  ->  ["Alice Example", "Bob Example"]  ->  both known  ->  actors
+"Alice Example Bob Example"   ->  ["Alice Example Bob Example"]     ->  not a name  ->  unrecognised
+```
+Every pre-rename filename is the second shape. ⭐ The vocabulary is present and simply never consulted, because nothing splits the segment into candidates to look up.
+### 📊 Measured on the drive library, 2026-08-16
+|  |  |
+| --- | --- |
+| Videos with no actor tag | **241** |
+| …whose filename contains a known actor | **119** (49%) |
+| Videos with no studio tag | 246 |
+| …whose filename contains a known studio | 33 (13%) |
+Names found per filename: 79 with one, 30 with two, 7 with three, 2 with four, 1 with seven.
+⭐ Every sampled hit carried **zero commas** and one or two ` - ` separators, so the outer segmentation is intact and only the within-segment split fails.
+### 🚨 D1 — Only VALIDATED, MULTI-TOKEN names may be matched inside a segment
+Scanning inside a segment invites false positives, and a wrongly credited performer is corruption rather than an absence. The vocabulary settles what the rule should be:
+| Rule | Recovers | Exposure |
+| --- | --- | --- |
+| any known name | 119 | a single-token name is also an ordinary word |
+| **validated, multi-token only** | **112** | a full name the library has confirmed exists |
+| single-token only | 7 | the entire cost of the safe rule |
+Of 1,366 actor names, only **45 are single-token** and **1,333 are validated**.
+⭐ **The safe rule costs seven videos out of 119 and removes essentially all of the exposure.** Two tokens means the match is a full name rather than a word; *validated* means the library has confirmed that person exists rather than having seen the string once — a distinction `NameVocabulary` already draws, and draws for exactly this reason.
+⚠️ The seven single-token cases stay **unrecognised**. They must not be quietly promoted later by loosening the rule without re-measuring, because the measurement is the only thing that made this safe.
+### D2 — Longest-first, and consumed
+Matches are taken longest-first and removed from the remaining text, so one token cannot serve two people and a shorter name cannot claim part of a longer one.
+### D3 — A reading, never a write
+Unchanged from Phase 1 and restated because this widens what the parser will claim: names found this way go through `FileNameParseReviewView` like everything else. Nothing here writes.
+### D4 — Studios get the same treatment, in the same pass
+33 of 246 is a much weaker return and the studio vocabulary is a quarter the size, so this rides along rather than justifying its own work.
+### ❓ Open — the remainder
+What is left once names are lifted out is probably tags, and the tag vocabulary could be applied to it the same way. **Recommend not doing so in the first cut:** it compounds one guess on another, and while a wrong tag is cheap to correct, the compounding is what makes the result hard to reason about. Measure the remainder separately first.
+### Test strategy
+- **P1** — a comma-less segment of two validated names places both.
+- **P2** — 🚨 a single-token name embedded in ordinary text is NOT matched.
+- **P3** — an unvalidated name is not matched, even multi-token.
+- **P4** — overlapping names consume longest-first, so one token cannot serve two people.
+- **P5** — a segment that already parses by comma is unchanged. No regression on the shape that works today.
+- **P6** — the remainder after extraction is reported, not silently dropped.
