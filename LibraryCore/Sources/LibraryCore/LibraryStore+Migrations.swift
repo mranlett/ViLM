@@ -878,6 +878,42 @@ extension LibraryStore {
             }
         }
 
+        // 🚨 F4 and F5 — the relocation journal. This table is the ONLY reason
+        // an interrupted run can be told apart from a completed one.
+        //
+        // `FileRenamerService` already rolls a move back when the database
+        // write throws, and that is NOT the same property. A `do/catch` handles
+        // an *error*; F4 is about the *process dying* — between the file
+        // landing at its new path and the row learning about it — and no
+        // in-memory rollback survives that. The intent has to be committed to
+        // disk BEFORE the file moves, or a crash leaves a file whose catalogue
+        // row points at a path that no longer exists, which reads exactly like
+        // a missing video.
+        //
+        // ⚠️ It is also F5. The old→new FULL paths are recorded per move and
+        // kept after completion, because "reversible" means reversible
+        // tomorrow, not merely unwindable during the run that made the mess.
+        //
+        // ⭐ `run_id` groups them so a revert targets one run. Reverting
+        // "everything ever moved" would undo relocations the operator has since
+        // accepted, which is a different and much worse operation.
+        migrator.registerMigration("v44") { db in
+            try db.create(table: "relocation_journal") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("run_id", .text).notNull().indexed()
+                t.column("asset_id", .text).notNull().indexed()
+                // FULL relative paths, both ends. Not a filename and not a
+                // directory — F5 says the mapping restores the original layout
+                // exactly, and a rename that also changed directory cannot be
+                // undone from a name alone.
+                t.column("from_path", .text).notNull()
+                t.column("to_path", .text).notNull()
+                t.column("state", .text).notNull().indexed()
+                t.column("created_at", .datetime).notNull()
+                t.column("settled_at", .datetime)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

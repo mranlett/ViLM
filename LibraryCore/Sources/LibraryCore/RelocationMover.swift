@@ -1,0 +1,312 @@
+// RelocationMover.swift
+// Step 3 of File Naming & Metadata Storage: runs a `RelocationPlan`.
+//
+// 🚨 Decision 1 — rename IN PLACE. `VideoTransferService.moveVideo` is the
+// obvious reuse and is the wrong tool: it copies, hash-verifies, then deletes,
+// which is correct for crossing volumes and needs free space equal to the
+// largest file. Disk space is the entire reason for renaming in place, so this
+// uses `FileManager.moveItem` — an atomic rename, no copy, no window in which
+// two copies exist.
+//
+// ⚠️ The failure that worried the spec is SILENT: `moveItem` across volumes
+// transparently degrades to copy-then-unlink, so a cross-volume run would do
+// the expensive thing and look identical while doing it. Volume identity is
+// therefore checked per move rather than assumed — see `sameVolume`.
+//
+// ⭐ Every move is journalled before it happens (F4) and its old→new full paths
+// are kept afterwards (F5). See `RelocationJournal`, which owns that reasoning.
+
+import Foundation
+
+/// One move that did not happen, and why.
+///
+/// ⚠️ A named struct rather than a tuple: it crosses a module boundary into the
+/// app and appears in test assertions, and a tuple of two labelled strings
+/// synthesises no `Equatable`, which pushes the failure into whatever tries to
+/// compare it.
+public struct RelocationFailure: Equatable, Sendable {
+    public let assetId: UUID
+    public let reason: String
+
+    public init(assetId: UUID, reason: String) {
+        self.assetId = assetId
+        self.reason = reason
+    }
+}
+
+public struct RelocationRunResult: Equatable, Sendable {
+    public var runId: String
+    public var moved: [UUID] = []
+    /// Moves that could not be performed, with the reason.
+    public var failed: [RelocationFailure] = []
+    /// Reconciliation performed before this run started.
+    public var reconciled: ReconciliationReport = .init()
+
+    public var movedCount: Int { moved.count }
+}
+
+public enum RelocationRunError: Error, Equatable {
+    /// 🚨 The plan says it must not run. Refused here as well as in the UI —
+    /// `canRun` is a property of the plan, and a caller that forgot to consult
+    /// it must not be able to move files anyway.
+    case planCannotRun(collisions: Int)
+    case nothingToDo
+    /// An interrupted run left rows nobody can resolve automatically.
+    case unreconciled(missing: Int, ambiguous: Int)
+    /// 🚨 Another relocation is already in flight in this process (#71). Two
+    /// movers over one plan produce spurious `sourceMissing` failures for every
+    /// file the first has already moved — noise that reads as damage.
+    case alreadyRunning
+}
+
+public struct RelocationMover {
+
+    private let store: LibraryStore
+
+    public init(store: LibraryStore) {
+        self.store = store
+    }
+
+    // MARK: - Test seams
+    //
+    // Default-preserving, in the style of `VideoTransferService.fileRemover`
+    // and `LibraryBackupService.postAssetWriteHook`. F4 cannot be asserted
+    // without a way to interrupt a run at a chosen instant, and interrupting a
+    // real process mid-rename is not something a test can do.
+
+    /// Performs the rename. Replaced in tests to simulate a failure or a crash.
+    public var moveFile: (URL, URL) throws -> Void = { from, to in
+        try FileManager.default.moveItem(at: from, to: to)
+    }
+
+    /// Called after the file has moved and BEFORE the catalogue learns of it —
+    /// the exact window F4 exists to survive. Throwing here simulates the
+    /// process dying at the one instant that matters.
+    public var postMoveHook: ((UUID) throws -> Void)? = nil
+
+    public var fileExists: (URL) -> Bool = {
+        FileManager.default.fileExists(atPath: $0.path)
+    }
+
+    // MARK: - Running
+
+    /// Executes a plan, one journalled move at a time.
+    ///
+    /// - Parameter runId: supplied by the caller so it can be recorded and
+    ///   offered for revert. ⚠️ Not generated here — `Date`/`UUID` in the middle
+    ///   of a run makes the result unreproducible in a test.
+    @discardableResult
+    public func run(_ plan: RelocationPlan, libraryURL: URL,
+                    runId: String) throws -> RelocationRunResult {
+
+        // 🚨 Claim the run token BEFORE anything else (#71). Test-and-set, so
+        // two callers cannot both find it free — and held for the whole run, so
+        // a plan screen opening midway reconciles nothing and says so rather
+        // than resolving rows this mover is about to settle.
+        guard RelocationActivity.tryBegin() else {
+            throw RelocationRunError.alreadyRunning
+        }
+        defer { RelocationActivity.end() }
+
+        // 🚨 Reconcile FIRST, always. Starting a fresh run on top of an
+        // interrupted one would journal new intents while old ones are still
+        // unresolved, and the second reconciliation could then no longer tell
+        // which run a stranded file belonged to.
+        //
+        // ⚠️ `duringOwnRun` because the token is already held: without it this
+        // mover's own reconciliation would defer to itself and never run.
+        let reconciled = try store.reconcileInterruptedRelocations(
+            libraryURL: libraryURL, duringOwnRun: true, fileExists: fileExists)
+
+        guard reconciled.isClean else {
+            throw RelocationRunError.unreconciled(missing: reconciled.missing.count,
+                                                  ambiguous: reconciled.ambiguous.count)
+        }
+        guard plan.collisions.isEmpty else {
+            throw RelocationRunError.planCannotRun(collisions: plan.collisions.count)
+        }
+        guard !plan.moves.isEmpty else { throw RelocationRunError.nothingToDo }
+
+        var result = RelocationRunResult(runId: runId)
+        result.reconciled = reconciled
+
+        for move in plan.moves {
+            do {
+                try perform(move, libraryURL: libraryURL, runId: runId)
+                result.moved.append(move.assetId)
+            } catch {
+                // ⚠️ One failure does not stop the run. Every move is
+                // independent and journalled, so stopping would leave the rest
+                // of a good plan unapplied for the sake of one bad file — and
+                // the operator would have to work out which. Reported instead.
+                result.failed.append(RelocationFailure(
+                    assetId: move.assetId,
+                    reason: (error as? LocalizedError)?.errorDescription ?? "\(error)"))
+            }
+        }
+        return result
+    }
+
+    private func perform(_ move: PlannedMove, libraryURL: URL, runId: String) throws {
+        let from = libraryURL.appendingPathComponent(move.from)
+        let to = libraryURL.appendingPathComponent(move.to)
+
+        guard fileExists(from) else { throw RelocationMoveError.sourceMissing(move.from) }
+        // ⚠️ Refused rather than overwritten. The plan's collision check covers
+        // two videos wanting one path; this covers a path already occupied by
+        // something the catalogue does not know about.
+        guard !fileExists(to) else { throw RelocationMoveError.targetOccupied(move.to) }
+
+        // 🚨 The silent-copy guard. Same volume is the precondition for
+        // `moveItem` being a rename rather than a copy, and the spec asks for
+        // this to be asserted because the failure only shows up as a full disk.
+        guard try sameVolume(from, to.deletingLastPathComponent(), libraryURL: libraryURL) else {
+            throw RelocationMoveError.crossesVolumes(move.to)
+        }
+
+        try FileManager.default.createDirectory(at: to.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+
+        // 1 · Intent, committed to disk before anything moves.
+        let entry = try store.recordRelocationIntent(runId: runId, assetId: move.assetId,
+                                                     from: move.from, to: move.to)
+        guard let entryId = entry.id else { throw RelocationMoveError.journalFailed }
+
+        // 2 · The rename.
+        try moveFile(from, to)
+
+        // The F4 window. Anything thrown here leaves a moved file and a
+        // `planned` row — which is precisely the state reconciliation resolves.
+        try postMoveHook?(move.assetId)
+
+        // 3 · The catalogue and the journal, together, in one transaction.
+        try store.settleRelocation(entryId, assetId: move.assetId,
+                                   newPath: move.to, state: .done)
+
+        // 4 · Carry the duplicate-scan fingerprint across. The bytes did not
+        // change, so a relocation must never cost a re-fingerprint — the same
+        // rule `FileRenamerService` follows, and now shared with it.
+        FrameFingerprintRekey.move(in: libraryURL, from: move.from, to: move.to)
+    }
+
+    /// Whether both ends sit on one volume.
+    ///
+    /// ⭐ Within a single library this is true by construction, so the check is
+    /// expected to pass every time. It exists because the case where it does
+    /// not — a library root spanning a mount point — is invisible: `moveItem`
+    /// would quietly copy several terabytes rather than refuse.
+    ///
+    /// ⚠️ The destination directory may not exist yet, so the nearest existing
+    /// ancestor is measured instead. Falling back to the library root is safe:
+    /// a directory this run is about to create is on whatever volume its parent
+    /// is on.
+    private func sameVolume(_ from: URL, _ toDirectory: URL, libraryURL: URL) throws -> Bool {
+        func volume(of url: URL) -> String? {
+            var probe = url
+            while !FileManager.default.fileExists(atPath: probe.path),
+                  probe.path.count > libraryURL.path.count {
+                probe = probe.deletingLastPathComponent()
+            }
+            let values = try? probe.resourceValues(forKeys: [.volumeIdentifierKey])
+            guard let identifier = values?.volumeIdentifier else { return nil }
+            return String(describing: identifier)
+        }
+        guard let a = volume(of: from), let b = volume(of: toDirectory) else {
+            // Undeterminable. Treated as SAME rather than refusing, because the
+            // library root is one directory tree and refusing every move on an
+            // unreadable attribute would make the feature unusable on a volume
+            // type that simply does not report an identifier.
+            return true
+        }
+        return a == b
+    }
+
+    // MARK: - F5 — putting it back
+
+    /// Reverses a completed run, newest move first.
+    ///
+    /// 🚨 Driven by the JOURNAL, not by recomputing the plan. Regenerating
+    /// where each file "should" be would restore where the generator thinks it
+    /// belongs today, which is not the same as where it actually was — and if
+    /// the generator is what went wrong, recomputing would faithfully reproduce
+    /// the damage.
+    @discardableResult
+    public func revert(runId: String, libraryURL: URL) throws -> RelocationRunResult {
+        var result = RelocationRunResult(runId: runId)
+
+        // Reverse order, so a file moved into a directory another move created
+        // leaves before the directory is considered empty.
+        // ⚠️ BOTH settled-as-moved states. A file recovered by reconciliation
+        // moved just as surely as one settled by its own run, and a revert that
+        // read only `.done` would leave exactly the files an interrupted run
+        // had already relocated — the ones most likely to need putting back.
+        let settled = try (store.relocationJournal(runId: runId, state: .done)
+                           + store.relocationJournal(runId: runId, state: .recovered))
+            .sorted { ($0.id ?? 0) < ($1.id ?? 0) }
+        for entry in settled.reversed() {
+            guard let entryId = entry.id, let assetId = UUID(uuidString: entry.assetId) else {
+                continue
+            }
+            let current = libraryURL.appendingPathComponent(entry.toPath)
+            let original = libraryURL.appendingPathComponent(entry.fromPath)
+            do {
+                guard fileExists(current) else {
+                    throw RelocationMoveError.sourceMissing(entry.toPath)
+                }
+                guard !fileExists(original) else {
+                    throw RelocationMoveError.targetOccupied(entry.fromPath)
+                }
+                try FileManager.default.createDirectory(
+                    at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try moveFile(current, original)
+                try store.settleRelocation(entryId, assetId: assetId,
+                                           newPath: entry.fromPath, state: .reverted)
+                FrameFingerprintRekey.move(in: libraryURL,
+                                           from: entry.toPath, to: entry.fromPath)
+                result.moved.append(assetId)
+            } catch {
+                result.failed.append(RelocationFailure(assetId: assetId,
+                                                       reason: "\(error)"))
+            }
+        }
+        return result
+    }
+}
+
+public enum RelocationMoveError: Error, Equatable, LocalizedError {
+    case sourceMissing(String)
+    case targetOccupied(String)
+    case crossesVolumes(String)
+    case journalFailed
+
+    public var errorDescription: String? {
+        switch self {
+        case let .sourceMissing(path):
+            return "The file is no longer at \(path)."
+        case let .targetOccupied(path):
+            return "Something is already at \(path), and it was not overwritten."
+        case let .crossesVolumes(path):
+            return "\(path) is on a different volume, which would mean copying the "
+                 + "whole file rather than renaming it. Refused."
+        case .journalFailed:
+            return "The move could not be recorded, so it was not attempted."
+        }
+    }
+}
+
+/// Carrying a duplicate-scan fingerprint from one path to another.
+///
+/// ⭐ Extracted so the mover and `FileRenamerService` share one expression of
+/// the rule. Two copies of "a rename must not cost a re-fingerprint" is exactly
+/// the drift that `ActorCredits` was created to end, and the cost of getting it
+/// wrong here is a silent full re-scan of a 2,000-file library.
+public enum FrameFingerprintRekey {
+    public static func move(in libraryURL: URL, from: String, to: String) {
+        var prints = FrameFingerprintStore(libraryURL: libraryURL)
+        guard let entry = prints.entries[from] else { return }
+        prints.setHashes(entry.hashes, relativePath: to,
+                         sizeBytes: entry.sizeBytes, modified: entry.modified)
+        prints.removeEntry(relativePath: from)
+        prints.save()
+    }
+}

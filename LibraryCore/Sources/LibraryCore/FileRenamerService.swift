@@ -45,12 +45,11 @@ public class FileRenamerService {
         // Re-key the duplicate-scan fingerprint to the new path: the bytes
         // didn't change, so the fingerprint is still valid. Best-effort —
         // the cache is regenerable.
-        var prints = FrameFingerprintStore(libraryURL: libraryURL)
-        if let entry = prints.entries[oldRelativePath] {
-            prints.setHashes(entry.hashes, relativePath: pathInLibrary,
-                             sizeBytes: entry.sizeBytes, modified: entry.modified)
-            prints.removeEntry(relativePath: oldRelativePath)
-            prints.save()
-        }
+        //
+        // ⭐ Shared with `RelocationMover` via `FrameFingerprintRekey`. Both
+        // move a file and must carry its fingerprint; a second copy of the rule
+        // would drift, and the cost of losing it is a silent re-scan of the
+        // whole library.
+        FrameFingerprintRekey.move(in: libraryURL, from: oldRelativePath, to: pathInLibrary)
     }
 }
