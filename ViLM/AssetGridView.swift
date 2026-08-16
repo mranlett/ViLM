@@ -216,6 +216,28 @@ struct AssetsGridView: View {
     /// expression exceeded the solver's budget — it had simply never been
     /// reached before, because a type error earlier in the file stopped
     /// compilation first. Identical content; no behaviour change.
+    /// Filled while a filter is active, so the control shows its own state.
+    private var filterIconName: String {
+        filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle"
+                               : "line.3.horizontal.decrease.circle.fill"
+    }
+
+    /// Sorting, shared by the macOS toolbar strip and the iOS overflow menu so
+    /// the two cannot drift apart.
+    @ViewBuilder
+    private var sortMenuContent: some View {
+        Picker("Sort By", selection: $sortOption) {
+            ForEach(SortOption.allCases, id: \.self) { option in
+                Text(option.rawValue).tag(option)
+            }
+        }
+        Divider()
+        Button(action: { sortAscending.toggle() }) {
+            Label(sortAscending ? "Ascending" : "Descending",
+                  systemImage: sortAscending ? "arrow.up" : "arrow.down")
+        }
+    }
+
     @ViewBuilder
     private var viewOptionsMenuContent: some View {
         Picker("Preview", selection: $gridStyle) {
@@ -369,15 +391,26 @@ struct AssetsGridView: View {
                     .padding(.top)
                 }
 
+                // ⭐ The line that NAMES the problem also solves it. This was
+                // inert text: it reported that most of the library was hidden
+                // and pointed at a toolbar button that iOS had collapsed out of
+                // sight. A notice about hidden content is exactly where someone
+                // reaches when they want it back, so it opens the filters —
+                // and it does not depend on the toolbar surviving layout.
                 if videosHiddenByFilter > 0 {
-                    Label {
-                        Text("^[\(videosHiddenByFilter) video](inflect: true) hidden by your filters")
-                    } icon: {
-                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    Button(action: { isShowingFilterBuilder = true }) {
+                        Label {
+                            Text("^[\(videosHiddenByFilter) video](inflect: true) hidden by your filters")
+                        } icon: {
+                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                        }
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .font(.caption)
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityHint("Opens the filters so you can change or clear them")
                     .padding(.horizontal)
                     .padding(.top, 8)
                 }
@@ -726,26 +759,18 @@ struct AssetsGridView: View {
             if !isFiltered { resultViewMode = .assets }
         }
         .toolbar {
+#if os(macOS)
+            // The Mac has the width for the whole strip in one item.
             ToolbarItem(placement: .primaryAction) {
                 HStack {
-                    Menu {
-                        Picker("Sort By", selection: $sortOption) {
-                            ForEach(SortOption.allCases, id: \.self) { option in
-                                Text(option.rawValue).tag(option)
-                            }
-                        }
-                        Divider()
-                        Button(action: { sortAscending.toggle() }) {
-                            Label(sortAscending ? "Ascending" : "Descending", systemImage: sortAscending ? "arrow.up" : "arrow.down")
-                        }
-                    } label: {
+                    Menu { sortMenuContent } label: {
                         Label("Sort", systemImage: "arrow.up.arrow.down")
                     }
-                    
+
                     Button(action: { isShowingFilterBuilder = true }) {
-                        Label("Filter", systemImage: filterCriteria.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        Label("Filter", systemImage: filterIconName)
                     }
-                    
+
                     if !filterCriteria.isEmpty {
                         Button(action: { isShowingSaveCollection = true }) {
                             Label("Save Collection", systemImage: "folder.badge.plus")
@@ -763,6 +788,43 @@ struct AssetsGridView: View {
                     }
                 }
             }
+#endif
+#if os(iOS)
+            // 🚨 ONE ToolbarItem PER CONTROL. These five used to share a single
+            // ToolbarItem holding an HStack, which iOS reads as one item it may
+            // collapse WHOLE — and it did, into a system "•••" the app never
+            // named, taking Filter with it. That left the grid announcing
+            // "1,350 videos hidden by your filters" beside no way to undo it.
+            // Separate items are measured and collapsed individually, and
+            // Filter is declared FIRST so it is the last thing to go.
+            //
+            // ⚠️ Do not merge these back into an HStack to tidy the toolbar.
+            // The nesting is what hid the control, not the number of controls.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: { isShowingFilterBuilder = true }) {
+                    Label("Filter", systemImage: filterIconName)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Menu { sortMenuContent } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                    }
+                    if !filterCriteria.isEmpty {
+                        Button(action: { isShowingSaveCollection = true }) {
+                            Label("Save Collection", systemImage: "folder.badge.plus")
+                        }
+                    }
+                    Button(action: { isShowingHeadToHead = true }) {
+                        Label("Head to Head", systemImage: "square.split.2x1")
+                    }
+                    Divider()
+                    viewOptionsMenuContent
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+            }
+#endif
 #if os(iOS)
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(isEditMode ? "Done" : "Select") {
