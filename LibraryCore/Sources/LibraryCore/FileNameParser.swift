@@ -94,16 +94,26 @@ public struct NameVocabulary: Sendable {
 
     /// Lowercased name → the library's own spelling of it.
     ///
-    /// 🚨 An embedded match is found in a FILENAME, and a filename's casing is
-    /// not evidence. Writing back whatever the file happened to say would put a
+    /// 🚨 A match is found in a FILENAME, and a filename's casing is not
+    /// evidence. Writing back whatever the file happened to say would put a
     /// second spelling of a person into the library beside the confirmed one —
     /// which is the shape of the casing damage this project has already had to
     /// repair. The library's own display name wins.
+    ///
+    /// ⚠️ Built from the WHOLE vocabulary, not only the validated part (#76).
+    /// Every branch that matches lowercased has to be able to answer in the
+    /// library's spelling, and three of them match against `actors`, `studios`
+    /// and `tags` — so a map covering only the validated names left those
+    /// branches with nothing to look up. Validated names are applied last so
+    /// they win a collision: a confirmed spelling outranks a remembered one.
     public let canonical: [String: String]
 
     public init(actors: Set<String> = [], studios: Set<String> = [], tags: Set<String> = [],
                 validatedActors: Set<String> = [], validatedStudios: Set<String> = []) {
         var canonical: [String: String] = [:]
+        for name in tags { canonical[name.lowercased()] = name }
+        for name in studios { canonical[name.lowercased()] = name }
+        for name in actors { canonical[name.lowercased()] = name }
         for name in validatedActors.union(validatedStudios) {
             canonical[name.lowercased()] = name
         }
@@ -113,6 +123,19 @@ public struct NameVocabulary: Sendable {
         self.tags = Set(tags.map { $0.lowercased() })
         self.validatedActors = Set(validatedActors.map { $0.lowercased() })
         self.validatedStudios = Set(validatedStudios.map { $0.lowercased() })
+    }
+
+    /// The library's own spelling of each name, where the library has one.
+    ///
+    /// 🚨 Call this on EVERY path that emits a name read out of a filename.
+    /// Not doing so is the whole of #76: every branch here matches
+    /// case-insensitively, so a branch that then returns the filename's text
+    /// silently files a second spelling of a person beside the first — a split
+    /// that no later count, filmography or leaderboard can see through. A name
+    /// the library does not know is returned unchanged; it is the caller's job
+    /// to have decided the name belongs.
+    public func canonicalised(_ names: [String]) -> [String] {
+        names.map { canonical[$0.lowercased()] ?? $0 }
     }
 
     /// Built from the library AND from what has been confirmed about it.
@@ -311,21 +334,27 @@ public enum FileNameParser {
                 unplaced.append((index, segment))
                 continue
             }
+            // ⚠️ Every one of these five emits a name lifted out of a FILENAME
+            // after matching it case-insensitively, so every one of them has to
+            // answer in the library's spelling (#76). They did not: only the
+            // embedded path below canonicalised, and these — older, and never
+            // revisited when it was added — wrote the filename's casing
+            // straight through.
             if validActor {
-                result.actors.append(contentsOf: entries)
+                result.actors.append(contentsOf: vocabulary.canonicalised(entries))
                 continue
             }
             if validStudio {
-                result.studios.append(contentsOf: entries)
+                result.studios.append(contentsOf: vocabulary.canonicalised(entries))
                 continue
             }
 
             if entries.allSatisfy({ vocabulary.actors.contains($0.lowercased()) }) {
-                result.actors.append(contentsOf: entries)
+                result.actors.append(contentsOf: vocabulary.canonicalised(entries))
             } else if entries.allSatisfy({ vocabulary.studios.contains($0.lowercased()) }) {
-                result.studios.append(contentsOf: entries)
+                result.studios.append(contentsOf: vocabulary.canonicalised(entries))
             } else if entries.allSatisfy({ vocabulary.tags.contains($0.lowercased()) }) {
-                result.tags.append(contentsOf: entries)
+                result.tags.append(contentsOf: vocabulary.canonicalised(entries))
             } else {
                 // ⭐ Only reached when nothing placed the segment WHOLE, so a
                 // comma-separated list that already parses is untouched — this

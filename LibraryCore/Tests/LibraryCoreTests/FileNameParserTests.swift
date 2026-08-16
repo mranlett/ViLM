@@ -331,11 +331,21 @@ final class FileNameParserTests: XCTestCase {
         XCTAssertTrue(vocab.tags.contains("something"))
     }
 
-    func testMatchingIsCaseInsensitive() {
+    /// 🚨 This test previously asserted `["alice example"]` and `["OUTDOORS"]` —
+    /// the filename's own casing. It was not a wrong assertion about matching;
+    /// it was an assertion about the wrong thing. Matching case-insensitively
+    /// and EMITTING the matched text are two behaviours, the name covered only
+    /// the first, and the second was the defect (#76). So the test passed for
+    /// years while the parser filed second spellings of real people.
+    ///
+    /// ⚠️ A test that pins a defect as a contract is worse than no test: it
+    /// makes the fix look like the regression. Both halves are asserted here so
+    /// the two behaviours cannot be confused again.
+    func testMatchingIsCaseInsensitiveAndEmitsTheLibrarysSpelling() {
         let p = FileNameParser.parse(fileName: "alice example - OUTDOORS.mp4",
                                      vocabulary: vocabulary)
-        XCTAssertEqual(p.actors, ["alice example"])
-        XCTAssertEqual(p.tags, ["OUTDOORS"])
+        XCTAssertEqual(p.actors, ["Alice Example"], "matched despite the casing…")
+        XCTAssertEqual(p.tags, ["Outdoors"], "…and recorded in the library's spelling")
     }
 }
 
@@ -572,10 +582,65 @@ extension FileNameParserTests {
     /// ⚠️ The library's spelling wins, not the filename's. Writing back what the
     /// file happened to say would put a second spelling of one person into the
     /// library beside the confirmed one.
+    ///
+    /// 🚨 This one exercises the EMBEDDED path only — the segment does not parse
+    /// whole, so it falls through to `embeddedNames`. That was the whole defect
+    /// in #76: this test existed and passed while five other paths wrote the
+    /// filename's casing straight through. See the whole-segment cases below.
     func testTheCanonicalSpellingIsRecordedNotTheFilenames() {
         let parsed = FileNameParser.parse(
             fileName: "alice example and friends.mp4",
             vocabulary: vocab(validatedActors: ["Alice Example"]))
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+    }
+
+    // MARK: - 🚨 #76 — the casing rule on the paths that do NOT go through
+    // `embeddedNames`. Found in real data: 151 names read out of the drive
+    // library, 149 right, and one written in the filename's casing — splitting
+    // one performer across two spellings that nothing downstream can reunite.
+
+    /// A segment that parses WHOLE never reaches `embeddedNames`, and this is
+    /// the shape that shipped: one name, alone in its segment, spelled by the
+    /// file rather than by the library.
+    func testAWholeSegmentMatchAlsoRecordsTheLibrarysSpelling() {
+        let parsed = FileNameParser.parse(
+            fileName: "ALICE EXAMPLE.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example"]))
+        XCTAssertEqual(parsed.actors, ["Alice Example"],
+                       "the filename's casing is not evidence of how the name is spelled")
+    }
+
+    /// ⚠️ The UNVALIDATED branches are the ones the canonical map could not
+    /// answer for at all, because it was built from the validated names only.
+    /// Each is asserted separately — they are three different branches, and a
+    /// test of one would pass while the other two wrote raw text.
+    func testTheUnvalidatedBranchesCanonicaliseToo() {
+        XCTAssertEqual(
+            FileNameParser.parse(fileName: "ALICE EXAMPLE.mp4",
+                                 vocabulary: vocab(actors: ["Alice Example"])).actors,
+            ["Alice Example"], "unvalidated actor")
+
+        XCTAssertEqual(
+            FileNameParser.parse(fileName: "OUTDOORS.mp4",
+                                 vocabulary: vocab(tags: ["Outdoors"])).tags,
+            ["Outdoors"], "unvalidated tag")
+
+        let studios = NameVocabulary(studios: ["Example Pictures"])
+        XCTAssertEqual(
+            FileNameParser.parse(fileName: "EXAMPLE PICTURES.mp4",
+                                 vocabulary: studios).studios,
+            ["Example Pictures"], "unvalidated studio")
+    }
+
+    /// ⭐ A confirmed spelling outranks a merely-remembered one. Both sets can
+    /// hold the same name in different casing — that is exactly how the damage
+    /// got into the library in the first place — so the tie has to be settled
+    /// deliberately rather than by dictionary insertion order.
+    func testAValidatedSpellingOutranksAnUnvalidatedOne() {
+        let parsed = FileNameParser.parse(
+            fileName: "ALICE EXAMPLE.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example"],
+                              actors: ["ALICE EXAMPLE"]))
         XCTAssertEqual(parsed.actors, ["Alice Example"])
     }
 }
