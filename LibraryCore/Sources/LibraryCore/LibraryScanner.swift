@@ -30,9 +30,26 @@ public class LibraryScanner {
         self.store = store
     }
     
-    public func scan(at rootURL: URL) async throws {
+    /// Walks the library and indexes what it finds.
+    ///
+    /// 🚨 S1 — a file arriving with a sidecar and NO catalogue record takes the
+    /// sidecar's values (#74). A file that already has a record does not: the
+    /// database wins, and the document is not consulted at all. That is the
+    /// directional rule, and the `known` set below is what enforces it — it is
+    /// read once, before the walk, so "already known" means known *before this
+    /// scan started* rather than whatever the walk has inserted so far.
+    ///
+    /// ⚠️ The reader is a parameter with a real default. It is the only way to
+    /// test the rule without a disk, and the default means no caller has to
+    /// know the seam exists.
+    @discardableResult
+    public func scan(at rootURL: URL,
+                     readSidecar: (String, URL) -> SidecarContents? = SidecarReader.read(besideVideo:in:))
+        async throws -> ScanSummary {
         let fileManager = FileManager.default
         var failedPaths: [String] = []
+        var summary = ScanSummary()
+        let known = Set((try? store.fetchAllAssets())?.map(\.relativePath) ?? [])
 
         // Only look for videos, skip the hidden .catalog folder
         let options: FileManager.DirectoryEnumerationOptions = [.skipsHiddenFiles, .skipsPackageDescendants]
@@ -62,10 +79,22 @@ public class LibraryScanner {
                 }
 
                 
-                let asset = Asset(
+                var asset = Asset(
                     relativePath: relativePath,
                     fileName: fileURL.lastPathComponent
                 )
+
+                // 🚨 Only for a file with no record. A known file keeps what
+                // the catalogue says, and its sidecar is not even read —
+                // reconciling an existing record is a different job with a
+                // different answer, and doing it here would quietly make the
+                // document authoritative.
+                var imported = false
+                if !known.contains(relativePath),
+                   let contents = readSidecar(relativePath, rootURL) {
+                    asset = SidecarImport.applying(contents, to: asset)
+                    imported = true
+                }
 
                 // saveAsset is INSERT OR IGNORE, so re-scanning known files
                 // is a no-op. One bad row must not abandon the rest of the
@@ -73,6 +102,20 @@ public class LibraryScanner {
                 // scanning, and report the aggregate at the end.
                 do {
                     try store.saveAsset(asset)
+                    if !known.contains(relativePath) { summary.added += 1 }
+
+                    // ⚠️ `saveAsset` is the minimal scan insert — it writes the
+                    // path and nothing else, and hard-codes empty tags. So the
+                    // imported values need a second write, and it must come
+                    // AFTER the insert. Keyed by the id this scan generated: if
+                    // the insert was ignored because a row already existed,
+                    // that row has a different id and this updates nothing,
+                    // which is the correct outcome for a file that turned out
+                    // to be known after all.
+                    if imported {
+                        try store.updateAsset(asset)
+                        summary.importedFromSidecar += 1
+                    }
                 } catch {
                     failedPaths.append(relativePath)
                 }
@@ -82,7 +125,20 @@ public class LibraryScanner {
         if !failedPaths.isEmpty {
             throw ScanError(failedPaths: failedPaths)
         }
+        return summary
     }
+}
+
+/// What a scan did.
+///
+/// ⚠️ `importedFromSidecar` is counted because it is the one thing a scan now
+/// does that the operator did not ask for file by file. A scan that silently
+/// took values out of documents it found would be indistinguishable from one
+/// that read nothing.
+public struct ScanSummary: Equatable, Sendable {
+    public var added = 0
+    public var importedFromSidecar = 0
+    public init() {}
 }
 
 /// Files that couldn't be indexed during a scan (the rest of the scan
