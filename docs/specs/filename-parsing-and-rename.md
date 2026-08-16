@@ -224,3 +224,16 @@ What is left once names are lifted out is probably tags, and the tag vocabulary 
 - **P4** — overlapping names consume longest-first, so one token cannot serve two people.
 - **P5** — a segment that already parses by comma is unchanged. No regression on the shape that works today.
 - **P6** — the remainder after extraction is reported, not silently dropped.
+### ✅ Built 2026-08-16 — and one prediction above was wrong
+Measured against the drive library after the change:
+|  |  |
+| --- | --- |
+| Castless videos now yielding a name | **113** of 241 |
+| Names recovered in total | 170 |
+| …with leftover text to show the operator | 65 |
+| Videos that already had cast, now offered a NEW name | 63 |
+⭐ That last row is the missing co-star case and was not anticipated. It is additive like every other reading — the parse only ever ADDS to what a record holds — and it goes through the review screen, so it is an offer rather than a change.
+🚨 **D4 was wrong, and the number in it should not be trusted.** It predicted 33 studio recoveries; the safe rule delivers **4**. The 33 was measured before the multi-token requirement existed, with a looser rule that would also have matched single-word studio names — and most studio names are a single word.
+⚠️ The rule stays as written. A studio can be an ordinary word exactly as a performer can, so exempting studios from the two-token requirement would reintroduce the risk the requirement exists to remove — it would simply do it somewhere the measurement had not looked. **What changes is the expectation, not the rule.**
+⭐ Worth keeping as a caution about this page's own evidence: a figure measured under one rule was carried into a decision about a different rule, and read as though it still applied. The 119/112 split for performers was measured correctly against both; the 33 never was.
+**Tests:** the six from the strategy above, plus one pinning that the library's spelling is recorded rather than the filename's. Mutation-checked — allowing single-token names kills one test, matching unvalidated names kills eight, and failing to consume matched words kills one.
