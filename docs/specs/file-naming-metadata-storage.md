@@ -11,16 +11,16 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 
 # File Naming & Metadata Storage Strategy
 
-> 🔨 **IMPLEMENTATION IN PROGRESS — 2 of 4 steps, as of 2026-08-13.** Status stays **Approved**; it becomes Implemented when the mover ships and the operator has verified a real run on device.
+> 🔨 **IMPLEMENTATION IN PROGRESS — 3 of 4 steps, as of 2026-08-15.** Status stays **Approved**; it becomes Implemented when the mover ships and the operator has verified a real run on device.
 > 
 > | Step | State | Commit |
 > | --- | --- | --- |
 > | 1 · Name generator — four grammars, pure | ✅ done | `9ba4652` |
 > | 2 · Dry-run plan | ✅ done | `3a0b306` |
-> | 3 · The mover — atomic rename, reversible | ⬜ next | |
+> | 3 · The mover — atomic rename, reversible | ✅ done | |
 > | 4 · Relocation rides matching (N2) | ⬜ | |
 > 
-> ⚠️ **All of it is verified against fixtures only.** Nothing has run against the real library — the drive has been detached throughout, and the snapshots available predate `content_kind` (v43), so they cannot exercise any of this.
+> ⚠️ **Superseded 2026-08-15 — it is no longer fixtures only.** Steps 1–3 have been measured against a copy of the **phone** library (1,350 assets, 363 declared), which produced the first non-empty plan: **280 moves, 1 collision, ****`canRun`**** false**. The drive library remains entirely undeclared and still plans zero moves. Nothing has been RUN against either — the plan and the mover are exercised, the actual rename has not been performed on real files.
 > 
 > **What shipped:** `ContentNaming` (all four grammars, F7b skipping, the truncation hierarchy, the three-performer rule), `PathComponentName` (T18b — the sanitiser did not exist; `ProfileImageNaming.safeId` handles only `:` and `/`, well short of what an ExFAT volume read on Windows needs), and `LibraryStore.relocationPlan()` (F3 asserted by snapshotting the database and the directory, collisions found before the run, cast resolved from edges **and** tag strings).
 > 
@@ -35,7 +35,7 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 | --- | --- | --- |
 | 1 | Rename IN PLACE. No copy into a parallel tree | Disk space is the constraint — see the mover note below |
 | 2 | Write NFO sidecars, standard Kodi fields only, no custom elements | Sets a hard ceiling on what can be exported |
-| 3 | Scenes keep the ViLM grammar — `Studio/Studio - Performers - Date` | Confirmed against the Kodi-movie alternative. Standards where they exist, ViLM grammar where none does |
+| 3 | Scenes keep the ViLM grammar — `Studio/Studio - Performers - Title - Date` (the title added 2026-08-15; see the section at the foot of this page) | Confirmed against the Kodi-movie alternative. Standards where they exist, ViLM grammar where none does |
 | 4 | Actor detail beyond name and photo is not exported | ViLM stays the source of truth for people |
 | 5 | Source description becomes `plot`; operator Notes are not exported | Private notes stay private |
 | 6 | Videos with no series and no title are renamed from their existing filename stem | Lossless, and converts the library in one pass |
@@ -138,7 +138,7 @@ Open standards win where they exist; ViLM defines a grammar only where none does
 | **Film** | `Film Title (2019)/Film Title (2019).mkv` | Kodi / Plex |
 | **Episodic** | `Series Name/Season 01/Series Name - S01E02 - Episode Title.mkv` | Kodi / Plex |
 | **Personal** | `Event or Description (2019).mkv` | Kodi `<movie>` shape |
-| **Scene** | `Studio/Studio - Performers - YYYY-MM-DD.ext` | **ViLM-defined** |
+| **Scene** | `Studio/Studio - Performers - Title - YYYY-MM-DD.ext` | **ViLM-defined** |
 **Performers appear only in the scene grammar.** The standards exclude them from film and episodic, which matches the principle that performers are identity for a scene and description for a film — and settles the instability worry, since a film's cast of dozens has no principled way to pick one.
 ### Missing fields omit their delimiter too
 A missing field removes **the segment and its adjacent separator**. A generated name never contains `' -  - '`, never begins or ends with `' - '`, and never carries a dangling `', '` from an empty performer list. Stated because the naive join produces exactly those, and they then fail to parse back — the round-trip F1 exists to catch.
@@ -152,7 +152,7 @@ Studio - 2019-04-12.mp4                                no performers
 Drop order is least-identifying first, and is fixed per class so the result is deterministic:
 | Class | Dropped first | Then | Never dropped |
 | --- | --- | --- | --- |
-| **Scene** | the **studio** — it is already the folder name, so repeating it is the only redundant segment | performers, from the end of the ordering, whole names only | the date |
+| **Scene** | the **studio** — it is already the folder name, so repeating it is the only redundant segment | the **title**, shortened at a word boundary — then performers from the end of the ordering, whole names only | the date |
 | **Episodic** | the episode title | — | series name, `SxxEyy` |
 | **Film** | — | the title truncates at a word boundary | the year |
 | **Personal** | — | the description truncates at a word boundary | the year |
@@ -220,6 +220,18 @@ The Epic owns T18 (a generated path matches the grammar, and personal content ne
 - **F7b — 🚨 A DECLARED kind whose grammar cannot be satisfied is also skipped, and reported with the field that is missing.** F7 covered undeclared only. The gap showed up the moment content was declared for real (2026-08-13): the Episodic grammar treats the series name and `SxxEyy` as structural — the truncation table lists them as never dropped — but only **173 of 2,077** videos carry an episode number and **113** a season. About 100 videos are now declared Episodic **on the phone library** — corrected 2026-08-14. The **drive** library is entirely undeclared: 0 of 2,077 carry a `contentKind`, measured against the catalogue itself. So the ~100 Episodic figure and the 173/113 season-and-episode figures describe two DIFFERENT libraries, and only the latter pair is the drive.
   ✅ **DECIDED 2026-08-13 — skip and report.** Consistent with everything else here: a video quietly filed under an invented episode number is worse than one visibly waiting, and the report doubles as the work list for adding the numbers. The file stays in the root, exactly as an undeclared one does.
   ⚠️ Not the same as inventing a *default*. Defaulting the season to 01 is a common convention and was considered; the episode number has no such convention, and half a guess still produces a wrong path.
+  ✅ **REVERSED 2026-08-15 — the season IS defaulted to 01. The episode number is still never invented.**
+  🚨 **The original reasoning bundled two fields that the data separates.** Measured on the phone library (the one carrying declarations), of **288** videos declared Episodic:
+  |  | Count |
+  | --- | --- |
+  | Filable today (series + season + episode) | **1** |
+  | Missing ONLY a season number | **204** |
+  | Missing an episode number | 71 |
+  | Missing a series name | 19 |
+  ⭐ The episode objection is sound and **still stands** — it reaches 71 videos, and those are reported, never guessed. It simply does not reach the 204 missing only a season, where the one assumed field is the one with a genuine convention. The earlier call was taken against an estimate of about 100 declared Episodic; this one is taken against the count.
+  **Measured effect, same library:** episodic filings **1 → 205**, whole plan **76 → 280 moves**.
+  🚨 **The default fills the PATH, never the record.** `asset.seasonNumber` is left `nil`. Writing 1 into it would turn a filing convention into a claim about the work — inference wearing a declaration's clothes, which is exactly what N4 forbids for `contentKind`. A real season can be stated later and nothing has to be un-guessed. Verified against the phone library: 6 episodic rows stored a season before the change and 6 after.
+  ⚠️ **And it is COUNTED and SHOWN.** `RelocationPlan.assumedSeasonCount` totals it, `PlannedMove.assumedSeason` marks the individual rows, and the plan screen states it in the dry run. A season nobody declared, applied to two hundred files and noticed afterwards, is the quiet wrongness this screen exists to prevent — approving 204 in aggregate is a decision, discovering them later is a surprise.
   ⭐ Film and Scene need no equivalent rule. Their at-risk field is the trailing release date — absent on 705 videos — and the grammar already handles that: a missing final segment truncates the name rather than leaving a placeholder, so `Title` alone is legal.
 - **F9 — Personal content never routes to a studio folder.** A `personal` asset carrying a studio — matched, mis-tagged, or read from a filename — is placed in the personal folder. Asserted for each of those three origins separately, because each is a different way the studio got there and only the last is obviously suspect.
 - **F10 — An undeclared asset stays in the root and stays usable.** With `contentKind == nil` the relocation produces no move, no error and no partial path; the asset remains playable, browsable and enrichable. Asserted so that "skipped" can never quietly become "broken".
@@ -260,3 +272,51 @@ The F7b note above said about 100 videos were declared Episodic. The drive has *
 - **`alreadyInPlace`**** is shown even though it is inert** — so that a plan with no moves is never mistaken for a library that was never examined.
 - **Single-library, like Identity Upgrade.** A path belongs to the library holding it; planning across an attached pair would propose moving files between two catalogues that each think they own them.
 - ⭐ **The readiness decision lives in ****`RelocationPlan`****, under test — only the wording is in the view.** The first draft worked it out in a private view function no test could reach, which is exactly the defect logged on 2026-08-14 in the same week. Six tests now cover it, including the one distinction that matters most on this library: *everything waiting* must never be reported as *nothing to do*.
+---
+## Step 3 — the mover, 2026-08-15
+**Built.** `RelocationMover`, `RelocationJournal`, schema **v44**. The Run button that the previous section deliberately withheld is now on the plan screen, and appears only when `canRun`.
+### 🚨 F4 needed a journal, because the existing rollback is a different property
+`FileRenamerService` already rolls a file move back when the database write throws. That is not interruption safety. A `do/catch` handles an **error**; F4 is about the **process dying** — in the window between the file landing at its new path and the row learning of it — and no in-memory rollback survives that.
+So the intent is committed to disk **before** the file moves. A crash then leaves an *unfinished* state rather than an *unknown* one, and reconciliation resolves each `planned` row by asking the filesystem which path holds the file:
+| On disk | Resolution |
+| --- | --- |
+| target only | the move landed; the catalogue catches up |
+| source only | the move never happened; abandoned |
+| **neither** | 🚨 reported, and the row is **left standing** — clearing it would erase the only record of where the file was going |
+| both | reported; an atomic rename cannot produce this, and deleting either copy is a decision about data |
+⚠️ A new run refuses to start while an earlier one is unresolved.
+### 🚨 The cross-volume check, and a deviation from this spec
+`moveItem` across volumes transparently degrades to copy-then-unlink — the expensive thing, done silently, surfacing only as a full disk. Volume identity is checked per move.
+⚠️ **This spec says fall back to copy-verify-remove; the implementation REFUSES instead.** Within one library both ends are on one volume by construction, so the fallback can never run — it would be a second, untestable copy of `VideoTransferService`'s routine. Refusing is the safe subset. **Open for the Human Operator:** build the fallback, or keep the refusal.
+### F5 is driven by the journal, never by recomputing
+🚨 A revert that re-derived where each file *should* go would undo a badly-named run by faithfully reproducing the same bad names. It replays the recorded old→new full paths in reverse. Pinned by a test that mutates the record after the move and asserts the revert ignores it.
+Undo is offered on the same screen: a reversible operation whose reverse is hidden elsewhere is one nobody trusts enough to use.
+### Tests — 18, mutation-checked
+⭐ The ordering invariant is asserted **from inside the move**: when the rename runs, the journal must already say `planned`. A source scan for line order would pass on any file containing both lines — the 2026-08-14 failure mode.
+- journal written *after* the move → **2** kills, including the test naming the invariant
+- a missing file quietly *abandoned* rather than reported → **5** kills
+Also pinned: T23, F2 (tags, rating, status, and the id-keyed contact sheet survive), the duplicate-scan fingerprint follows the file, one failure does not stop the run, an occupied target is refused rather than overwritten.
+**2,003 tests. macOS and iOS both build.** Step 4 (N2 — relocation rides matching) is next.
+---
+## The scene grammar gains the title, 2026-08-15
+Reported from the device: two scenes sharing a studio and a performer were told they would get the same name, despite different episode titles.
+### 🚨 This spec contradicted itself, and D2 was the half that was right
+**D2** lists the episode title under **Identity**, with *"In a filename? Yes"*. **D11/D12** then defined the scene grammar without it. The grammar was the half that disagreed.
+The reported pair shows why it mattered: same studio, same single performer, and **no release date on either** — so the old grammar had two segments to work with and produced one name for both files.
+|  |  |
+| --- | --- |
+| Old grammar | **1** distinct name for 2 files |
+| New grammar | **2** distinct names |
+### Where the title comes from, and where it deliberately does not
+The **episode** field, else the **series**. 🚨 Explicitly *not* the filename-stem fallback used by decision 6 — that fallback is right for a record with nothing else to offer, and wrong here, because it would bake the old junk filename into the new one permanently. A scene with no recorded title keeps the short `Studio - Performers - Date` form.
+### ⚠️ D3's separator collapse is handled, not accepted
+D3 named it: *"the delimiter is **`' - '`**, and episode titles routinely contain that exact sequence"* — introducing titles makes the collision ordinary. So `" - "` inside a title is folded to an en dash before joining. The field **count** stays fixed, so a name still parses back into the same segments (F1), and it reads the same to a person. Legal on ExFAT and on Windows, per D14.
+### Revised truncation order
+studio → **title shortened at a word boundary** → performers from the end → the date is never dropped.
+⚠️ Shortened rather than dropped, deliberately: the title is both the longest segment and the one that disambiguates, so dropping it whole would reintroduce the collision it was added to resolve.
+### 🚨 A second defect, found while fixing the first
+Collision detection keyed the target path **case-sensitively**, on a volume that is **ExFAT and therefore case-insensitive** — the property D14 chose it for.
+Two generated names differing only in case read as distinct, `canRun` reported true, and the run then failed partway as *"something is already there"*. Reachable in practice while disambiguating titles by hand, which is precisely what the operator was doing when this was reported. Now folded; the displayed path keeps its real casing, and `alreadyInPlace` folds case too.
+### Tests — 8 added
+Mutant: a case-sensitive collision key → **4** failures.
+⚠️ Worth recording: every existing scene test passed unchanged after this grammar change, because no fixture carried a title. The suite said nothing about the new segment until fixtures were written for it.

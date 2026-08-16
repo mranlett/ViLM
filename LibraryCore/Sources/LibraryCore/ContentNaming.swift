@@ -242,17 +242,19 @@ public enum ContentNaming {
         }
         let castPart = cast.isEmpty ? nil : cast.joined(separator: ", ")
         let date = asset.releaseDate?.trimmed
+        let title = recordedTitle(asset).map(foldingSeparator)
 
         // ⚠️ A missing field takes its separator with it. The naive join
         // produces " -  - " and a name that no longer parses back.
-        var stem = join([studioName, castPart, date], with: " - ")
+        var stem = join([studioName, castPart, title, date], with: " - ")
         if stem.isEmpty {
             // Nothing identifying at all — fall back to whatever the record can
             // still offer rather than producing a nameless file.
             guard let fallback = usableTitle(asset) else { return .skipped(.noUsableName) }
             stem = fallback
         }
-        stem = truncateScene(stem, studio: studioName, cast: cast, date: date)
+        stem = truncateScene(stem, studio: studioName, cast: cast,
+                             title: title, date: date)
 
         guard let component = PathComponentName.sanitised(stem) else {
             return .skipped(.noUsableName)
@@ -292,22 +294,71 @@ public enum ContentNaming {
             .map(\.name)
     }
 
-    /// Scene truncation: the studio first — it is already the folder name, so
-    /// repeating it is the only redundant segment — then performers from the
-    /// end, whole names only. The date is never dropped.
-    private static func truncateScene(_ stem: String, studio: String?,
-                                      cast: [String], date: String?) -> String {
-        guard stem.utf8.count > PathComponentName.maximumBytes else { return stem }
+    /// The title a scene is named by: the episode title, else the series.
+    ///
+    /// 🚨 Deliberately NOT `usableTitle`, which falls back to the existing
+    /// filename stem. That fallback is right when a record has nothing else to
+    /// offer (decision 6), and wrong here — a scene that already has a studio,
+    /// a cast and a date would otherwise have its OLD junk filename baked into
+    /// its new one permanently, which is precisely what renaming exists to undo.
+    static func recordedTitle(_ asset: Asset) -> String? {
+        if let t = asset.episode?.trimmed, !t.isEmpty { return t }
+        if let s = asset.videoName?.trimmed, !s.isEmpty { return s }
+        return nil
+    }
 
-        var candidate = join([cast.isEmpty ? nil : cast.joined(separator: ", "), date],
-                             with: " - ")
+    /// ⚠️ D3's separator collapse, handled rather than accepted. The field
+    /// separator is `" - "` and titles routinely contain that exact sequence —
+    /// the spec named this as the reason filenames could not be a store, and
+    /// putting titles into names would make the collision ordinary. Folding it
+    /// to an en dash inside the segment keeps the field COUNT fixed, so a
+    /// generated name still parses back into the same fields (F1).
+    ///
+    /// ⭐ An en dash rather than deleting it: it reads identically to a person
+    /// and is legal on ExFAT and on Windows, which D14 fixed the delimiters for.
+    static func foldingSeparator(_ text: String) -> String {
+        text.replacingOccurrences(of: " - ", with: " – ")
+    }
+
+    /// Scene truncation, least-identifying first.
+    ///
+    /// 1. the **studio** — already the folder name, so the only redundant segment
+    /// 2. the **title**, shortened at a word boundary rather than dropped
+    /// 3. **performers** from the end, whole names only
+    /// 4. the **date** is never dropped
+    ///
+    /// ⚠️ The title is shortened rather than removed, and that ordering is the
+    /// point: it is both the longest segment and the one that disambiguates two
+    /// scenes sharing a studio, a cast and a date. Dropping it whole would
+    /// reintroduce the exact collision it was added to resolve.
+    private static func truncateScene(_ stem: String, studio: String?,
+                                      cast: [String], title: String?,
+                                      date: String?) -> String {
+        guard stem.utf8.count > PathComponentName.maximumBytes else { return stem }
+        let castPart = { (names: [String]) -> String? in
+            names.isEmpty ? nil : names.joined(separator: ", ")
+        }
+
+        // 1 · without the studio
+        var candidate = join([castPart(cast), title, date], with: " - ")
         if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
 
+        // 2 · shorten the title at a word boundary, keeping everything else
+        if let title, !title.isEmpty {
+            var words = title.split(separator: " ").map(String.init)
+            while words.count > 1 {
+                words.removeLast()
+                candidate = join([castPart(cast), words.joined(separator: " "), date],
+                                 with: " - ")
+                if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
+            }
+        }
+
+        // 3 · performers from the end, whole names only
         var remaining = cast
         while !remaining.isEmpty {
             remaining.removeLast()
-            candidate = join([remaining.isEmpty ? nil : remaining.joined(separator: ", "), date],
-                             with: " - ")
+            candidate = join([castPart(remaining), date], with: " - ")
             if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         }
         return date ?? stem

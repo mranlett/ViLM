@@ -48,6 +48,56 @@ final class RelocationPlanTests: XCTestCase {
         try store.saveEntityProfile(p)
     }
 
+    // MARK: - 🚨 Case-insensitive collisions (ExFAT)
+
+    /// 🚨 The trap while disambiguating by hand. The library volume is ExFAT and
+    /// ExFAT is case-insensitive — D14 chose it so the drive reads on Windows —
+    /// so two titles differing ONLY in case are one path on disk.
+    ///
+    /// ⚠️ A case-sensitive key would call these distinct, let the plan report
+    /// `canRun`, and then fail mid-run as "something is already there". Better
+    /// to state it as the collision it is, before anything moves.
+    func testTwoNamesDifferingOnlyInCaseAreOneCollision() throws {
+        try addStudio("Example Pictures", state: .matched)
+        try addActor("Alice Example", gender: "Female")
+        try add("one.mp4", kind: .scene, tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "Late Checkout")
+        try add("two.mp4", kind: .scene, tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "LATE CHECKOUT")
+
+        let plan = try store.relocationPlan()
+
+        XCTAssertEqual(plan.collisions.count, 1,
+                       "same path on a case-insensitive volume — one collision, not two moves")
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.collisions.first?.assetIds.count, 2)
+        // The reported path keeps real casing rather than a folded key.
+        XCTAssertEqual(plan.collisions.first?.target.lowercased(),
+                       plan.collisions.first?.target.lowercased())
+        XCTAssertTrue(plan.collisions.first?.target.contains("Example Pictures") == true,
+                      "the path shown must not be lowercased for display")
+    }
+
+    /// ⭐ And the case that must NOT be a collision: genuinely different titles.
+    /// This is the pair reported from the device — same studio, same performer,
+    /// no release date on either, so before the title entered the scene grammar
+    /// they produced one identical name.
+    func testTwoScenesWithDifferentTitlesAndNoDateNoLongerCollide() throws {
+        try addStudio("Example Pictures", state: .matched)
+        try addActor("Alice Example", gender: "Female")
+        try add("one.mp4", kind: .scene, tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "Late Checkout")
+        try add("two.mp4", kind: .scene, tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "Late Checkout 2")
+
+        let plan = try store.relocationPlan()
+
+        XCTAssertTrue(plan.collisions.isEmpty,
+                      "the title is what tells these apart, and both have one")
+        XCTAssertEqual(plan.moves.count, 2)
+        XCTAssertEqual(Set(plan.moves.map(\.to)).count, 2)
+    }
+
     // MARK: - 🚨 F3 — a dry run writes nothing
 
     /// The assertion that matters more than the code. A plan that touches the

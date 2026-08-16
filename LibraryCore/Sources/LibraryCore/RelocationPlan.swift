@@ -162,7 +162,16 @@ public extension LibraryStore {
         var moves: [PlannedMove] = []
         var unfilable: [UnfilableVideo] = []
         var inPlace = 0
+        // 🚨 Keyed CASE-INSENSITIVELY, because the library volume is ExFAT and
+        // ExFAT is case-insensitive (D14 chose it so the drive reads on Windows
+        // too). Two generated names differing only in case are one path on that
+        // volume, so a case-sensitive key would report them as distinct, let the
+        // plan claim it could run, and then fail mid-run as "something is
+        // already there" — a confusing failure instead of a stated collision.
+        //
+        // ⚠️ The DISPLAY path keeps its original casing; only the key is folded.
         var byTarget: [String: [(UUID, String)]] = [:]
+        var displayTarget: [String: String] = [:]
 
         for asset in assets {
             let title = ActorKnownFor.displayTitle(asset)
@@ -177,17 +186,23 @@ public extension LibraryStore {
                 unfilable.append(.init(assetId: asset.id, path: asset.relativePath,
                                        title: title, skip: skip))
             case let .path(target):
-                guard target != asset.relativePath else { inPlace += 1; continue }
+                // ⚠️ Also case-insensitive: a file already at the target under
+                // different casing is in place on this volume, not a move.
+                guard target.lowercased() != asset.relativePath.lowercased() else {
+                    inPlace += 1; continue
+                }
                 moves.append(.init(assetId: asset.id, from: asset.relativePath,
                                    to: target, title: title,
                                    assumedSeason: ContentNaming.assumesSeason(for: asset)))
-                byTarget[target, default: []].append((asset.id, title))
+                let key = target.lowercased()
+                byTarget[key, default: []].append((asset.id, title))
+                if displayTarget[key] == nil { displayTarget[key] = target }
             }
         }
 
         let collisions = byTarget
             .filter { $0.value.count > 1 }
-            .map { PathCollision(target: $0.key,
+            .map { PathCollision(target: displayTarget[$0.key] ?? $0.key,
                                  assetIds: $0.value.map(\.0),
                                  titles: $0.value.map(\.1)) }
             .sorted { $0.target < $1.target }

@@ -145,6 +145,94 @@ final class ContentNamingTests: XCTestCase {
                        "Example Pictures/Example Pictures - Alice Example, Bea Example - 2019-04-12.mp4")
     }
 
+    // MARK: - 🚨 The title in a scene name (2026-08-15)
+
+    /// The gap that produced a real collision: two scenes sharing a studio, a
+    /// cast and a date got one name however different their titles were,
+    /// because the title was not in the grammar at all. D2 lists the episode
+    /// title under Identity with "in a filename? Yes", so the grammar was the
+    /// half that disagreed with the spec.
+    func testASceneNameCarriesItsTitleAfterTheCast() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .scene, episode: "Late Checkout", released: "2019-04-12"),
+            in: context(.filed("Example Pictures"), [("Alice Example", "Female")]))
+        XCTAssertEqual(path(outcome),
+                       "Example Pictures/Example Pictures - Alice Example - Late Checkout - 2019-04-12.mp4")
+    }
+
+    /// 🚨 The case this was built for, asserted as a difference rather than as
+    /// two separate expected strings — the property is that they do not collide.
+    func testTwoScenesSharingStudioCastAndDateNoLongerCollide() {
+        func name(_ title: String) -> String? {
+            path(ContentNaming.path(
+                for: asset(kind: .scene, episode: title, released: "2019-04-12"),
+                in: context(.filed("Example Pictures"), [("Alice Example", "Female")])))
+        }
+        let first = name("Late Checkout")
+        let second = name("Early Departure")
+        XCTAssertNotNil(first)
+        XCTAssertNotEqual(first, second,
+                          "same studio, same cast, same date — the title is the only thing "
+                          + "that can tell these apart")
+    }
+
+    /// ⚠️ D3's separator collapse, which the spec named as the reason titles
+    /// were kept out of filenames. Folding it keeps the FIELD COUNT fixed, so
+    /// the name still parses back into the same number of segments (F1).
+    func testATitleContainingTheDelimiterDoesNotAddAField() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .scene, episode: "Room 12 - The Long Way Back",
+                       released: "2019-04-12"),
+            in: context(.filed("Example Pictures"), [("Alice Example", "Female")]))
+        guard let name = path(outcome) else { return XCTFail("no path") }
+
+        let stem = (name as NSString).lastPathComponent
+        XCTAssertEqual(stem.components(separatedBy: " - ").count, 4,
+                       "studio, cast, title, date — and the title must not split into two")
+        XCTAssertTrue(name.contains("Room 12 – The Long Way Back"),
+                      "the title still reads the same to a person")
+    }
+
+    /// 🚨 A scene with no recorded title must NOT inherit its old filename.
+    /// `usableTitle` falls back to the stem, which is right for a record with
+    /// nothing else (decision 6) and wrong here — it would bake the junk name
+    /// the rename exists to remove into the new name permanently.
+    func testASceneWithNoTitleDoesNotInheritItsOldFilename() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .scene, file: "Alice - tags - studio junk.mp4",
+                       released: "2019-04-12"),
+            in: context(.filed("Example Pictures"), [("Alice Example", "Female")]))
+        XCTAssertEqual(path(outcome),
+                       "Example Pictures/Example Pictures - Alice Example - 2019-04-12.mp4",
+                       "the old stem must not survive into the generated name")
+        XCTAssertNil(ContentNaming.recordedTitle(
+            asset(kind: .scene, file: "Alice - tags - studio junk.mp4")))
+    }
+
+    /// The series is used when there is no episode title — a scene may still
+    /// belong to a named grouping.
+    func testASceneFallsBackToItsSeriesWhenThereIsNoEpisodeTitle() {
+        XCTAssertEqual(ContentNaming.recordedTitle(
+            asset(kind: .scene, series: "Harbour Nights")), "Harbour Nights")
+    }
+
+    /// ⚠️ Over the ceiling the title is SHORTENED, not dropped. Dropping it
+    /// whole would reintroduce the collision it was added to resolve.
+    func testAnOverlongSceneNameShortensTheTitleRatherThanLosingIt() {
+        let longTitle = String(repeating: "Verylongword ", count: 30).trimmingCharacters(in: .whitespaces)
+        let outcome = ContentNaming.path(
+            for: asset(kind: .scene, episode: longTitle, released: "2019-04-12"),
+            in: context(.filed("Example Pictures"), [("Alice Example", "Female")]))
+        guard let name = path(outcome) else { return XCTFail("no path") }
+        let stem = (name as NSString).lastPathComponent
+
+        XCTAssertLessThanOrEqual(stem.utf8.count, PathComponentName.maximumBytes)
+        XCTAssertTrue(stem.contains("Verylongword"),
+                      "some of the title must survive — it is what disambiguates")
+        XCTAssertTrue(stem.contains("Alice Example"), "the cast is dropped after the title")
+        XCTAssertTrue(stem.contains("2019-04-12"), "the date is never dropped")
+    }
+
     /// ⭐ Female and non-binary first, male last; alphabetical within a rank.
     ///
     /// 🚨 The male performer is named so he sorts FIRST alphabetically. An
