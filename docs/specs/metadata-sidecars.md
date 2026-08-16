@@ -73,3 +73,23 @@ Those live on the show-level file, not per episode. A video filed under the **Ep
 ## Sequencing
 💡 **Last, and blocking nothing.** It has no consumer today. The parent spec's relocation work does not depend on it, and shipping the two together would only mean the naming work waited on a format question.
 ⚠️ One ordering constraint: **S6 means the sidecar must be written by whatever performs the rename**, not by a separate later pass. A pass that writes sidecars for files it did not move cannot know what they used to be called.
+---
+## Built — the write half, 2026-08-16
+`MetadataSidecar` renders one video into Kodi `<movie>` XML, and `RelocationMover` writes it beside the file it has just renamed.
+### 🚨 Written by whatever performs the rename (S6)
+Not a later pass, per this spec's own sequencing note. A pass that writes sidecars for files it did not move cannot know what they used to be called, so it cannot remove the stale one — and a document left behind under an old name is worse than none: metadata that still looks authoritative and is now attached to nothing. The revert takes it back too.
+### 🚨 D4 is `ProviderBoundary`, reused rather than restated
+Personal writes none, and undeclared writes none. The question is identical to the one the provider boundary already answers — *may this content's metadata leave the device* — and two expressions of one rule is how the two drift with only one of them audited.
+⚠️ **The old document is removed even when no new one is written.** Moving a personal video and leaving its previous sidecar behind would strand exactly the plaintext D4 exists to keep off the disk. That case is easy to miss because the write path is the one you think about.
+### What the tests pin
+|  |  |
+| --- | --- |
+| **S2** | personal and `nil` asserted **separately** — different states, same required silence |
+| **S3** | a **whitelist** of Kodi elements, so decision 2 cannot erode one convenient field at a time; Notes never exported |
+| **S4** | every performer, not the filename's three — a path has a length limit and an XML document does not |
+| **S5** | blank fields omitted, because `<plot/>` claims "no description" where silence claims nothing |
+| **S6** | named for its video, and the stale one removed |
+Also pinned: the rating doubles onto Kodi's 0–10 scale, the full date survives beside the coarse year, a series standing alone is **not** claimed as a set (that would invent a collection of one), and markup in a title is escaped — an unescaped ampersand produces a document no consumer can read, failing on the receiving side where nobody is watching.
+**17 tests.** Mutants killed: writing for personal or undeclared (3), emitting blank fields (2), leaving the stale document behind (3).
+### ⚠️ S1 is NOT built, and is filed separately
+Accepting a sidecar on **first import** — where the database wins a reconciliation, and a sidecar is the only data for a file with no record — is a different feature. It means trusting a document this app did not write, which is a materially different risk from emitting one. Status therefore stays **Approved**: the half that closes the hole is done, and the half that reads is not.
