@@ -515,7 +515,7 @@ struct LibraryTransferView: View {
         isLoadingMoveList = true
         selectedForMove = []
         moveAlphaFilter = nil
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             var rows: [MoveRow] = []
             var profileList: [EntityProfile] = []
             var akaMap: [String: String] = [:]
@@ -609,7 +609,7 @@ struct LibraryTransferView: View {
         let service = VideoTransferService()
 
         let result: [DupMatch] = await ScopedOperation.run(holding: [openURL, otherURL]) {
-            await Task.detached(priority: .userInitiated) {
+            await Task.detached(priority: .utility) {
             guard let openStore = try? LibraryStore(at: openURL),
                   let otherStore = try? LibraryStore(at: otherURL),
                   let openAssets = try? openStore.fetchAllAssets(),
@@ -686,7 +686,7 @@ struct LibraryTransferView: View {
         isApplyingDups = true
 
         let (deleted, failures): (Int, [String]) = await ScopedOperation.run(holding: [openURL, otherURL]) {
-            await Task.detached(priority: .userInitiated) {
+            await Task.detached(priority: .utility) {
                 let service = VideoTransferService()
                 var deleted = 0
                 var failures: [String] = []

@@ -200,7 +200,7 @@ struct ActorLibraryImportView: View {
             let data = try Data(contentsOf: pickedURL)
             let loadedExport = try JSONDecoder().decode(ActorLibraryExport.self, from: data)
             let url = libraryURL
-            let computedPlan = try await Task.detached(priority: .userInitiated) {
+            let computedPlan = try await Task.detached(priority: .utility) {
                 let store = try LibraryStore(at: url)
                 return try store.planActorMerge(loadedExport)
             }.value
@@ -222,7 +222,7 @@ struct ActorLibraryImportView: View {
         isApplying = true
         do {
             let url = libraryURL
-            let applied = try await Task.detached(priority: .userInitiated) {
+            let applied = try await Task.detached(priority: .utility) {
                 let store = try LibraryStore(at: url)
                 return try store.applyGraphMerge(export)
             }.value

@@ -369,7 +369,7 @@ struct ActorSyncView: View {
         let urls = LibrarySession.shared.allURLs
         do {
             let (snaps, planned, thumbs) = try await ScopedOperation.run(holding: urls) {
-                try await Task.detached(priority: .userInitiated) { () -> ([ActorSync.LibrarySnapshot], [ActorSyncPlan], [String: PlatformImage]) in
+                try await Task.detached(priority: .utility) { () -> ([ActorSync.LibrarySnapshot], [ActorSyncPlan], [String: PlatformImage]) in
                     let snaps = try urls.map { try ActorSync.snapshot(of: $0) }
                     let planned = ActorSync.plan(for: snaps)
                     // One avatar per (differing actor, source library),
@@ -460,7 +460,7 @@ struct ActorSyncView: View {
 
         do {
             try await ScopedOperation.run(holding: urls) {
-                try await Task.detached(priority: .userInitiated) {
+                try await Task.detached(priority: .utility) {
                     // Applied in batches, re-reading photo bytes for only the
                     // actors in each batch.
                     //

@@ -138,7 +138,7 @@ struct SeriesTitleRepairView: View {
         let url = libraryURL
         isRepairing = true
         Task {
-            let outcome: Result<Int, Error> = await Task.detached(priority: .userInitiated) {
+            let outcome: Result<Int, Error> = await Task.detached(priority: .utility) {
                 do { return .success(try LibraryStore(at: url).repairSeriesTitles()) }
                 catch { return .failure(error) }
             }.value

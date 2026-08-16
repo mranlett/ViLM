@@ -514,7 +514,7 @@ struct RelocationPlanView: View {
         isBackfilling = true
         defer { isBackfilling = false }
         let url = libraryURL
-        backfill = await Task.detached(priority: .userInitiated) { () -> SidecarBackfillSummary? in
+        backfill = await Task.detached(priority: .utility) { () -> SidecarBackfillSummary? in
             guard let store = try? LibraryStore(at: url),
                   let assets = try? store.fetchAllAssets() else { return nil }
             let profiles = (try? store.fetchAllEntityProfiles()).map(EntityProfileIndex.init)

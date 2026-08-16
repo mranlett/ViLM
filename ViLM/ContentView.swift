@@ -1623,6 +1623,7 @@ struct ContentView: View {
         // session learns which libraries contain each profile so edits and
         // downloads target the owning one.
         let openURLs = LibrarySession.shared.allURLs
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         Task.detached(priority: .userInitiated) {
             do {
                 var layers: [[EntityProfile]] = []

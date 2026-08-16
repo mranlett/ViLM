@@ -757,7 +757,7 @@ struct ActorGridView: View {
         // File read, CSV parse, and the row-by-row DB writes all run off the
         // main thread — a large CSV used to freeze the UI for its duration.
         isImportingCSV = true
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             defer {
                 Task { @MainActor in isImportingCSV = false }
             }

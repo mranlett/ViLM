@@ -262,6 +262,7 @@ enum ThumbnailLoader {
     /// Cache key includes the file's modification date so regenerated
     /// thumbnails (e.g. "Set as Main Thumbnail") are picked up.
     static func image(from url: URL, maxPixelSize: Int) async -> CGImage? {
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         await Task.detached(priority: .userInitiated) {
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
             let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0

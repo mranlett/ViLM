@@ -201,7 +201,7 @@ struct LibraryBackupView: View {
         let url = openLibraryURL
         do {
             let result = try await ScopedOperation.run(holding: [url]) {
-                try await Task.detached(priority: .userInitiated) { try LibraryBackupService().exportBackup(of: url) }.value
+                try await Task.detached(priority: .utility) { try LibraryBackupService().exportBackup(of: url) }.value
             }
             // 🚨 Renamed BEFORE the picker sees it. `.fileMover` offers the
             // file's own name, and the service names its temp archive
@@ -261,7 +261,7 @@ struct LibraryBackupView: View {
         isRestoring = true; restoreStatus = "Restoring…"
         do {
             try await ScopedOperation.run(holding: [archive, target]) {
-                try await Task.detached(priority: .userInitiated) {
+                try await Task.detached(priority: .utility) {
                     try LibraryBackupService().restoreIntoEmpty(archiveURL: archive, targetLibraryURL: target)
                 }.value
             }
@@ -277,7 +277,7 @@ struct LibraryBackupView: View {
         isRestoring = true; restoreStatus = "Analyzing backup…"
         do {
             let plan = try await ScopedOperation.run(holding: [archive, target]) {
-                try await Task.detached(priority: .userInitiated) {
+                try await Task.detached(priority: .utility) {
                     try LibraryBackupService().planRestore(archiveURL: archive, destinationLibraryURL: target)
                 }.value
             }
@@ -331,7 +331,7 @@ struct LibraryBackupView: View {
         let discards = discardIDs
         do {
             try await ScopedOperation.run(holding: [archive, target]) {
-                try await Task.detached(priority: .userInitiated) {
+                try await Task.detached(priority: .utility) {
                     _ = try LibraryBackupService().applyRestoreOverExisting(
                         archiveURL: archive, destinationLibraryURL: target, discardAssetIDs: discards)
                 }.value

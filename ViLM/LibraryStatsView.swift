@@ -355,7 +355,7 @@ struct LibraryStatsView: View {
         // profiles remain primary-only until the merged actor view lands.
         let unionAssets = (try? LibrarySession.shared.fetchUnionAssets().assets) ?? []
 
-        await Task.detached(priority: .userInitiated) {
+        await Task.detached(priority: .utility) {
             do {
                 let store = try LibraryStore(at: url)
                 let assets = unionAssets

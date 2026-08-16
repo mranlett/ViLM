@@ -475,6 +475,7 @@ struct ActorEnrichmentSheet: View {
     private func loadLocalStudios() async {
         guard let libraryURL, localStudios.isEmpty else { return }
         let name = actorName
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         let found = await Task.detached(priority: .userInitiated) { () -> Set<String> in
             (try? LibraryStore(at: libraryURL).studios(forActor: name)) ?? []
         }.value
@@ -496,6 +497,7 @@ struct ActorEnrichmentSheet: View {
             return
         }
         let name = actorName
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         let refusal = await Task.detached(priority: .userInitiated) {
             () -> PerformerExposure.Refusal? in
             guard let exposures = try? LibraryStore(at: libraryURL).performerExposures() else {

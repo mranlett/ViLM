@@ -293,7 +293,7 @@ struct GraphConnectView: View {
         isPruning = true
         do {
             let url = libraryURL
-            try await Task.detached(priority: .userInitiated) {
+            try await Task.detached(priority: .utility) {
                 let store = try LibraryStore(at: url)
                 // ⭐ Exactly the edges listed above, not a fresh scan. The
                 // operator approved a list; deleting something else is not a

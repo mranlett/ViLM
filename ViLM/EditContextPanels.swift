@@ -287,6 +287,7 @@ struct ActorContextPanel: View {
         let name = displayName
         let id = entityId
         let urls = LibrarySession.shared.allURLs
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         let found: [Asset] = await Task.detached(priority: .userInitiated) {
             var seen = Set<UUID>()
             var out: [Asset] = []

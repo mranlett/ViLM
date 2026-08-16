@@ -293,6 +293,7 @@ final class HeadToHeadModel: ObservableObject {
     private static func assetsWithAStill(among assets: [Asset],
                                          owners: [Asset.ID: URL?]) async -> Set<UUID> {
         let libraries = Set(owners.values.compactMap { $0 })
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         let names: Set<String> = await Task.detached(priority: .userInitiated) {
             var out: Set<String> = []
             for library in libraries {

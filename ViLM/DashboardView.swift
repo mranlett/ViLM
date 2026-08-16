@@ -114,7 +114,7 @@ struct DashboardView: View {
         let smartCollections = self.smartCollections
         let playlists = self.playlists
         let playlistItems = self.playlistItems
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             let stats = Self.computeStats(
                 assets: assets, entityProfiles: entityProfiles,
                 profileImageFileNames: profileImageFileNames,

@@ -287,7 +287,7 @@ struct IdentityUpgradeView: View {
         upgradeError = nil
         let url = libraryURL
         do {
-            let outcome = try await Task.detached(priority: .userInitiated) {
+            let outcome = try await Task.detached(priority: .utility) {
                 try LibraryStore(at: url).performIdentityRekey()
             }.value
             result = outcome
@@ -320,7 +320,7 @@ struct IdentityUpgradeView: View {
         isWorking = true
         do {
             let url = libraryURL
-            let result = try await Task.detached(priority: .userInitiated) {
+            let result = try await Task.detached(priority: .utility) {
                 try LibraryStore(at: url).migrationPreflight()
             }.value
             check = result

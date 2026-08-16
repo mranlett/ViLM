@@ -391,7 +391,7 @@ struct AliasSplitMergeView: View {
             // passes would read the same 2,000 assets twice, and a second read
             // landing after the first would repaint the list under the
             // operator's finger.
-            let loaded = try await Task.detached(priority: .userInitiated) {
+            let loaded = try await Task.detached(priority: .utility) {
                 () -> (candidates: [AliasSplitCandidate],
                        films: [String: [ActorKnownFor.VideoRef]],
                        profiles: [String: EntityProfile],
@@ -443,7 +443,7 @@ struct AliasSplitMergeView: View {
         pending = nil
         isMerging = true
         let url = libraryURL
-        let outcome = await Task.detached(priority: .userInitiated) {
+        let outcome = await Task.detached(priority: .utility) {
             AliasMerge.perform(losing: losing, surviving: surviving, in: url)
         }.value
 

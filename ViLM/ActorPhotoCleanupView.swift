@@ -207,7 +207,7 @@ struct ActorPhotoCleanupView: View {
         isScanning = true
         summary = nil
         let url = libraryURL
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             do {
                 let store = try LibraryStore(at: url)
                 let result = try ActorPhotoScanner.scan(store: store, libraryURL: url) { done, total in
@@ -232,7 +232,7 @@ struct ActorPhotoCleanupView: View {
         isApplying = true
         let chosen = selected
         let url = libraryURL
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             do {
                 let store = try LibraryStore(at: url)
                 let removed = try ActorPhotoScanner.apply(chosen, store: store, libraryURL: url)

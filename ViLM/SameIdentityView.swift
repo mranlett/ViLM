@@ -149,7 +149,7 @@ struct SameIdentityView: View {
         let losers = finding.members.filter { $0.id != survivor.id }.map(\.id)
         isMerging = true
         Task {
-            let error: Error? = await Task.detached(priority: .userInitiated) {
+            let error: Error? = await Task.detached(priority: .utility) {
                 do {
                     let store = try LibraryStore(at: url)
                     // ⚠️ Every other member, not just one. A group can hold two

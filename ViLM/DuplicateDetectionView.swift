@@ -255,7 +255,7 @@ struct DuplicateDetectionView: View {
             ($0.id, LibrarySession.shared.url(for: $0.id) ?? lib)
         })
 
-        let (resultGroups, resultMeta) = await Task.detached(priority: .userInitiated) { () -> ([DuplicateGroup], [Asset.ID: FileMeta]) in
+        let (resultGroups, resultMeta) = await Task.detached(priority: .utility) { () -> ([DuplicateGroup], [Asset.ID: FileMeta]) in
             // Phase 1: metadata for every video (size from the filesystem;
             // duration/resolution from the container; bitrate estimated as
             // size ÷ duration — the whole-file rate, which is what matters
@@ -435,7 +435,7 @@ struct DuplicateDetectionView: View {
         // Route through the shared delete (file-first ordering: a failed file
         // removal aborts that video with its metadata intact; artifacts and
         // marker previews are cleaned up; the file goes to the Trash).
-        let (deleted, failures) = await Task.detached(priority: .userInitiated) { () -> (Set<Asset.ID>, [String]) in
+        let (deleted, failures) = await Task.detached(priority: .utility) { () -> (Set<Asset.ID>, [String]) in
             let service = VideoTransferService()
             var deleted = Set<Asset.ID>()
             var failures: [String] = []

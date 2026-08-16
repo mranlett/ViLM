@@ -295,7 +295,7 @@ struct IdentityGapView: View {
     private func repairDamaged() {
         let url = libraryURL
         Task {
-            let outcome: Result<Int, Error> = await Task.detached(priority: .userInitiated) {
+            let outcome: Result<Int, Error> = await Task.detached(priority: .utility) {
                 do { return .success(try LibraryStore(at: url).repairNamelessNodes()) }
                 catch { return .failure(error) }
             }.value
@@ -315,7 +315,7 @@ struct IdentityGapView: View {
     private func load() async {
         do {
             let url = libraryURL
-            let found = try await Task.detached(priority: .userInitiated) {
+            let found = try await Task.detached(priority: .utility) {
                 try LibraryStore(at: url).identityGaps()
             }.value
             await MainActor.run {

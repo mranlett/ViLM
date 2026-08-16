@@ -31,6 +31,7 @@ enum ContactSheetFrames {
         let posterURL = LibrarySession.shared.thumbnailURL(for: assetID)
         let sheetURL = LibrarySession.shared.contactSheetURL(for: assetID)
 
+        // ⚠️ Deliberately interactive — see QoSConventionTests for the rule and the reason.
         return await Task.detached(priority: .userInitiated) {
             var out: [CGImage] = []
             if let posterURL, let poster = image(at: posterURL) { out.append(poster) }
