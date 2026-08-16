@@ -374,8 +374,15 @@ public enum ContentNaming {
         // Nothing but the title and the date left. The date is never dropped;
         // the title goes only if even that will not fit.
         candidate = join([shortestTitle, date], with: " - ")
-        if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
-        return date ?? stem
+        if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
+            return candidate
+        }
+        // ⚠️ Nothing structured left. A scene with no studio, cast, title or
+        // date is named from its filename stem (decision 6), and rebuilding
+        // from the empty parts produces "" — which fits the ceiling trivially
+        // and then sanitises to nothing, reporting a perfectly nameable file as
+        // having no usable name. Truncate what we were given instead.
+        return date ?? PathComponentName.truncated(stem)
     }
 
     // MARK: - Helpers

@@ -262,6 +262,25 @@ public extension LibraryStore {
         }
     }
 
+    /// Marks the forward move that a recovered revert was undoing.
+    ///
+    /// Matched on the asset and the exact pair of paths, reversed — the same
+    /// two strings the revert row carries, so it cannot settle an unrelated
+    /// move of the same file.
+    func settleMatchingForwardRelocation(assetId: String, from: String, to: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE relocation_journal SET state = ?, settled_at = ?
+                 WHERE asset_id = ? AND from_path = ? AND to_path = ?
+                   AND kind = ? AND state IN (?, ?)
+                """, arguments: [RelocationJournalEntry.State.reverted.rawValue, Date(),
+                                  assetId, from, to,
+                                  RelocationJournalEntry.Kind.relocate.rawValue,
+                                  RelocationJournalEntry.State.done.rawValue,
+                                  RelocationJournalEntry.State.recovered.rawValue])
+        }
+    }
+
     // MARK: - Reading
 
     func relocationJournal(runId: String? = nil,
@@ -365,6 +384,16 @@ public extension LibraryStore {
                 // the opposite of what happened.
                 try settleRelocation(entryId, assetId: assetId, newPath: entry.toPath,
                                      state: entry.kindValue == .revert ? .reverted : .recovered)
+                // ⚠️ A revert settles TWO rows: its own, and the forward move it
+                // undoes. Recovering only its own left the original reading
+                // `done`, so the run still counted the file as moved and a
+                // second revert would try to undo it again — and fail, because
+                // the file is already back.
+                if entry.kindValue == .revert {
+                    try settleMatchingForwardRelocation(assetId: entry.assetId,
+                                                        from: entry.toPath,
+                                                        to: entry.fromPath)
+                }
                 // 🚨 The fingerprint follows the file here too. `perform` re-keys
                 // it after settling; the recovery path did not, so a crash in
                 // that window left the duplicate-scan cache stranded at the old

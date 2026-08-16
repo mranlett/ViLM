@@ -265,6 +265,14 @@ public struct RelocationMover {
         guard RelocationActivity.tryBegin() else { return .failed("A rename is already running.") }
         defer { RelocationActivity.end() }
         do {
+            // ⚠️ Reconcile first, even here. An earlier run interrupted after
+            // moving THIS asset leaves the catalogue naming the old path — so
+            // the plan would propose moving a file that is no longer there and
+            // the operator would be told their video is missing when it is
+            // safely at its destination. Cheap: a query over `planned` rows,
+            // which is normally empty.
+            try store.reconcileInterruptedRelocations(libraryURL: libraryURL,
+                                                      duringOwnRun: true)
             let plan = try store.relocationPlan(limitedTo: [assetId])
 
             if let skip = plan.unfilable.first(where: { $0.assetId == assetId }) {

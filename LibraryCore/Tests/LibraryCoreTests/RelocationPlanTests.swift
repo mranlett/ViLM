@@ -98,6 +98,31 @@ final class RelocationPlanTests: XCTestCase {
         XCTAssertEqual(Set(plan.moves.map(\.to)).count, 2)
     }
 
+    /// 🚨 A file already correctly filed still OCCUPIES its path. It was
+    /// skipped as work AND skipped from the collision map, so another video
+    /// wanting the same name read as a clean single move — and the mover then
+    /// refused it mid-run as "something is already there". A collision found
+    /// during the run instead of before it is the one thing the dry run exists
+    /// to prevent. Found by the auditor.
+    func testAVideoAlreadyInPlaceStillCollidesWithOneWantingItsPath() throws {
+        try addStudio("Example Pictures", state: .matched)
+        try addActor("Alice Example", gender: "Female")
+        // Already at the exact path the grammar would give it.
+        try add("Example Pictures/Example Pictures - Alice Example - Late Checkout - 2019-04-12.mp4",
+                kind: .scene, tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "Late Checkout", released: "2019-04-12")
+        // A different file that generates the same name.
+        try add("elsewhere.mp4", kind: .scene,
+                tags: ["studio:Example Pictures", "actor:Alice Example"],
+                episode: "Late Checkout", released: "2019-04-12")
+
+        let plan = try store.relocationPlan()
+
+        XCTAssertEqual(plan.collisions.count, 1,
+                       "the occupied path must be reported before the run, not during it")
+        XCTAssertFalse(plan.canRun)
+    }
+
     // MARK: - 🚨 F3 — a dry run writes nothing
 
     /// The assertion that matters more than the code. A plan that touches the

@@ -201,15 +201,25 @@ public extension LibraryStore {
             case let .path(target):
                 // ⚠️ Also case-insensitive: a file already at the target under
                 // different casing is in place on this volume, not a move.
-                guard target.lowercased() != asset.relativePath.lowercased() else {
-                    inPlace += 1; continue
+                let key = target.lowercased()
+                if displayTarget[key] == nil { displayTarget[key] = target }
+                guard key != asset.relativePath.lowercased() else {
+                    // 🚨 An in-place file still OCCUPIES its path, so it joins
+                    // the collision map before being skipped as work. Without
+                    // this, a video already correctly filed was invisible to
+                    // the check, another video wanting the same name read as a
+                    // clean single move, and the mover then refused it mid-run
+                    // as `targetOccupied` — a collision found during the run
+                    // instead of before it, which is the one thing the dry run
+                    // exists to prevent.
+                    byTarget[key, default: []].append((asset.id, title))
+                    inPlace += 1
+                    continue
                 }
                 moves.append(.init(assetId: asset.id, from: asset.relativePath,
                                    to: target, title: title,
                                    assumedSeason: ContentNaming.assumesSeason(for: asset)))
-                let key = target.lowercased()
                 byTarget[key, default: []].append((asset.id, title))
-                if displayTarget[key] == nil { displayTarget[key] = target }
             }
         }
 
