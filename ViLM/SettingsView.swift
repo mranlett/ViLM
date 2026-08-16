@@ -14,9 +14,7 @@ struct SettingsView: View {
     
     var onOpenLibrary: (() -> Void)?
     var onCheckForChanges: (() -> Void)?
-    var onAuditFileName: (() -> Void)?
     var onFindDuplicates: (() -> Void)?
-    var onMigrateEpisodes: (() -> Void)?
     var onTagCleanup: (() -> Void)?
     var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
@@ -191,14 +189,11 @@ struct SettingsView: View {
                 Section(
                     header: Text("Find Problems"),
                     footer: Text(session.isFederated
-                        ? "Find Duplicates scans every open library, so cross-library copies surface. File Name Audit works on one at a time — detach to use it."
+                        ? "Find Duplicates scans every open library, so cross-library copies surface. The rest work on one at a time — detach to use them."
                         : "These report rather than change anything.")
                 ) {
                     toolButton("Find Duplicate Videos",
                                icon: "square.on.square.dashed", action: onFindDuplicates)
-                    toolButton("File Name Audit",
-                               icon: "doc.text.magnifyingglass", action: onAuditFileName)
-                        .disabled(session.isFederated)
                     // Single-library for the same reason Connect the Graph is:
                     // half of what it checks is edges, and an edge cannot span
                     // two libraries.
@@ -280,11 +275,8 @@ struct SettingsView: View {
                 // resembles the consequences of.
                 Section(
                     header: Text("Maintenance"),
-                    footer: Text("Rarely needed. Migrate Episode Info runs once on a library that predates structured episodes. Match Again clears match status so videos are looked up afresh — it cannot be undone.")
+                    footer: Text("Rarely needed. Match Again clears match status so videos are looked up afresh — it cannot be undone. Measure Videos opens every file that has not been measured, so it takes a while.")
                 ) {
-                    toolButton("Migrate Episode Info", icon: "arrow.triangle.branch",
-                               action: onMigrateEpisodes)
-                        .disabled(session.isFederated)
                     toolButton("Match Again", icon: "arrow.counterclockwise",
                                action: onResetMatches)
                         .disabled(session.isFederated)

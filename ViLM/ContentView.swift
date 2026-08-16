@@ -110,7 +110,6 @@ struct ContentView: View {
     @State private var detailPath: [AppRoute] = []
 
     // Feature Sheets
-    @State private var isShowingFileNameAudit = false
     @State private var isShowingTagCleanup = false
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
@@ -145,7 +144,6 @@ struct ContentView: View {
     @State private var isShowingGraphConnect = false
     @State private var isShowingMatchReset = false
     @State private var isShowingDuplicateDetection = false
-    @State private var isShowingEpisodeBackfill = false
     @State private var isShowingActorLibraryExport = false
     @State private var isShowingActorLibraryImport = false
     @State private var isShowingLibraryTransfer = false
@@ -271,15 +269,6 @@ struct ContentView: View {
             }) {
                 settingsSheet
             }
-            .sheet(isPresented: $isShowingFileNameAudit) {
-                if let url = selectedLibraryURL {
-                    FileNameAuditView(
-                        libraryURL: url,
-                        assets: assets,
-                        onRefresh: { reloadUnionAssets() }
-                    )
-                }
-            }
             .sheet(isPresented: $isShowingDuplicateDetection) {
                 if let url = selectedLibraryURL {
                     DuplicateDetectionView(
@@ -287,11 +276,6 @@ struct ContentView: View {
                         assets: assets,
                         onRefresh: { reloadUnionAssets() }
                     )
-                }
-            }
-            .sheet(isPresented: $isShowingEpisodeBackfill) {
-                if let url = selectedLibraryURL {
-                    EpisodeBackfillView(libraryURL: url, assets: assets)
                 }
             }
             .sheet(isPresented: $isShowingActorLibraryExport) {
@@ -839,9 +823,7 @@ struct ContentView: View {
                 libraryURL: selectedLibraryURL,
                 onOpenLibrary: openLibrary,
                 onCheckForChanges: validateLibrary,
-                onAuditFileName: { isShowingFileNameAudit = true },
                 onFindDuplicates: { isShowingDuplicateDetection = true },
-                onMigrateEpisodes: { isShowingEpisodeBackfill = true },
                 onTagCleanup: { isShowingTagCleanup = true },
                 onClassifyTags: { isShowingTagClassification = true },
                 onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
