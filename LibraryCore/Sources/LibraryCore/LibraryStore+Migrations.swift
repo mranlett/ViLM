@@ -914,6 +914,20 @@ extension LibraryStore {
             }
         }
 
+        // ⚠️ What a journal row IS, so an undo is never reported as a rename.
+        //
+        // A revert records its own reverse move (crash safety, symmetric with a
+        // run). Without this column those rows are indistinguishable from
+        // ordinary moves: an interrupted revert reconciles to `.recovered`, and
+        // "your last run" then shows the undo as the last rename — the opposite
+        // of what happened. Inferring it from a run-id prefix was the
+        // alternative, and a string convention is not a schema.
+        migrator.registerMigration("v45") { db in
+            try db.alter(table: "relocation_journal") { t in
+                t.add(column: "kind", .text).notNull().defaults(to: "relocate")
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

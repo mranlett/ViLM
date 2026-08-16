@@ -591,6 +591,84 @@ final class RelocationMoverTests: XCTestCase {
         XCTAssertEqual(second, .alreadyInPlace)
     }
 
+    // MARK: - 🚨 What the audit found (2026-08-16)
+
+    /// A run that dies on its FIRST file has no settled rows at all. Filtering
+    /// the summary by state skipped it entirely and reported an older,
+    /// successful run as the latest — telling the operator their last run was
+    /// fine when it had just failed.
+    func testARunThatFailedOnItsFirstFileIsStillTheLastRunReported() throws {
+        let first = try addFile("first.mp4")
+        _ = try RelocationMover(store: store).run(
+            plan([move(first, to: "Filed/first.mp4")]), libraryURL: dir, runId: "run-good")
+
+        let second = try addFile("second.mp4")
+        var mover = RelocationMover(store: store)
+        mover.moveFile = { _, _ in throw CancellationError() }
+        _ = try mover.run(plan([move(second, to: "Filed/second.mp4")]),
+                          libraryURL: dir, runId: "run-bad")
+        try store.reconcileInterruptedRelocations(libraryURL: dir)
+
+        XCTAssertEqual(try store.lastRelocationRun()?.runId, "run-bad",
+                       "the newest run must be reported even when it settled nothing")
+    }
+
+    /// 🚨 An undo is not a rename. A revert records its own reverse rows, and
+    /// without a kind they are indistinguishable from moves — so the screen
+    /// would report the undo as the last rename, the opposite of what happened.
+    func testAnUndoIsNeverReportedAsTheLastRename() throws {
+        let asset = try addFile("first.mp4")
+        let mover = RelocationMover(store: store)
+        _ = try mover.run(plan([move(asset, to: "Filed/a.mp4")]),
+                          libraryURL: dir, runId: "run-1")
+        _ = try mover.revert(runId: "run-1", libraryURL: dir)
+
+        XCTAssertEqual(try store.lastRelocationRun()?.runId, "run-1",
+                       "the revert must not become the last run")
+    }
+
+    /// ⚠️ The fingerprint follows the file on the RECOVERY path too. `perform`
+    /// re-keys it after settling; the reconciler did not, so a crash in that
+    /// window stranded the duplicate-scan cache at the old path and the video
+    /// was silently re-fingerprinted later.
+    func testReconciliationCarriesTheFingerprintAcross() throws {
+        let asset = try addFile("old name.mp4")
+        var prints = FrameFingerprintStore(libraryURL: dir)
+        prints.setHashes([9, 9, 9], relativePath: "old name.mp4", sizeBytes: 5, modified: 0)
+        prints.save()
+
+        var mover = RelocationMover(store: store)
+        mover.postMoveHook = { _ in throw CancellationError() }
+        _ = try mover.run(plan([move(asset, to: "Filed/new name.mp4")]),
+                          libraryURL: dir, runId: "run-1")
+        try store.reconcileInterruptedRelocations(libraryURL: dir)
+
+        let after = FrameFingerprintStore(libraryURL: dir)
+        XCTAssertEqual(after.entries["Filed/new name.mp4"]?.hashes, [9, 9, 9])
+        XCTAssertNil(after.entries["old name.mp4"])
+    }
+
+    /// The token covers every writer, not just the bulk run.
+    func testAMatchTimeRelocationAlsoHoldsTheRunToken() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+        let library = store!
+        var deferredDuring = false
+
+        var mover = RelocationMover(store: library)
+        let realMove = mover.moveFile
+        mover.moveFile = { from, to in
+            deferredDuring = (try? library.reconcileInterruptedRelocations(libraryURL: self.dir))?
+                .deferredWhileRunning ?? false
+            try realMove(from, to)
+        }
+        _ = mover.relocateAfterMatch(assetId: asset.id, libraryURL: dir, runId: "match-1")
+
+        XCTAssertTrue(deferredDuring,
+                      "reconciliation must defer during a match-time move too")
+    }
+
     // MARK: - Refusals
 
     func testAPlanWithCollisionsRefusesToRun() throws {

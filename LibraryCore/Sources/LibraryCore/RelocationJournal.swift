@@ -44,7 +44,14 @@ public struct RelocationJournalEntry: Codable, FetchableRecord, PersistableRecor
         case reverted
     }
 
+    /// Whether this row is a relocation or the undo of one.
+    public enum Kind: String, Codable, Sendable {
+        case relocate
+        case revert
+    }
+
     public var id: Int64?
+    public var kind: String = Kind.relocate.rawValue
     public var runId: String
     public var assetId: String
     public var fromPath: String
@@ -55,8 +62,11 @@ public struct RelocationJournalEntry: Codable, FetchableRecord, PersistableRecor
 
     public var stateValue: State { State(rawValue: state) ?? .planned }
 
+    public var kindValue: Kind { Kind(rawValue: kind) ?? .relocate }
+
     enum CodingKeys: String, CodingKey {
         case id
+        case kind
         case runId = "run_id"
         case assetId = "asset_id"
         case fromPath = "from_path"
@@ -68,9 +78,10 @@ public struct RelocationJournalEntry: Codable, FetchableRecord, PersistableRecor
 
     public init(id: Int64? = nil, runId: String, assetId: String,
                 fromPath: String, toPath: String,
-                state: State = .planned,
+                state: State = .planned, kind: Kind = .relocate,
                 createdAt: Date = Date(), settledAt: Date? = nil) {
         self.id = id
+        self.kind = kind.rawValue
         self.runId = runId
         self.assetId = assetId
         self.fromPath = fromPath
@@ -201,9 +212,11 @@ public extension LibraryStore {
     /// window this exists to close.
     @discardableResult
     func recordRelocationIntent(runId: String, assetId: UUID,
-                                from: String, to: String) throws -> RelocationJournalEntry {
+                                from: String, to: String,
+                                kind: RelocationJournalEntry.Kind = .relocate)
+    throws -> RelocationJournalEntry {
         var entry = RelocationJournalEntry(runId: runId, assetId: assetId.uuidString,
-                                           fromPath: from, toPath: to)
+                                           fromPath: from, toPath: to, kind: kind)
         try dbQueue.write { db in
             try entry.insert(db)
             // ⚠️ Read the row id explicitly rather than relying on `didInsert`
@@ -266,14 +279,22 @@ public extension LibraryStore {
         }
     }
 
-    /// The most recent run that moved anything, for offering a revert.
+    /// The most recent relocation run, for offering a revert and for reporting.
+    ///
+    /// 🚨 The newest run of KIND relocate, whatever state its rows ended in —
+    /// not the newest run containing a settled move. Filtering by state hid the
+    /// case that matters most: a run that died on its FIRST file has no settled
+    /// rows at all, so the query skipped it and reported an older, successful
+    /// run as the latest — telling the operator their last run was fine when it
+    /// had just failed.
+    ///
+    /// ⚠️ And `kind`, so an undo is never offered back as the last rename.
     func lastCompletedRelocationRunId() throws -> String? {
         try dbQueue.read { db in
             try String.fetchOne(db, sql: """
                 SELECT run_id FROM relocation_journal
-                 WHERE state IN (?, ?) ORDER BY id DESC LIMIT 1
-                """, arguments: [RelocationJournalEntry.State.done.rawValue,
-                                  RelocationJournalEntry.State.recovered.rawValue])
+                 WHERE kind = ? ORDER BY id DESC LIMIT 1
+                """, arguments: [RelocationJournalEntry.Kind.relocate.rawValue])
         }
     }
 
@@ -337,8 +358,19 @@ public extension LibraryStore {
             switch (atSource, atTarget) {
             case (false, true):
                 // The move landed and the bookkeeping did not. Finish it.
-                try settleRelocation(entryId, assetId: assetId,
-                                     newPath: entry.toPath, state: .recovered)
+                //
+                // ⚠️ Settled as what this row IS. An interrupted revert
+                // recovered as `.recovered` would then be picked up as the last
+                // rename run, and the screen would report an undo as a move —
+                // the opposite of what happened.
+                try settleRelocation(entryId, assetId: assetId, newPath: entry.toPath,
+                                     state: entry.kindValue == .revert ? .reverted : .recovered)
+                // 🚨 The fingerprint follows the file here too. `perform` re-keys
+                // it after settling; the recovery path did not, so a crash in
+                // that window left the duplicate-scan cache stranded at the old
+                // path and the video silently re-fingerprinted later.
+                FrameFingerprintRekey.move(in: libraryURL,
+                                           from: entry.fromPath, to: entry.toPath)
                 report.completed.append(assetId)
 
             case (true, false):

@@ -257,6 +257,13 @@ public struct RelocationMover {
     /// with the whole-library plan, where the moves are read before they run.
     public func relocateAfterMatch(assetId: UUID, libraryURL: URL,
                                    runId: String) -> MatchRelocation {
+        // 🚨 Same token as a bulk run (#71). Without it this path left
+        // `isRunning` false while a move was in flight, so the plan screen
+        // opening at that instant would reconcile a row this mover was about to
+        // settle. `run` was guarded and the other two entry points were not —
+        // the guard is only worth anything if every writer takes it.
+        guard RelocationActivity.tryBegin() else { return .failed("A rename is already running.") }
+        defer { RelocationActivity.end() }
         do {
             let plan = try store.relocationPlan(limitedTo: [assetId])
 
@@ -284,6 +291,11 @@ public struct RelocationMover {
     /// the damage.
     @discardableResult
     public func revert(runId: String, libraryURL: URL) throws -> RelocationRunResult {
+        // 🚨 And here. A revert moves files, so reconciliation must not run
+        // against it either.
+        guard RelocationActivity.tryBegin() else { throw RelocationRunError.alreadyRunning }
+        defer { RelocationActivity.end() }
+
         var result = RelocationRunResult(runId: runId)
 
         // Reverse order, so a file moved into a directory another move created
@@ -326,7 +338,7 @@ public struct RelocationMover {
                 // picked up as movable work by a later revert of the SAME run.
                 let back = try store.recordRelocationIntent(
                     runId: "revert-\(runId)", assetId: assetId,
-                    from: entry.toPath, to: entry.fromPath)
+                    from: entry.toPath, to: entry.fromPath, kind: .revert)
                 guard let backId = back.id else { throw RelocationMoveError.journalFailed }
 
                 try moveFile(current, original)
