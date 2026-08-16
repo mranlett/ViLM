@@ -156,6 +156,39 @@ public extension LibraryStore {
     ///   still refuses a target that is already occupied on disk. So a scoped
     ///   move is refused rather than overwriting — it just learns later than the
     ///   dry run would have told it.
+    /// What the naming rules would call ONE video, or why they cannot name it.
+    ///
+    /// 🚨 Built on the scoped plan rather than on a second call into
+    /// `ContentNaming`, and that is the entire point. The per-video Rename on
+    /// the details page used `Asset.suggestedFileNameFromTags` — the OLD
+    /// grammar, `Actors - Series - Tags - Studios` — so the one screen an
+    /// operator reaches for a single file proposed a name the rest of the
+    /// system had stopped using, complete with the tags D2 removed from
+    /// filenames for being the most mutable field in the model.
+    ///
+    /// ⚠️ Assembling a `NamingContext` here instead would have been a second
+    /// expression of studio placement and cast resolution, which is how the two
+    /// drift with only one of them audited. This asks the planner.
+    ///
+    /// ⭐ Returns the FILE NAME, not the path. This is what a rename-in-place
+    /// dialog can offer; filing it into its folder is the plan's job, and a
+    /// caller that wants both should run the plan.
+    func generatedFileName(for assetId: UUID,
+                           personalFolder: String = "Personal",
+                           unfiledFolder: String = "Unfiled") throws -> NamingOutcome? {
+        let plan = try relocationPlan(personalFolder: personalFolder,
+                                      unfiledFolder: unfiledFolder,
+                                      limitedTo: [assetId])
+        if let move = plan.moves.first {
+            return .path((move.to as NSString).lastPathComponent)
+        }
+        if let skip = plan.unfilable.first {
+            return .skipped(skip.skip)
+        }
+        // Neither a move nor a refusal means it is already correctly named.
+        return nil
+    }
+
     func relocationPlan(personalFolder: String = "Personal",
                         unfiledFolder: String = "Unfiled",
                         limitedTo: Set<UUID>? = nil) throws -> RelocationPlan {

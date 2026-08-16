@@ -403,6 +403,22 @@ extension Asset {
         return parts.joined(separator: " ")
     }
 
+    /// 🚨 SUPERSEDED — do not use this to name a file.
+    ///
+    /// This is the OLD convention, `Actors - Series/Episode - Tags - Studios`,
+    /// and it is retained only because it describes how files in the library
+    /// were named BEFORE the four content-class grammars — which is what
+    /// `FileNameParser` reads them back with. As a generator it is wrong twice
+    /// over: the field order was replaced, and D2 removed tags from filenames
+    /// entirely because they are the most mutable thing in the model, so a
+    /// re-tag renamed the file.
+    ///
+    /// ⚠️ Two screens still called it long after it was superseded — the
+    /// per-video Rename and the File Name Audit, which offered to convert the
+    /// whole library back to it. Both now take their proposal from
+    /// `LibraryStore.generatedFileName(for:)`, which asks the planner. If you
+    /// are reaching for this to produce a name, you want that instead.
+    @available(*, deprecated, message: "Superseded by ContentNaming via LibraryStore.generatedFileName(for:). This is the pre-2026-08 convention and exists to document what old filenames look like.")
     public var suggestedFileNameFromTags: String? {
         let actorsPart = actors.joined(separator: ", ")
         let tagsPart = actions.joined(separator: ", ")

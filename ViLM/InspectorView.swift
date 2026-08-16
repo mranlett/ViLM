@@ -81,6 +81,8 @@ struct SingleInspectorView: View {
     @State private var activeCategory = "tag"
     @State private var editingTagValue: String? = nil
     @State private var isShowingRenameDialog = false
+    /// Why the naming rules refused this file, when they did.
+    @State private var renameSkip: NamingSkip?
     @State private var suggestedRenameValue = ""
     @State private var showDeleteConfirmation = false
     @State private var isShowingHelp = false
@@ -319,7 +321,7 @@ struct SingleInspectorView: View {
                             .disabled(missingAssetIDs.contains(asset.id) || libraryURL == nil)
                         }
                         Button {
-                            suggestedRenameValue = asset.suggestedFileNameFromTags ?? asset.fileName
+                            prepareRenameProposal()
                             isShowingRenameDialog = true
                         } label: {
                             Label("Rename File…", systemImage: "pencil.line")
@@ -375,7 +377,8 @@ struct SingleInspectorView: View {
                 onCancel: { isShowingRenameDialog = false },
                 onConfirm: {
                     performRename()
-                }
+                },
+                namingSkip: renameSkip
             )
         }
         .alert("Delete Video?", isPresented: $showDeleteConfirmation) {
@@ -1766,6 +1769,46 @@ struct SingleInspectorView: View {
         } catch {
             print("Failed to remove missing asset: \(error)")
             AppErrorReporter.report("Couldn't remove the missing file's entry: \(error.localizedDescription)")
+        }
+    }
+
+    /// 🚨 The name the CURRENT rules would give this file.
+    ///
+    /// This used to be `asset.suggestedFileNameFromTags` — the old grammar,
+    /// `Actors - Series/Episode - Tags - Studios`, studio last and tags in the
+    /// middle. That scheme was replaced by the four per-content-class grammars,
+    /// and D2 specifically removed tags from filenames because they are the
+    /// most mutable field in the model: re-tagging a video renamed the file.
+    /// So the one screen an operator reaches to rename a single video was
+    /// proposing names to a scheme nothing else in the app still used, and
+    /// undoing the Relocation Plan's work one file at a time.
+    ///
+    /// ⭐ The proposal comes from the PLANNER, not from a second call into
+    /// `ContentNaming`. Building a naming context here would have been another
+    /// expression of studio placement and cast resolution, which is exactly how
+    /// this pair drifted apart in the first place.
+    private func prepareRenameProposal() {
+        renameSkip = nil
+        suggestedRenameValue = asset.fileName
+
+        guard let url = LibrarySession.shared.url(for: asset.id),
+              let store = try? LibraryStore(at: url) else { return }
+
+        // ⚠️ Flattened: `try?` wraps an already-optional return, and the doubly
+        // optional value is easy to match wrongly.
+        let outcome = (try? store.generatedFileName(for: asset.id)) ?? nil
+        switch outcome {
+        case let .path(name):
+            suggestedRenameValue = name
+        case let .skipped(skip):
+            // ⚠️ Refused, and it says why. The old grammar always produced
+            // something, so a video the rules deliberately decline to file
+            // still got a confident suggestion.
+            renameSkip = skip
+        case nil:
+            // Already correctly named. The field holds the current name and
+            // renaming is a no-op unless the operator edits it.
+            break
         }
     }
 
