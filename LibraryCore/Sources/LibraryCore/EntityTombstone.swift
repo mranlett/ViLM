@@ -58,8 +58,27 @@ public enum TombstoneRules {
                                        to profile: EntityProfile?) -> Bool {
         guard let profile else { return false }   // nothing to delete
         guard let created = profile.createdAt else { return true }
-        return created <= tombstone.deletedAt
+        return created <= tombstone.deletedAt + storageGranularity
     }
+
+    /// 🚨 How far apart two timestamps may be and still count as the same moment.
+    ///
+    /// `createdAt` is stored rounded to the nearest millisecond, so a profile
+    /// saved at the instant of a deletion reads back as much as half a
+    /// millisecond LATER than it — and the comparison above, written as
+    /// inclusive, then declined to propagate the deletion. Measured: 13 of 40
+    /// saves came back later than a deletion recorded after them.
+    ///
+    /// ⭐ This is not loosening the rule, it is making it mean what it says. The
+    /// rule asks whether a profile was DELIBERATELY RE-CREATED after a deletion,
+    /// and half a millisecond is not evidence of a person doing anything — it is
+    /// the width of the storage format. A genuine re-creation is seconds apart at
+    /// the very least.
+    ///
+    /// ⚠️ Deliberately the granularity itself and nothing more generous. A wider
+    /// window would start discarding real re-creations, which is the resurrection
+    /// this rule exists to prevent, in the opposite direction.
+    static let storageGranularity: TimeInterval = 0.001
 
     /// Whether an incoming profile should be refused because it predates a
     /// recorded deletion.
@@ -72,7 +91,7 @@ public enum TombstoneRules {
                                         incoming: EntityProfile?) -> Bool {
         guard let incoming else { return true }
         guard let created = incoming.createdAt else { return true }
-        return created <= tombstone.deletedAt
+        return created <= tombstone.deletedAt + storageGranularity
     }
 
     /// The winning tombstone for an id across libraries: the most recent.

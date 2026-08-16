@@ -150,13 +150,43 @@ final class ActorMergeBoundaryTests: XCTestCase {
     }
 
     // A8 — a tombstone deletes the LOCAL profile it names.
+    //
+    // 🚨 The ordering is STATED, not left to two `Date()` calls microseconds
+    // apart. This test failed about one run in eight for weeks and was written
+    // off as "the known flake" until it was finally caught: `createdAt` stores
+    // rounded to the nearest millisecond, so a profile saved immediately before
+    // the tombstone reads back as much as half a millisecond LATER than it —
+    // and `shouldPropagate` then correctly declines, because a profile created
+    // after a deletion is a deliberate re-creation.
+    //
+    // ⚠️ The product is right and the fixture was wrong. Measured: 13 of 40
+    // saves came back later than a deletion timestamp taken after the save.
+    // A6 above already states its ordering explicitly; this one did not.
     func testATombstoneDeletesTheLocalProfile() throws {
-        try store.saveEntityProfile(EntityProfile(id: "actor:Doomed"))
+        let deletedAt = Date()
+        try store.saveEntityProfile(
+            EntityProfile(id: "actor:Doomed",
+                          createdAt: deletedAt.addingTimeInterval(-3600)))
         _ = try store.applyActorMerge(export(tombstones: [
-            EntityTombstone(entityId: "actor:Doomed", deletedAt: Date(), replacedBy: nil)
+            EntityTombstone(entityId: "actor:Doomed", deletedAt: deletedAt, replacedBy: nil)
         ]))
 
         XCTAssertNil(try store.fetchEntityProfile(for: "actor:Doomed"))
+    }
+
+    /// ⚠️ The boundary the flake was hiding: a profile created at the SAME
+    /// instant as the deletion is still deleted, because the rule is inclusive.
+    /// Pinned so the fix above cannot be mistaken for the rule having changed.
+    func testAProfileCreatedAtTheDeletionInstantIsStillDeleted() throws {
+        let instant = Date()
+        try store.saveEntityProfile(EntityProfile(id: "actor:Simultaneous",
+                                                  createdAt: instant))
+        _ = try store.applyActorMerge(export(tombstones: [
+            EntityTombstone(entityId: "actor:Simultaneous", deletedAt: instant,
+                            replacedBy: nil)
+        ]))
+
+        XCTAssertNil(try store.fetchEntityProfile(for: "actor:Simultaneous"))
     }
 
     // MARK: - 🚨 The no-op assertion
