@@ -230,11 +230,27 @@ struct VideoManualSearchView: View {
                 }
                 Spacer()
                 Button {
+                    // 🚨 Commit whatever is still sitting in the fields first.
+                    //
+                    // A name typed into "Add a performer…" and not confirmed
+                    // with Add or Return was NOT a filter, so `canBrowse` was
+                    // false, Search was silently greyed out, and pressing it did
+                    // nothing — with the name visibly right there on screen.
+                    // Reported twice as "search by hand is not working".
+                    //
+                    // ⭐ Pressing Search plainly means "search for what I have
+                    // typed". Requiring a separate confirmation step first is a
+                    // rule the screen never stated.
+                    commitPending()
                     Task { await model.runBrowse(page: 1) }
                 } label: {
                     if model.isBrowsing { ProgressView().controlSize(.small) } else { Text("Search") }
                 }
-                .disabled(model.isBrowsing || !model.canBrowse)
+                .disabled(model.isBrowsing || !canSearch)
+                // ⚠️ A disabled control that does not say why teaches the
+                // operator that the feature is broken.
+                .help(canSearch ? "Search the source with these filters"
+                                : "Add a performer, studio, tag or title to search for")
             }
         }
         .padding()
@@ -262,6 +278,20 @@ struct VideoManualSearchView: View {
                 }
             }
         }
+    }
+
+    /// Whether there is anything to search for, INCLUDING text still sitting
+    /// uncommitted in a field.
+    private var canSearch: Bool {
+        model.canBrowse
+            || !newPerformer.trimmingCharacters(in: .whitespaces).isEmpty
+            || !newTag.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Turns whatever is in the entry fields into filters.
+    private func commitPending() {
+        if !newPerformer.trimmingCharacters(in: .whitespaces).isEmpty { commitPerformer() }
+        if !newTag.trimmingCharacters(in: .whitespaces).isEmpty { commitTag() }
     }
 
     private func commitPerformer() {
