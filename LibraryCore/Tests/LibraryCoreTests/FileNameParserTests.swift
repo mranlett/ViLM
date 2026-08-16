@@ -493,3 +493,89 @@ extension FileNameParserTests {
         XCTAssertTrue(additions.contains("tag:Outdoors"))
     }
 }
+
+// MARK: - 🚨 #73 · reading names out of a comma-less segment
+
+extension FileNameParserTests {
+
+    private func vocab(validatedActors: [String] = [], validatedStudios: [String] = [],
+                       actors: [String] = [], tags: [String] = []) -> NameVocabulary {
+        NameVocabulary(actors: Set(actors), studios: [], tags: Set(tags),
+                       validatedActors: Set(validatedActors),
+                       validatedStudios: Set(validatedStudios))
+    }
+
+    /// P1 — the case reported from the device. Filenames written before any
+    /// renaming utility existed do not separate names with commas, so the whole
+    /// segment matched nothing and the vocabulary was never consulted.
+    func testP1ACommaLessSegmentOfTwoValidatedNamesPlacesBoth() {
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example Bob Example - Example Pictures.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example", "Bob Example"],
+                              validatedStudios: ["Example Pictures"]))
+        XCTAssertEqual(parsed.actors.sorted(), ["Alice Example", "Bob Example"])
+        XCTAssertEqual(parsed.studios, ["Example Pictures"])
+    }
+
+    /// 🚨 P2 — the rule that makes this safe. A single-token name is also an
+    /// ordinary word, and crediting the wrong performer is corruption rather
+    /// than an absence. Measured cost of refusing these: seven videos of 119.
+    func testP2ASingleTokenNameIsNotMatchedInsideOrdinaryText() {
+        let parsed = FileNameParser.parse(
+            fileName: "a summer diamond by the lake.mp4",
+            vocabulary: vocab(validatedActors: ["Diamond"]))
+        XCTAssertTrue(parsed.actors.isEmpty,
+                      "one token is a word, not a name — it must stay unrecognised")
+        XCTAssertFalse(parsed.unrecognised.isEmpty)
+    }
+
+    /// P3 — merely PRESENT is not evidence. An unvalidated name may be there
+    /// only because an earlier parse guessed it, which would let one guess
+    /// justify the next.
+    func testP3AnUnvalidatedNameIsNotMatchedEvenWithTwoTokens() {
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example Bob Example.mp4",
+            vocabulary: vocab(actors: ["Alice Example", "Bob Example"]))
+        XCTAssertTrue(parsed.actors.isEmpty)
+    }
+
+    /// P4 — longest-first, and consumed. One token cannot serve two people.
+    func testP4OverlappingNamesConsumeLongestFirst() {
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example Smith rides again.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example", "Alice Example Smith"]))
+        XCTAssertEqual(parsed.actors, ["Alice Example Smith"],
+                       "the longer name takes the tokens the shorter one wanted")
+    }
+
+    /// P5 — no regression. A segment that already parses by comma is untouched,
+    /// because embedded scanning only runs where nothing placed the segment whole.
+    func testP5ACommaSeparatedSegmentIsUnchanged() {
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example, Bob Example.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example", "Bob Example"]))
+        XCTAssertEqual(parsed.actors.sorted(), ["Alice Example", "Bob Example"])
+        XCTAssertTrue(parsed.unrecognised.isEmpty)
+    }
+
+    /// P6 — what is left over is REPORTED, not dropped. It is probably tags,
+    /// and applying the tag vocabulary to it would compound a guess on a guess.
+    func testP6TheRemainderIsReportedRatherThanDiscarded() {
+        let parsed = FileNameParser.parse(
+            fileName: "Alice Example on a rainy afternoon.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example"]))
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+        XCTAssertEqual(parsed.unrecognised, ["on a rainy afternoon"],
+                       "the leftover keeps the operator's own words")
+    }
+
+    /// ⚠️ The library's spelling wins, not the filename's. Writing back what the
+    /// file happened to say would put a second spelling of one person into the
+    /// library beside the confirmed one.
+    func testTheCanonicalSpellingIsRecordedNotTheFilenames() {
+        let parsed = FileNameParser.parse(
+            fileName: "alice example and friends.mp4",
+            vocabulary: vocab(validatedActors: ["Alice Example"]))
+        XCTAssertEqual(parsed.actors, ["Alice Example"])
+    }
+}

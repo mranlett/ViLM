@@ -92,8 +92,22 @@ public struct NameVocabulary: Sendable {
     public let validatedActors: Set<String>
     public let validatedStudios: Set<String>
 
+    /// Lowercased name → the library's own spelling of it.
+    ///
+    /// 🚨 An embedded match is found in a FILENAME, and a filename's casing is
+    /// not evidence. Writing back whatever the file happened to say would put a
+    /// second spelling of a person into the library beside the confirmed one —
+    /// which is the shape of the casing damage this project has already had to
+    /// repair. The library's own display name wins.
+    public let canonical: [String: String]
+
     public init(actors: Set<String> = [], studios: Set<String> = [], tags: Set<String> = [],
                 validatedActors: Set<String> = [], validatedStudios: Set<String> = []) {
+        var canonical: [String: String] = [:]
+        for name in validatedActors.union(validatedStudios) {
+            canonical[name.lowercased()] = name
+        }
+        self.canonical = canonical
         self.actors = Set(actors.map { $0.lowercased() })
         self.studios = Set(studios.map { $0.lowercased() })
         self.tags = Set(tags.map { $0.lowercased() })
@@ -167,6 +181,97 @@ public enum FileNameParser {
             .filter { !$0.isEmpty }
     }
 
+    /// Names the vocabulary can find INSIDE a segment that matched nothing whole.
+    ///
+    /// 🚨 The filenames written before any renaming utility existed do not
+    /// separate names with commas, so `splitList` hands back one entry that is
+    /// not a name and the whole segment is discarded — with the vocabulary
+    /// sitting right there, unconsulted. Measured on the drive library: 241
+    /// videos carry no cast, and 119 of them name a known performer in the
+    /// filename.
+    ///
+    /// ## 🚨 Validated, and at least two tokens. Both, and neither is optional.
+    ///
+    /// Scanning inside a segment invites false positives, and a wrongly
+    /// credited performer is corruption rather than an absence.
+    ///
+    /// - **Two tokens** means a match is a full name rather than a word. Of
+    ///   1,366 names in that library only 45 are a single token, and a single
+    ///   token is also ordinary English.
+    /// - **Validated** means the library has CONFIRMED that person exists,
+    ///   rather than having seen the string once — possibly because an earlier
+    ///   parse guessed it, which would then let one guess justify the next.
+    ///
+    /// Measured, the two rules together cost seven videos out of 119 and remove
+    /// essentially all of the exposure. ⚠️ Loosening either without re-measuring
+    /// throws away the only reason this is safe.
+    ///
+    /// ⭐ Matching runs over WORD WINDOWS of the original text rather than over
+    /// a normalised copy, so the remainder keeps the operator's own spelling
+    /// and punctuation — it is shown to them, and a mangled remainder is worse
+    /// than none.
+    ///
+    /// - Returns: the canonical names found, longest-first, and what was left.
+    static func embeddedNames(in segment: String,
+                              from names: Set<String>,
+                              canonical: [String: String]) -> (found: [String], remainder: String) {
+        let words = segment.split(separator: " ").map(String.init)
+        guard words.count >= 2 else { return ([], segment) }
+
+        /// Comparable form: lowercased, letters and digits only.
+        func fold(_ text: String) -> String {
+            text.lowercased().replacingOccurrences(of: "[^a-z0-9]+", with: "",
+                                                   options: .regularExpression)
+        }
+        let folded = words.map(fold)
+
+        // Multi-token only, longest-first so a longer name wins the tokens a
+        // shorter one would have taken.
+        //
+        // ⚠️ Built in steps with explicit types. As one chained expression this
+        // exceeded the type-checker's budget outright — the same reason
+        // `AssetsGridView` lifts its own pipelines apart.
+        var candidates: [(raw: String, parts: [String])] = []
+        for name in names {
+            var parts: [String] = []
+            for word in name.split(separator: " ") {
+                let piece = fold(String(word))
+                if !piece.isEmpty { parts.append(piece) }
+            }
+            if parts.count >= 2 { candidates.append((raw: name, parts: parts)) }
+        }
+        candidates.sort { a, b in
+            if a.parts.count != b.parts.count { return a.parts.count > b.parts.count }
+            return a.parts.joined().count > b.parts.joined().count
+        }
+
+        var consumed = Array(repeating: false, count: words.count)
+        var found: [String] = []
+
+        for candidate in candidates {
+            let width = candidate.parts.count
+            guard width <= words.count else { continue }
+            for start in 0...(words.count - width) {
+                let range = start..<(start + width)
+                // ⚠️ Never reuse a word. One token cannot serve two people, and
+                // without this a name overlapping another would credit both.
+                guard !range.contains(where: { consumed[$0] }) else { continue }
+                guard Array(folded[range]) == candidate.parts else { continue }
+                found.append(canonical[candidate.raw.lowercased()] ?? candidate.raw)
+                range.forEach { consumed[$0] = true }
+                break
+            }
+        }
+
+        guard !found.isEmpty else { return ([], segment) }
+        let remainder = words.enumerated()
+            .filter { !consumed[$0.offset] }
+            .map(\.element)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (found, remainder)
+    }
+
     /// Reads a filename into fields, using the vocabulary to place segments.
     public static func parse(fileName: String, vocabulary: NameVocabulary) -> ParsedFileName {
         let stem = (fileName as NSString).deletingPathExtension
@@ -222,7 +327,27 @@ public enum FileNameParser {
             } else if entries.allSatisfy({ vocabulary.tags.contains($0.lowercased()) }) {
                 result.tags.append(contentsOf: entries)
             } else {
-                unplaced.append((index, segment))
+                // ⭐ Only reached when nothing placed the segment WHOLE, so a
+                // comma-separated list that already parses is untouched — this
+                // widens what can be read without changing what already works.
+                let (people, afterPeople) = embeddedNames(
+                    in: segment, from: vocabulary.validatedActors,
+                    canonical: vocabulary.canonical)
+                let (houses, remainder) = embeddedNames(
+                    in: afterPeople, from: vocabulary.validatedStudios,
+                    canonical: vocabulary.canonical)
+
+                if people.isEmpty && houses.isEmpty {
+                    unplaced.append((index, segment))
+                } else {
+                    result.actors.append(contentsOf: people)
+                    result.studios.append(contentsOf: houses)
+                    // ⚠️ What is left is REPORTED, not dropped. It is probably
+                    // tags, and applying the tag vocabulary to it would compound
+                    // one guess on another — measure the remainder before
+                    // deciding that, rather than deciding it here by default.
+                    if !remainder.isEmpty { unplaced.append((index, remainder)) }
+                }
             }
         }
 
