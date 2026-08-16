@@ -344,15 +344,17 @@ struct VideoManualSearchView: View {
             if largeImages {
                 imageGrid
             } else {
-                List {
-                    Section {
-                        ForEach(model.browseResults) { candidate in
-                            row(candidate)
+                startingAtTheTop {
+                    List {
+                        Section {
+                            ForEach(model.browseResults) { candidate in
+                                row(candidate)
+                            }
+                        } header: {
+                            Text(showingLabel).id(Self.topOfResults)
+                        } footer: {
+                            if model.hasNextBrowsePage || model.browsePage > 1 { pager }
                         }
-                    } header: {
-                        Text(showingLabel)
-                    } footer: {
-                        if model.hasNextBrowsePage || model.browsePage > 1 { pager }
                     }
                 }
             }
@@ -379,6 +381,7 @@ struct VideoManualSearchView: View {
     /// recognise anything from. Tapping an image opens the full gallery;
     /// tapping the caption chooses, so a mis-tap looks rather than commits.
     private var imageGrid: some View {
+        startingAtTheTop {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
                 ForEach(model.browseResults) { candidate in
@@ -414,12 +417,49 @@ struct VideoManualSearchView: View {
                 }
             }
             .padding(.horizontal)
+            .id(Self.topOfResults)
 
             VStack(spacing: 8) {
                 Text(showingLabel).font(.caption).foregroundStyle(.secondary)
                 if model.hasNextBrowsePage || model.browsePage > 1 { pager }
             }
             .padding()
+        }
+        }
+    }
+
+    /// Where the top of a page of results is, for both presentations.
+    private static let topOfResults = "browse.top"
+
+    /// 🚨 A new page of results starts at the TOP of that page.
+    ///
+    /// Reported from use: the pager sits at the FOOT of the results, so Next is
+    /// clicked from the bottom of the view — and the next page then arrived
+    /// still scrolled to the bottom. Reading it meant scrolling up to the start,
+    /// down again to reach Next, and repeating that for every page. The control
+    /// that advances a list is at the end of it, so paging without this lands
+    /// the reader past everything they asked to see.
+    ///
+    /// ⚠️ The trigger is `isBrowsing` falling, NOT `browsePage` changing. Two
+    /// reasons: `runBrowse` sets the results and the page number before it
+    /// clears `isBrowsing` in a `defer`, so this fires once the new content is
+    /// actually in place; and it also covers running a new SEARCH while already
+    /// on page 1, where the page number does not change but the results
+    /// completely do.
+    ///
+    /// ⭐ Applied to both presentations from one place. They are a `List` and a
+    /// `ScrollView` of a grid, and fixing the one that was reported would have
+    /// left the other doing it — the sibling-path mistake this log keeps
+    /// recording.
+    @ViewBuilder
+    private func startingAtTheTop<Content: View>(
+        @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        ScrollViewReader { proxy in
+            content()
+                .onChange(of: model.isBrowsing) { _, isBrowsing in
+                    guard !isBrowsing else { return }
+                    proxy.scrollTo(Self.topOfResults, anchor: .top)
+                }
         }
     }
 
