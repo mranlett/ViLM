@@ -341,6 +341,7 @@ struct FileNameParseReviewView: View {
     private func apply() async {
         isApplying = true
         var written = 0
+        var unresolvedNames = 0
         do {
             let byId = Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0) })
             // One store per library rather than per write: opening the same
@@ -357,8 +358,29 @@ struct FileNameParseReviewView: View {
                 }()
                 try store.updateAsset(FileNameParser.applying(proposal, to: asset))
                 written += 1
+
+                // 🚨 Record WHERE these names came from (#77). Without this the
+                // strings above are all that survives, and the bulk connect
+                // later turns them into edges marked `inferred` — filing a
+                // filename guess, the least reliable origin the system has,
+                // indistinguishable from a name an operator typed.
+                //
+                // ⚠️ Best-effort. A name with no profile has nothing to point
+                // an edge at, and failing to record an origin must not cost the
+                // parse result that is already written.
+                let edges = try? store.recordFilenameDerived(proposal.additions,
+                                                             forVideo: proposal.assetId)
+                unresolvedNames += edges?.unresolved.count ?? 0
             }
+            // ⚠️ The unresolved count is stated rather than swallowed. Those
+            // names ARE on the videos — the tag string is written — but the
+            // graph does not know them, so they will not appear in counts,
+            // filmographies or the leaderboards until a profile exists. A
+            // silent success would read as "all of it landed".
             summary = "Updated \(written) video\(written == 1 ? "" : "s") from their filenames."
+            if unresolvedNames > 0 {
+                summary? += " \(unresolvedNames) name\(unresolvedNames == 1 ? " has" : "s have") no profile yet, so \(unresolvedNames == 1 ? "it is" : "they are") recorded on the video but not in the graph."
+            }
             proposals = []
             unreadable = []
             accepted = []

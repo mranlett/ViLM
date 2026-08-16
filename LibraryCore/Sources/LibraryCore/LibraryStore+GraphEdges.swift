@@ -49,21 +49,50 @@ extension LibraryStore {
     /// A scene has one releasing studio, so this is an assignment rather than
     /// an addition — and the primary key means a caller cannot accidentally
     /// make it an addition.
-    public func setStudio(_ studioId: String, forVideo videoId: UUID) throws {
+    ///
+    /// 🚨 An UNCHANGED studio never has its origin downgraded (#77). The same
+    /// assertion arriving again from a weaker source is not new information,
+    /// and rewriting `source` would turn a confirmed studio into a guess — the
+    /// laundering the bulk connect was doing until it was guarded. A stronger
+    /// source is still allowed to upgrade it, and a CHANGED studio always
+    /// carries its own origin, because the old one described a different fact.
+    public func setStudio(_ studioId: String, forVideo videoId: UUID,
+                          source: EdgeProvenance = .inferred) throws {
         try dbQueue.write { db in
+            let current = try Row.fetchOne(
+                db, sql: "SELECT studio_id, source FROM video_studio WHERE video_id = ?",
+                arguments: [videoId.uuidString])
+
+            var effective = source
+            if let current, (current["studio_id"] as String?) == studioId,
+               let existing = (current["source"] as String?).flatMap(EdgeProvenance.init(rawValue:)),
+               existing.precedence > source.precedence {
+                effective = existing
+            }
+
             try db.execute(sql: """
-                INSERT INTO video_studio (video_id, studio_id) VALUES (?, ?)
-                ON CONFLICT(video_id) DO UPDATE SET studio_id = excluded.studio_id
-                """, arguments: [videoId.uuidString, studioId])
+                INSERT INTO video_studio (video_id, studio_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    studio_id = excluded.studio_id,
+                    source = excluded.source,
+                    recorded_at = excluded.recorded_at
+                """, arguments: [videoId.uuidString, studioId, effective.rawValue, Date()])
         }
     }
 
     /// Attaches a tag to a video. `tagId` is the folded identity key.
-    public func linkTag(_ tagId: String, toVideo videoId: UUID) throws {
+    ///
+    /// ⚠️ `INSERT OR IGNORE`, so an existing edge keeps whatever origin it
+    /// already had — no downgrade rule is needed here, because a second
+    /// attachment of the same tag writes nothing at all.
+    public func linkTag(_ tagId: String, toVideo videoId: UUID,
+                        source: EdgeProvenance = .inferred) throws {
         try dbQueue.write { db in
             try db.execute(sql: """
-                INSERT OR IGNORE INTO video_tag (video_id, tag_id) VALUES (?, ?)
-                """, arguments: [videoId.uuidString, tagId])
+                INSERT OR IGNORE INTO video_tag (video_id, tag_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [videoId.uuidString, tagId, source.rawValue, Date()])
         }
     }
 
