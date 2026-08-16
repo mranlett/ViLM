@@ -82,6 +82,12 @@ final class VideoEnrichmentModel: ObservableObject {
     /// because a dropped filter returns everything and looks like a filter that
     /// simply does not work.
     @Published private(set) var unresolvedFilters: [String] = []
+    /// Whether a browse has actually completed since entering this screen.
+    ///
+    /// 🚨 Without this, "you have not searched yet" and "the search found
+    /// nothing" render as the SAME empty state — which is how a working search
+    /// gets reported as "it no longer searches". Reported from the device.
+    @Published private(set) var hasBrowsed = false
     @Published private(set) var browseResults: [PluginCandidate] = []
     @Published private(set) var browseTotal: Int = 0
     @Published private(set) var browsePage: Int = 1
@@ -305,6 +311,7 @@ final class VideoEnrichmentModel: ObservableObject {
         browsePage = 1
         browsePageSize = 0
         browseError = nil
+        hasBrowsed = false
         phase = .browsing
     }
 
@@ -402,7 +409,22 @@ final class VideoEnrichmentModel: ObservableObject {
     }
 
     func runBrowse(page: Int = 1) async {
-        guard let provider else { return }
+        // 🚨 Was a bare `return`, and it made the privacy boundary look like a
+        // broken feature. With no provider — because the video is undeclared or
+        // personal (#59), or because nothing is installed — searching by hand
+        // did nothing at all: no results, no error, no explanation, whatever
+        // the filters said. Reported from the device as "it no longer searches".
+        //
+        // ⚠️ The refusal itself was correct. The two other entry points that
+        // obtain a provider already say why they cannot proceed; this one and
+        // `choose` below were the paths that stayed quiet, so the boundary was
+        // enforced in three places and explained in one.
+        guard let provider else {
+            browseError = boundaryRefusal?.reason
+                ?? "No video metadata source is installed, so there is nothing to search."
+            isBrowsing = false
+            return
+        }
         isBrowsing = true
         browseError = nil
         do {
@@ -421,6 +443,7 @@ final class VideoEnrichmentModel: ObservableObject {
             browsePage = page
             // Largest page wins: a short final page is not the page size.
             browsePageSize = max(browsePageSize, result.candidates.count)
+            hasBrowsed = true
         } catch {
             // Surfaced rather than swallowed: an unresolvable performer name is
             // the most likely failure and the operator can fix it immediately.
@@ -548,7 +571,15 @@ final class VideoEnrichmentModel: ObservableObject {
     }
 
     func choose(_ candidate: PluginCandidate) async {
-        guard let provider else { return }
+        // ⚠️ Same silent guard as `runBrowse`. Rarely reachable — a candidate
+        // has to be on screen, which means a provider answered — but a tap that
+        // does nothing is the worst possible response to a boundary, so it says
+        // why rather than appearing to have been ignored.
+        guard let provider else {
+            phase = .failed(boundaryRefusal?.reason
+                            ?? "No video metadata source is installed.")
+            return
+        }
         chosenCandidate = candidate
         await fetchAndReview(candidate.id, provider: provider)
     }

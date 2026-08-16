@@ -276,18 +276,40 @@ struct VideoManualSearchView: View {
 
     // MARK: - Results
 
+    /// What an empty result actually means, in the three cases that produce one.
+    ///
+    /// ⭐ The middle case is the one that was missing: a search that ran and
+    /// found nothing has to say so, and say what it searched WITH — because the
+    /// most common cause is a filter the source did not recognise and therefore
+    /// ignored, and that is fixable in five seconds once it is visible.
+    private var emptyStateDetail: String {
+        if model.isBrowsing { return "" }
+        guard model.hasBrowsed else {
+            return "Any filter will do — a studio on its own works when you don't know the cast. Adding one tag to it usually cuts hundreds of scenes down to a handful."
+        }
+        if !model.unresolvedFilters.isEmpty {
+            return "The source did not recognise \(model.unresolvedFilters.joined(separator: ", ")), so \(model.unresolvedFilters.count == 1 ? "it was" : "they were") ignored. Try a different spelling, or remove \(model.unresolvedFilters.count == 1 ? "it" : "them") and narrow with something else."
+        }
+        return "The source has nothing matching every filter at once. Removing the narrowest one — usually a tag — is the quickest way to find out which is doing it."
+    }
+
     @ViewBuilder
     private var results: some View {
         if let error = model.browseError {
             ContentUnavailableView("Couldn't search", systemImage: "exclamationmark.triangle",
                                    description: Text(error))
         } else if model.browseResults.isEmpty {
+            // 🚨 "Not searched yet" and "searched, found nothing" used to render
+            // as the SAME empty state — both said "Narrow it down". A search
+            // that ran and returned nothing was therefore indistinguishable
+            // from one that never ran, which is how a working search gets
+            // reported from the device as "it no longer searches".
             ContentUnavailableView(
-                model.isBrowsing ? "Searching…" : "Narrow it down",
-                systemImage: "magnifyingglass",
-                description: Text(model.isBrowsing
-                    ? ""
-                    : "Any filter will do — a studio on its own works when you don't know the cast. Adding one tag to it usually cuts hundreds of scenes down to a handful."))
+                model.isBrowsing ? "Searching…"
+                    : model.hasBrowsed ? "No matches" : "Narrow it down",
+                systemImage: model.hasBrowsed && !model.isBrowsing
+                    ? "magnifyingglass.circle" : "magnifyingglass",
+                description: Text(emptyStateDetail))
         } else {
             if largeImages {
                 imageGrid
