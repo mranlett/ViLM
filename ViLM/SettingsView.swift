@@ -71,6 +71,16 @@ struct SettingsView: View {
     var onOpenTagGallery: (() -> Void)?
 
     @State private var isShowingHelp = false
+
+    /// 🚨 Hidden when the library is already upgraded, which both real
+    /// libraries now are — the row reported "0 nodes re-keyed" and did nothing.
+    ///
+    /// ⚠️ Hidden rather than DELETED. Nothing in the app detects an
+    /// un-upgraded library automatically, so removing the tool would leave a
+    /// restored pre-v34 backup with no way to diagnose or repair it. A row that
+    /// appears exactly when it has work is the version of "retire it" that does
+    /// not throw away the recovery path.
+    @State private var identityUpgradeRemaining = 0
     // Single-library maintenance tools are disabled while other libraries
     // are attached (the federated view spans several catalogs; each of these
     // tools is deeply single-library). Find Duplicates joins the federation
@@ -280,13 +290,14 @@ struct SettingsView: View {
                     toolButton("Match Again", icon: "arrow.counterclockwise",
                                action: onResetMatches)
                         .disabled(session.isFederated)
-                    // ⚠️ Single-library, like Migrate Episode Info. Identity is
-                    // per database — a uid minted in one library means nothing
-                    // in another — so this must never run across an attached
-                    // pair.
-                    toolButton("Identity Upgrade", icon: "key",
-                               action: onIdentityUpgrade)
-                        .disabled(session.isFederated)
+                    // ⚠️ Single-library. Identity is per database — a uid
+                    // minted in one library means nothing in another — so this
+                    // must never run across an attached pair.
+                    if identityUpgradeRemaining > 0 {
+                        toolButton("Identity Upgrade (\(identityUpgradeRemaining))",
+                                   icon: "key", action: onIdentityUpgrade)
+                            .disabled(session.isFederated)
+                    }
                     // F6 (#10). ⚠️ Presented by ContentView like every other
                     // tool here, NOT from a sheet owned by this view. A first
                     // attempt held the sheet locally and it flashed and closed
@@ -354,6 +365,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .task { await checkIdentityUpgrade() }
             .sheet(isPresented: $isShowingHelp) {
                 HelpView(initialTopicID: HelpContent.settings.id)
             }
@@ -364,6 +376,18 @@ struct SettingsView: View {
 
     // Every tool row behaves the same way: close Settings, then hand off to
     // the callback ContentView wired up (which presents the tool's sheet).
+    /// ⭐ Off the main actor and best-effort. A count that cannot be taken
+    /// leaves the row hidden, which is the same as the answer for every library
+    /// that is already upgraded — and a Settings screen must not fail to open
+    /// because a maintenance tool could not decide whether to appear.
+    private func checkIdentityUpgrade() async {
+        guard let libraryURL else { return }
+        identityUpgradeRemaining = await Task.detached(priority: .utility) {
+            guard let store = try? LibraryStore(at: libraryURL) else { return 0 }
+            return (try? store.identityUpgradeRemaining()) ?? 0
+        }.value
+    }
+
     private func toolButton(_ title: String, icon: String, action: (() -> Void)?) -> some View {
         Button(action: {
             dismiss()

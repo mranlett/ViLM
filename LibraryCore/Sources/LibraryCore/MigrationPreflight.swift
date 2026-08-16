@@ -160,6 +160,30 @@ public struct MigrationPreflight: Equatable, Sendable {
 
 public extension LibraryStore {
 
+    /// How many nodes the identity upgrade would still re-key. Cheap, and
+    /// changes nothing.
+    ///
+    /// 🚨 The criterion is lifted from `IdentityRekey`'s OWN statement —
+    /// `UPDATE entity_profiles SET id = uid WHERE uid IS NOT NULL` — so this
+    /// counts exactly what that would change and cannot drift into a
+    /// second opinion about what "upgraded" means.
+    ///
+    /// ⭐ Why it exists: both real libraries now report zero, so the Settings
+    /// row was permanently dead weight. Deleting the tool outright would have
+    /// removed the ONLY route to the re-key engine — nothing detects an
+    /// un-upgraded library automatically — so restoring a pre-v34 backup would
+    /// leave a library nothing could diagnose or repair. The row is hidden when
+    /// this is zero and comes back when it is not.
+    func identityUpgradeRemaining() throws -> Int {
+        try dbQueue.read { db in
+            guard try db.columns(in: "entity_profiles").contains(where: { $0.name == "uid" })
+            else { return 0 }
+            return try Int.fetchOne(db, sql: """
+                SELECT count(*) FROM entity_profiles WHERE uid IS NOT NULL AND id <> uid
+                """) ?? 0
+        }
+    }
+
     /// Runs every gate. Changes nothing.
     func migrationPreflight() throws -> MigrationPreflight {
         let ready = try dbQueue.read { db in
