@@ -11,14 +11,14 @@ notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf
 
 # File Naming & Metadata Storage Strategy
 
-> 🔨 **IMPLEMENTATION IN PROGRESS — 3 of 4 steps, as of 2026-08-15.** Status stays **Approved**; it becomes Implemented when the mover ships and the operator has verified a real run on device.
+> 🔨 **ALL FOUR STEPS BUILT — 2026-08-16.** Status stays **Approved**; it becomes Implemented when the mover ships and the operator has verified a real run on device.
 > 
 > | Step | State | Commit |
 > | --- | --- | --- |
 > | 1 · Name generator — four grammars, pure | ✅ done | `9ba4652` |
 > | 2 · Dry-run plan | ✅ done | `3a0b306` |
 > | 3 · The mover — atomic rename, reversible | ✅ done | |
-> | 4 · Relocation rides matching (N2) | ⬜ | |
+> | 4 · Relocation rides matching (N2) | ✅ done | |
 > 
 > ⚠️ **Superseded 2026-08-15 — it is no longer fixtures only.** Steps 1–3 have been measured against a copy of the **phone** library (1,350 assets, 363 declared), which produced the first non-empty plan: **280 moves, 1 collision, ****`canRun`**** false**. The drive library remains entirely undeclared and still plans zero moves. Nothing has been RUN against either — the plan and the mover are exercised, the actual rename has not been performed on real files.
 > 
@@ -320,3 +320,23 @@ Two generated names differing only in case read as distinct, `canRun` reported t
 ### Tests — 8 added
 Mutant: a case-sensitive collision key → **4** failures.
 ⚠️ Worth recording: every existing scene test passed unchanged after this grammar change, because no fixture carried a title. The suite said nothing about the new segment until fixtures were written for it.
+---
+## Step 4 — relocation rides matching, 2026-08-16
+**Built.** N2, and the last of the four steps.
+A video is filed the moment its match is confirmed — the Epic's D8 moment, when the metadata is at its best and an operator is present. Resumability is free because each video is its own unit, a partly migrated library is the normal state rather than an error, and the blast radius of a mistake is one file instead of the library.
+### 🚨 Ordering is the safety property
+The relocation is the **last** thing `apply()` does. The asset row, the graph edges, the credits and the match edge are all committed before a byte moves, so a failed move cannot cost the match (T23). It **reports rather than throws**, for the same reason — throwing would tempt a caller into rolling back the very thing that has to survive.
+### 🚨 The returned path, which matters more than it looks
+The caller persists whatever `apply()` hands back. Returning the asset unchanged would write the **old** path straight over the row the move just updated, and the file would then read as missing — a match that loses its own video. Pinned by test; the mutant that reports the old path kills four.
+### ⚠️ Two deliberate limits
+**Not wired into unattended batch runs.** N2's justification is that an operator is present to see what happened — true of a confirmation, false of a hundred videos matched overnight. Those keep the whole-library plan, where the moves are read before they run.
+**A scoped plan cannot see collisions outside its scope.** A trade, not an oversight: the whole-library plan remains where collisions are found before a bulk run, and the mover still refuses a target already occupied on disk. So a scoped move is refused rather than overwriting — it just learns later than the dry run would have told it.
+### Where the spec now stands
+|  |  |
+| --- | --- |
+| Steps 1–3 | verified against the real library — **254 files moved across two runs**, zero stranded, zero unresolved |
+| Step 4 | built and unit-tested; **not yet exercised on device** |
+⚠️ Status therefore stays **Approved** rather than Implemented. Its own rule is that it becomes Implemented when the operator has verified a real run, and step 4 changes what happens on every future match — a file now moves as a consequence of confirming a match, which is the first thing in this feature that moves anything without a plan being read first.
+### ❓ Still open for the Human Operator
+1. The cross-volume **refusal** versus the spec's copy-verify-remove fallback (recorded under Step 3).
+2. **Metadata Sidecars** remains specified and unbuilt, so a renamed file still travels with no `.nfo` beside it. The spec says whatever performs the rename writes the sidecar — the mover is now that thing, and it does not.

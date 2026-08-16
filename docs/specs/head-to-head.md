@@ -270,3 +270,21 @@ The same list #34 carried, in a new shape: whether a 16:9 frame reads well at ha
 - **Two ladders that never mix** — asserted in test, and observed in the real database: 59 actor standings sat untouched while the video subject started from zero.
 - **Derived stars only above ten comparisons**, recomputed on read and never written to `rating`.
 🚨 **The recommendation work this unlocks still has its gate, and the gate is data, not code.** *What this unlocks* below proposes preference propagating across the graph. It needs contenders above the confidence threshold to propagate FROM, and the spec's own warning applies: it should not be built — and certainly not judged — before then, or it will be dismissed as inaccurate when it is merely early. **Playing more is the prerequisite**, and that is now a pleasant task rather than a chore, which was the entire point.
+---
+## The standings stopped being a dead end, 2026-08-16 (#69)
+Requested from the device. The board named a leader, showed their picture, their comparison count and their stars — and offered nothing to do with any of it. Tapping a row now opens that performer's profile or that video.
+### 📊 The measurement that changed the priority
+On the drive library: **59 contenders, 96 comparisons, and exactly one** past the five-comparison confidence threshold. By D8 the other 58 show no position and no star, so the board today is almost entirely rows carrying a face, a name and a count.
+⭐ That inverts the obvious reading. The tap-through is **most** valuable on precisely the rows where the board is withholding a judgement, because *"who is this, what are they in"* is the only question those rows can answer. A version that made only ranked rows tappable would have lit up one row in fifty-nine.
+### Three decisions
+|  |  |
+| --- | --- |
+| Video paging context | the **standings order**, so opening #3 pages on to #4 rather than into whatever the grid was sorted by |
+| Back | returns to the library, closing the game. A leaderboard is a place you leave |
+| Which boards | both, though the video half has no play data yet and is exercised by construction rather than by use |
+### 🚨 What it did NOT need
+A router. Each board reveals into its own grid's domain — actor standings into the actor gallery, video standings into the videos grid — so there is no cross-navigation and no global state.
+And the hard part already existed. `ContentView.openAsset` carries this exact lesson in its own doc comment: *on a phone, setting the selection alone changes nothing visible, because compact layout navigates by the path* — which is how an earlier report's rows once did nothing at all when tapped. `openActor` is now its twin, extracted rather than written a second time.
+⚠️ Two details that are easy to get wrong: the state is set **before** the sheet closes, because a change made while a sheet is dismissing is the one SwiftUI is most likely to drop; and the actor is resolved by **stored display name**, never by parsing an id — the standings key by profile id, and after the re-key those are uids with no name in them.
+### ⚠️ Testability
+View plumbing, and the app target has no test target — the same gap that hid a missing button on one platform earlier the same week. Verified by building both platforms and by reading the two things that could realistically be wrong. **Device verification is the only real check here.**
