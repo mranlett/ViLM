@@ -54,6 +54,10 @@ struct RelocationPlanView: View {
     /// stop being mentioned the moment it is repaired.
     @State private var previousRun: RelocationRunSummary?
 
+    /// #75 — the sidecar catch-up, and what it last reported.
+    @State private var isBackfilling = false
+    @State private var backfill: SidecarBackfillSummary?
+
     /// ⚠️ Whatever is cut is COUNTED and said out loud. A list that quietly
     /// stops reads as a library with only that many files in it.
     private let examplesShown = 12
@@ -446,7 +450,76 @@ struct RelocationPlanView: View {
                     Text("Counted so that a plan with no moves is not mistaken for a library that was never looked at.")
                 }
             }
+
+            sidecarBackfillSection
         }
+    }
+
+    /// #75 — the sidecar catch-up for files renamed before sidecars existed.
+    ///
+    /// ⭐ It lives on this screen because this is where the renaming happened,
+    /// and the gap it fills was created by a rename. Putting it in Settings
+    /// would separate the repair from the thing that needs repairing.
+    ///
+    /// ⚠️ In the CONTENT, not a toolbar — the button appears beside the
+    /// sentence describing it, on both platforms, for the same reason the Run
+    /// button does.
+    @ViewBuilder
+    private var sidecarBackfillSection: some View {
+        Section {
+            Button {
+                Task { await backfillSidecars() }
+            } label: {
+                Label("Write Missing Sidecars", systemImage: "doc.badge.plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(isBackfilling || isRunning)
+            .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+
+            if let result = backfill {
+                // 🚨 Every bucket is shown, including the ones that did
+                // nothing. "Wrote 40" over a library of 254 reads as 214
+                // failures unless the screen says why the rest were left.
+                summaryRow("Written", result.written)
+                if result.alreadyPresent > 0 { summaryRow("Already had one", result.alreadyPresent) }
+                if result.refused > 0 { summaryRow("Personal or undeclared — none written", result.refused) }
+                if result.failed > 0 { summaryRow("Could not be written", result.failed) }
+
+                // 🚨 The one finding worth interrupting for.
+                if result.refusedButPresent > 0 {
+                    Label("\(result.refusedButPresent) personal or undeclared video\(result.refusedButPresent == 1 ? " has a sidecar" : "s have sidecars") beside them. Nothing here wrote or removed those — they name people in plain text on a drive that travels.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+            }
+        } header: {
+            Text("Sidecars")
+        } footer: {
+            Text("A sidecar is written when a video is renamed, so videos renamed before that existed have none. This writes one for any video missing it, and never touches a video that already has one — running it twice costs nothing. Personal and undeclared videos are deliberately skipped.")
+        }
+    }
+
+    private func summaryRow(_ label: String, _ count: Int) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+        }
+        .font(.callout)
+    }
+
+    private func backfillSidecars() async {
+        isBackfilling = true
+        defer { isBackfilling = false }
+        let url = libraryURL
+        backfill = await Task.detached(priority: .userInitiated) { () -> SidecarBackfillSummary? in
+            guard let store = try? LibraryStore(at: url),
+                  let assets = try? store.fetchAllAssets() else { return nil }
+            let profiles = (try? store.fetchAllEntityProfiles()).map(EntityProfileIndex.init)
+            return SidecarBackfill.run(libraryURL: url, assets: assets, profiles: profiles)
+        }.value
     }
 
     // MARK: - What the numbers mean
