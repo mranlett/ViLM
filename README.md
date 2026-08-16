@@ -25,6 +25,10 @@ The project is split into a **UI app** and a **shared core library** (`LibraryCo
 - ↔️ **Move the graph between libraries** — export actors, studios, tags and their connections to a file and merge it into another copy. The merge is additive: it fills gaps, never overrules the receiving library, and reports genuine disagreements instead of silently picking a side
 - 🔍 **Self-auditing** — checks that find *wrong* data rather than merely absent data: a video released before a credited performer was born, a studio owning itself, a video filed under two studios
 - 💾 **Backup & restore** — the catalog, not the video files, so a backup is small and merges on restore
+- 🔒 **A privacy boundary you declare, not one that guesses** — every video is declared as a scene, film, episodic or personal. Personal content reaches no external service, and neither does anything still undeclared: unknown fails closed. Performers inherit the same rule from the videos they appear in, so a name only leaves the device when a video that person is in has been declared commercial
+- 🏷 **Naming and filing, per content class** — a generated on-disk layout with a grammar per kind (Kodi/Plex conventions for films and series, a ViLM grammar for scenes). A dry run shows every move and every collision before anything happens; the run itself renames in place, records each move before making it so an interruption leaves nothing half-moved, and can put the whole thing back exactly
+- 🏆 **Head to Head** — rank performers or videos by repeated pairwise choice rather than by scoring each one cold. Standings show how much evidence sits behind each place, and say so when there is not enough yet
+- 🕵️ **Explore the graph** — questions no single record can answer: which tags always travel together and whether that means a merge or a hierarchy, where in a career each studio tends to work, and performers who share several studios but have never shared a video
 
 ---
 
@@ -62,6 +66,14 @@ ViLM/
 │  │  ├─ LibraryStore.swift     # SQLite access, migrations, global tag rename
 │  │  ├─ LibraryScanner.swift   # Filesystem scanning
 │  │  ├─ ContactSheetService.swift # Thumbnail & contact sheet generation
+│  │  ├─ ContentNaming.swift     # The four filing grammars, pure
+│  │  ├─ PathComponentName.swift # Path sanitising (ExFAT/Windows safe)
+│  │  ├─ RelocationPlan.swift    # The dry run: every move, before any move
+│  │  ├─ RelocationMover.swift   # The rename itself — interruptible, reversible
+│  │  ├─ RelocationJournal.swift # Write-ahead record that makes both possible
+│  │  ├─ ContentKind.swift       # What a video IS, and the provider boundary
+│  │  ├─ PerformerExposure.swift # The same boundary, for names
+│  │  ├─ ActorCredits.swift      # One crediting rule, shared by every consumer
 │  │  ├─ FileRenamerService.swift
 │  │  ├─ TagNormalizer.swift / TagSuggester.swift
 │  │  └─ LibraryCore.swift
@@ -110,7 +122,7 @@ cd LibraryCore
 swift test
 ```
 
-Roughly 1,200 tests. Covers `LibraryStore` (CRUD, entity profiles, AKA resolution, global rename/merge, smart collections, reopen persistence), `LibraryScanner` (formats, recursion, hidden/`.catalog` exclusion, idempotent rescans), the tag utilities, the graph edges and their migrations, the cross-library merge, and the audit rules.
+Roughly 2,000 tests. Covers `LibraryStore` (CRUD, entity profiles, AKA resolution, global rename/merge, smart collections, reopen persistence), `LibraryScanner` (formats, recursion, hidden/`.catalog` exclusion, idempotent rescans), the tag utilities, the graph edges and their migrations, the cross-library merge, and the audit rules.
 
 ⚠️ The **app target has no test target.** Anything asserted about the UI is asserted in `LibraryCore` by keeping the decision out of the view — which is why policies like `StudioBatchPolicy` and `VideoEnrichmentReview` are pure types in the package rather than logic inside a `View`.
 
@@ -146,12 +158,15 @@ Still open:
 - [ ] File change monitoring (incremental rescans)
 - [ ] Advanced metadata extraction (duration, codec, resolution)
 - [ ] Resume playback & watch history
-- [ ] A tag hierarchy (broad tags containing narrow ones), the shape studios already have
+- [ ] A tag hierarchy (broad tags containing narrow ones), the shape studios already have — the evidence for it is now measured rather than assumed: a handful of narrow tags sit almost entirely inside two broad ones
 - [ ] Persisting confirmed duplicate verdicts so the same question is not asked twice
+- [ ] Metadata sidecars, so a file that leaves the library still means something
 
 Shipped since this list was first written: manual playlists with drag-and-drop
 ordering, scene markers, the metadata graph, plugin-based matching, attaching a
-second library, and backup/restore.
+second library, backup/restore, the content-kind privacy boundary, per-class
+file naming with a reversible bulk rename, Head to Head ranking, and the graph
+exploration screens.
 
 ---
 
