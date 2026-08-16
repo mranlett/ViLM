@@ -225,4 +225,75 @@ final class ConnectStudioAndTagEdgesTests: XCTestCase {
         XCTAssertEqual(result.discarded, 0)
         XCTAssertEqual(try store.edgeCount(.pendingTagAssociation), 1, "still waiting")
     }
+
+    // MARK: - 🚨 #77 — a known origin is not laundered into a guess
+
+    private func studioProvenance(forVideo id: UUID) throws -> String? {
+        try store.dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT source FROM video_studio WHERE video_id = ?",
+                                arguments: [id.uuidString])
+        }
+    }
+
+    /// 🚨 The studio edge is the only one of the four written as an upsert
+    /// rather than `INSERT OR IGNORE`, because a video has ONE studio and a
+    /// correction has to land. The unguarded form rewrote `source` on every
+    /// pass, so a studio asserted by a confirmed match was downgraded to
+    /// `inferred` — silently, and repeatedly, every time this ran.
+    func testAConfirmedStudioOriginSurvivesTheBulkConnect() throws {
+        try profile("studio:Example Studio")
+        let v = try video(["studio:Example Studio"])
+        try store.dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_studio (video_id, studio_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [v.uuidString, "studio:Example Studio",
+                                 EdgeProvenance.download.rawValue, Date()])
+        }
+
+        try store.connectStudioEdges()
+
+        XCTAssertEqual(try studioProvenance(forVideo: v), EdgeProvenance.download.rawValue,
+                       "a confirmed origin must not be rewritten as a guess")
+    }
+
+    /// ⚠️ The other half, asserted with it. Preserving the origin must not cost
+    /// the correction — if the studio itself CHANGED, the old origin describes
+    /// a different fact and the new assertion carries its own.
+    func testAChangedStudioStillLandsAndCarriesItsOwnOrigin() throws {
+        try profile("studio:Example Studio"); try profile("studio:Other Studio")
+        let v = try video(["studio:Example Studio"])
+        try store.dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_studio (video_id, studio_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [v.uuidString, "studio:Other Studio",
+                                 EdgeProvenance.download.rawValue, Date()])
+        }
+
+        try store.connectStudioEdges()
+
+        XCTAssertEqual(try store.studioId(forVideo: v), "studio:Example Studio",
+                       "the correction still lands")
+        XCTAssertEqual(try studioProvenance(forVideo: v), EdgeProvenance.inferred.rawValue,
+                       "and it is honest about where the NEW assertion came from")
+    }
+
+    /// Earlier versions created these edges with no provenance at all. Those
+    /// rows are still worth filling in, so a NULL is not treated as something
+    /// to protect.
+    func testAnEdgeWithNoRecordedOriginIsFilledIn() throws {
+        try profile("studio:Example Studio")
+        let v = try video(["studio:Example Studio"])
+        try store.dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_studio (video_id, studio_id, source, recorded_at)
+                VALUES (?, ?, NULL, ?)
+                """, arguments: [v.uuidString, "studio:Example Studio", Date()])
+        }
+
+        try store.connectStudioEdges()
+
+        XCTAssertEqual(try studioProvenance(forVideo: v), EdgeProvenance.inferred.rawValue)
+    }
 }

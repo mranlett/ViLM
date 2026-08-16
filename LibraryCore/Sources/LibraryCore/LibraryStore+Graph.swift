@@ -251,6 +251,24 @@ extension LibraryStore {
                     // tag edges were being created with NULL provenance —
                     // D7 says every value carries its source, and an edge kind
                     // that quietly does not is worse than none doing it.
+                    // 🚨 The `WHERE` is the whole point (#77). A video has ONE
+                    // studio, so this has to be an upsert rather than an
+                    // `INSERT OR IGNORE` like its three siblings — a corrected
+                    // studio must actually land. But the unguarded form
+                    // rewrote `source` to `inferred` on every run, so a studio
+                    // asserted by a confirmed match was DOWNGRADED to a guess
+                    // the next time this passed over it. That is the laundering
+                    // D7 added provenance to prevent, performed by the one edge
+                    // kind that could not use the safe insert.
+                    //
+                    // ⚠️ The condition is `studio_id` CHANGED, not "source is
+                    // weaker". If the assertion itself is different then its
+                    // old origin describes a different fact and must not carry
+                    // over; if it is the same, the stronger origin already on
+                    // the row is the better record and `recorded_at` should not
+                    // be rewritten either. The NULL clause exists because
+                    // earlier versions created these edges with no provenance
+                    // at all, and those rows should still be filled in.
                     try db.execute(sql: """
                         INSERT INTO video_studio
                             (video_id, studio_id, source, recorded_at) VALUES (?, ?, ?, ?)
@@ -258,6 +276,9 @@ extension LibraryStore {
                             studio_id = excluded.studio_id,
                             source = excluded.source,
                             recorded_at = excluded.recorded_at
+                        WHERE video_studio.studio_id <> excluded.studio_id
+                           OR video_studio.source IS NULL
+                           OR video_studio.source = ''
                         """, arguments: [videoId.uuidString, studioId,
                                          EdgeProvenance.inferred.rawValue, Date()])
                 }
