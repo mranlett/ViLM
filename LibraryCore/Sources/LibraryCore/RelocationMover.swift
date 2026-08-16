@@ -271,8 +271,12 @@ public struct RelocationMover {
             // the operator would be told their video is missing when it is
             // safely at its destination. Cheap: a query over `planned` rows,
             // which is normally empty.
+            // ⚠️ The INJECTED `fileExists`, same as `run` passes. Omitting it
+            // let a test's filesystem double be bypassed on this one path, so
+            // the seam would silently read the real disk.
             try store.reconcileInterruptedRelocations(libraryURL: libraryURL,
-                                                      duringOwnRun: true)
+                                                      duringOwnRun: true,
+                                                      fileExists: fileExists)
             let plan = try store.relocationPlan(limitedTo: [assetId])
 
             if let skip = plan.unfilable.first(where: { $0.assetId == assetId }) {

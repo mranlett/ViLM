@@ -377,6 +377,15 @@ public enum ContentNaming {
         if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
             return candidate
         }
+        // ⚠️ A title that cannot be shortened below the ceiling — one very long
+        // word — made step 3 drop the entire cast for no benefit, and the name
+        // came out as a bare date. The title is preferred over the cast, but
+        // not at the cost of BOTH: if it cannot fit at all, drop it and keep
+        // the performers, who at least identify the scene.
+        candidate = join([castPart(cast), date], with: " - ")
+        if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
+            return candidate
+        }
         // ⚠️ Nothing structured left. A scene with no studio, cast, title or
         // date is named from its filename stem (decision 6), and rebuilding
         // from the empty parts produces "" — which fits the ceiling trivially

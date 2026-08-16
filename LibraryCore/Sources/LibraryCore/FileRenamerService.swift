@@ -25,7 +25,15 @@ public class FileRenamerService {
 
         try FileManager.default.moveItem(at: oldURL, to: newURL)
 
-        let pathInLibrary = newURL.path.replacingOccurrences(of: libraryURL.path + "/", with: "")
+        // ⚠️ The PREFIX, not every occurrence. `replacingOccurrences` removed
+        // the library path wherever it appeared, so a folder whose name repeats
+        // it produced a mangled relative path with a separator eaten. Rare, and
+        // wrong in a way that would read as a corrupted record rather than as a
+        // string bug. Found by the auditor; pre-existing.
+        let prefix = libraryURL.path + "/"
+        let pathInLibrary = newURL.path.hasPrefix(prefix)
+            ? String(newURL.path.dropFirst(prefix.count))
+            : newURL.path
 
         asset.fileName = newFileName
         asset.relativePath = pathInLibrary
