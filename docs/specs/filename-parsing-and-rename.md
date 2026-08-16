@@ -237,3 +237,32 @@ Measured against the drive library after the change:
 ⚠️ The rule stays as written. A studio can be an ordinary word exactly as a performer can, so exempting studios from the two-token requirement would reintroduce the risk the requirement exists to remove — it would simply do it somewhere the measurement had not looked. **What changes is the expectation, not the rule.**
 ⭐ Worth keeping as a caution about this page's own evidence: a figure measured under one rule was carried into a decision about a different rule, and read as though it still applied. The 119/112 split for performers was measured correctly against both; the 33 never was.
 **Tests:** the six from the strategy above, plus one pinning that the library's spelling is recorded rather than the filename's. Mutation-checked — allowing single-token names kills one test, matching unvalidated names kills eight, and failing to consume matched words kills one.
+### 🚨 Validated against confirmed cast, 2026-08-16
+The question worth asking of any parser that credits people: **does it credit the right ones?** Answered against ground truth rather than fixtures — **1,396 videos whose own match is confirmed AND whose every credited performer is an identified profile**, carrying 3,173 cast names, all validated.
+Precision — the number that decides whether this is safe
+|  |  |
+| --- | --- |
+| Names proposed that are NOT in the confirmed cast | **26**, across 21 videos |
+| …that DO appear in the filename | **26** |
+| …that DO NOT appear in the filename | **0** |
+⭐ **The parser never invented a name.** Every disagreement is a name the filename genuinely contains while the confirmed cast does not — a wrong filename, read correctly. Precision on names proposed is **1,861 of 1,887 (98.6%)**, and the 1.4% is bad filenames rather than bad matching.
+⚠️ Those 26 are visible: every reading goes through the review screen, so they appear as a proposed name the operator can decline, not as a silent write.
+Recall
+|  |  |
+| --- | --- |
+| Confirmed cast names the parser did not read | 1,312 of 3,173 |
+| …absent from the filename entirely | **1,201** — the file never named them |
+| …present in the filename and missed | **111** — the real gap |
+Against names the filename actually contains, recall is **94.4%**. The raw 41% miss rate is almost entirely filenames that do not list their cast, which no parser can recover.
+Per video: read the cast **exactly** on 352, partially on 929, nothing on 115.
+Why the 111 were missed
+| Cause | Count |
+| --- | --- |
+| left unrecognised | 57 |
+| swallowed by the series block | 22 |
+| other | 22 |
+| segment placed as a tag or studio | 9 |
+| name spans a `  • ` boundary | 1 |
+⭐ The recommendation this produces: do NOT widen it
+Every route to those 111 means scanning segments the parser has **already placed** — and that is precisely where false positives would begin, because the segment was placed for a reason. The zero-invention result is the property worth protecting, and it is worth more than the remaining 5.6% of recall.
+⚠️ If it is ever widened, it must be re-measured with this same ground-truth harness first. The measurement is the only thing that establishes precision, and a change that improves recall while quietly costing precision would look like an improvement in every other report.
