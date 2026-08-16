@@ -183,10 +183,53 @@ public struct RelocationMover {
         try store.settleRelocation(entryId, assetId: move.assetId,
                                    newPath: move.to, state: .done)
 
-        // 4 · Carry the duplicate-scan fingerprint across. The bytes did not
+        // 4 · The sidecar, written by whatever performed the rename (S6).
+        //
+        // 🚨 Not a later pass, and the spec is explicit about why: a pass that
+        // writes sidecars for files it did not move cannot know what they used
+        // to be called, so it cannot remove the stale one. A sidecar left
+        // behind under the old name is worse than none — it is metadata that
+        // still looks authoritative and is now attached to nothing.
+        writeSidecar(for: move.assetId, at: move.to, removing: move.from,
+                     libraryURL: libraryURL)
+
+        // 5 · Carry the duplicate-scan fingerprint across. The bytes did not
         // change, so a relocation must never cost a re-fingerprint — the same
         // rule `FileRenamerService` follows, and now shared with it.
         FrameFingerprintRekey.move(in: libraryURL, from: move.from, to: move.to)
+    }
+
+    /// Writes the `.nfo` beside a video and removes the one it left behind.
+    ///
+    /// ⚠️ Best-effort and never throws. A sidecar is portability, not the
+    /// library — failing to write one must not fail a move that has already
+    /// happened, and must certainly not undo it. Reported by its absence, which
+    /// a later pass can correct because the file is by then where it belongs.
+    ///
+    /// 🚨 The OLD sidecar goes even when no new one is written. Personal and
+    /// undeclared content writes none (D4), and if such a video is ever moved,
+    /// leaving the previous document beside its old path would strand exactly
+    /// the plaintext the rule exists to keep off the disk.
+    private func writeSidecar(for assetId: UUID, at newPath: String,
+                              removing oldPath: String, libraryURL: URL) {
+        let stale = libraryURL.appendingPathComponent(MetadataSidecar.path(forVideo: oldPath))
+        try? FileManager.default.removeItem(at: stale)
+
+        guard let store = try? LibraryStore(at: libraryURL),
+              let asset = try? store.fetchAllAssets().first(where: { $0.id == assetId })
+        else { return }
+
+        let profiles = (try? store.fetchAllEntityProfiles()).map(EntityProfileIndex.init)
+        let cast = asset.actors.map { name in
+            SidecarPerformer(name: name, thumbURL: profiles?[actor: name]?.photoUrl)
+        }
+        let stem = (asset.fileName as NSString).deletingPathExtension
+        guard let document = MetadataSidecar.document(
+            for: asset, cast: cast, studio: asset.studios.first, fallbackTitle: stem)
+        else { return }
+
+        let target = libraryURL.appendingPathComponent(MetadataSidecar.path(forVideo: newPath))
+        try? document.write(to: target, atomically: true, encoding: .utf8)
     }
 
     /// Whether both ends sit on one volume.
@@ -360,6 +403,10 @@ public struct RelocationMover {
                 try store.settleRelocation(backId, assetId: assetId,
                                            newPath: entry.fromPath, state: .reverted)
                 try store.settleRelocationRowOnly(entryId, state: .reverted)
+                // ⚠️ The sidecar goes back too. Undoing a move and leaving the
+                // document beside the new path would strand it next to nothing.
+                writeSidecar(for: assetId, at: entry.fromPath, removing: entry.toPath,
+                             libraryURL: libraryURL)
                 FrameFingerprintRekey.move(in: libraryURL,
                                            from: entry.toPath, to: entry.fromPath)
                 result.moved.append(assetId)

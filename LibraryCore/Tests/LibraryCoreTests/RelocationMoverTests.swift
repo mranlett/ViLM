@@ -669,6 +669,73 @@ final class RelocationMoverTests: XCTestCase {
                       "reconciliation must defer during a match-time move too")
     }
 
+    // MARK: - 🚨 The sidecar rides the rename (Metadata Sidecars, S6)
+
+    /// S6 — written by whatever performed the rename, beside the video and
+    /// named for it. Not a later pass: a pass that writes sidecars for files it
+    /// did not move cannot know what they used to be called.
+    func testTheSidecarIsWrittenBesideTheMovedFile() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Filed/new name.mp4")]), libraryURL: dir, runId: "run-1")
+
+        XCTAssertTrue(exists("Filed/new name.nfo"))
+        let doc = try String(contentsOf: dir.appendingPathComponent("Filed/new name.nfo"),
+                             encoding: .utf8)
+        XCTAssertTrue(doc.contains("<movie>"))
+        XCTAssertTrue(doc.contains("<premiered>2019-04-12</premiered>"))
+    }
+
+    /// 🚨 The old one goes. A sidecar left behind under the previous name is
+    /// worse than none — stale metadata that still looks authoritative and is
+    /// now attached to nothing.
+    func testAStaleSidecarIsRemovedRatherThanLeftBehind() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+        try Data("<movie/>".utf8).write(to: dir.appendingPathComponent("old name.nfo"))
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Filed/new name.mp4")]), libraryURL: dir, runId: "run-1")
+
+        XCTAssertFalse(exists("old name.nfo"), "the stale document must not survive the move")
+        XCTAssertTrue(exists("Filed/new name.nfo"))
+    }
+
+    /// 🚨 Personal content writes none — AND its previous one is still removed.
+    /// Moving such a video and leaving the old document behind would strand
+    /// exactly the plaintext the rule exists to keep off the disk.
+    func testPersonalContentWritesNoSidecarAndLosesAnyOldOne() throws {
+        let asset = try addFile("mine.mp4", kind: .personal)
+        try Data("<movie><title>private</title></movie>".utf8)
+            .write(to: dir.appendingPathComponent("mine.nfo"))
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Personal/mine.mp4")]), libraryURL: dir, runId: "run-1")
+
+        XCTAssertFalse(exists("Personal/mine.nfo"), "no sidecar for personal content")
+        XCTAssertFalse(exists("mine.nfo"), "and the old one must not be stranded")
+    }
+
+    /// ⚠️ The undo takes the sidecar back with it, or it sits beside nothing.
+    func testARevertTakesTheSidecarBack() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("first.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+        let mover = RelocationMover(store: store)
+        _ = try mover.run(plan([move(asset, to: "Filed/a.mp4")]),
+                          libraryURL: dir, runId: "run-1")
+        XCTAssertTrue(exists("Filed/a.nfo"))
+
+        _ = try mover.revert(runId: "run-1", libraryURL: dir)
+
+        XCTAssertTrue(exists("first.nfo"), "the sidecar comes home too")
+        XCTAssertFalse(exists("Filed/a.nfo"))
+    }
+
     // MARK: - Refusals
 
     func testAPlanWithCollisionsRefusesToRun() throws {
