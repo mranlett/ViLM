@@ -8,6 +8,7 @@ import LibraryCore
 
 struct SettingsView: View {
     @AppStorage("defaultHomePage") private var defaultHomePage: String = "dashboard"
+    @State private var isShowingMediaBackfill = false
     @Environment(\.dismiss) private var dismiss
     
     var libraryURL: URL?
@@ -294,6 +295,13 @@ struct SettingsView: View {
                     toolButton("Identity Upgrade", icon: "key",
                                action: onIdentityUpgrade)
                         .disabled(session.isFederated)
+                    // F6 (#10). Self-contained rather than another callback
+                    // threaded through ContentView: it owns its own progress
+                    // and its own cancellation, and nothing outside it needs
+                    // to know when it is running.
+                    toolButton("Measure Videos", icon: "ruler",
+                               action: { isShowingMediaBackfill = true })
+                        .disabled(session.isFederated || libraryURL == nil)
                 }
 
                 // Reference and setup last: these are read once or
@@ -353,6 +361,11 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $isShowingHelp) {
                 HelpView(initialTopicID: HelpContent.settings.id)
+            }
+            .sheet(isPresented: $isShowingMediaBackfill) {
+                if let libraryURL {
+                    MediaFactsBackfillView(libraryURL: libraryURL)
+                }
             }
         }
         .macFormSheet()

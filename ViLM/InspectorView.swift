@@ -1314,7 +1314,22 @@ struct SingleInspectorView: View {
     // MARK: - macOS scrubber logic
 
     #if os(macOS)
+    /// ⭐ F6 (#10) — a DISPLAY read, so the catalogue answers it where it can.
+    /// This used to open the file and parse its container atoms every time the
+    /// inspector appeared, for one number the database now holds.
+    ///
+    /// ⚠️ `generatePreview` below deliberately still constructs its own
+    /// `AVURLAsset`: it extracts a frame, which is not four numbers and cannot
+    /// come from a cache. Only display reads move.
     private func loadDuration() {
+        if let recorded = asset.duration {
+            self.duration = recorded
+            self.scrubTime = min(45.0, recorded / 2.0)
+            generatePreview()
+            return
+        }
+
+        // Not measured yet — fall back to opening the file, exactly as before.
         guard let url = LibrarySession.shared.videoURL(for: asset) else { return }
         Task {
             let avAsset = AVURLAsset(url: url)
