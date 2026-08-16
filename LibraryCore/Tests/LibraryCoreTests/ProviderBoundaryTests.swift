@@ -229,6 +229,38 @@ final class ProviderBoundaryTests: XCTestCase {
         XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .film })
     }
 
+    /// 🚨 The two numbers an overwrite involves are DIFFERENT, and confusing
+    /// them is what put the wrong count on the button.
+    ///
+    /// The refusal reports how many were *already declared*; the overwrite
+    /// changes the *whole selection*. With one declared among three, the screen
+    /// said "Change all 1 to Scene" and then changed all 3 — a number the
+    /// operator approves that is not the number that happens.
+    func testAnOverwriteChangesTheWholeSelectionNotJustTheDeclaredOnes() throws {
+        let (store, dir) = try makeStore()
+        defer { LibraryStore.evictCachedConnection(forLibraryAt: dir)
+                try? FileManager.default.removeItem(at: dir) }
+
+        let declared = Asset(relativePath: "a.mp4", fileName: "a.mp4", contentKind: .scene)
+        let blank1 = Asset(relativePath: "b.mp4", fileName: "b.mp4")
+        let blank2 = Asset(relativePath: "c.mp4", fileName: "c.mp4")
+        for a in [declared, blank1, blank2] { try store.insertAsset(a) }
+        let ids = [declared.id, blank1.id, blank2.id]
+
+        // The refusal counts only the already-declared one.
+        XCTAssertThrowsError(try store.declareContentKind(.film, forAssetIds: ids)) {
+            XCTAssertEqual($0 as? DeclarationRefusal, .alreadyDeclared(count: 1),
+                           "the refusal reports what triggered it")
+        }
+
+        // The overwrite changes all three.
+        XCTAssertEqual(try store.declareContentKind(.film, forAssetIds: ids,
+                                                    overwritingExisting: true), 3,
+                       "the overwrite acts on the whole selection — this is the "
+                       + "number the button must name")
+        XCTAssertTrue(try store.fetchAllAssets().allSatisfy { $0.contentKind == .film })
+    }
+
     /// 🚨 The one an overwrite must never touch. Correcting scene→film in bulk
     /// is housekeeping; turning `personal` into `scene` cannot be taken back,
     /// and here it would arrive as a side effect of an action aimed elsewhere.

@@ -795,7 +795,39 @@ struct AssetsGridView: View {
                 }
             }
 #endif
+#if os(macOS)
+            // 🚨 macOS had no Select All at all. The one that exists sits in a
+            // `.bottomBar` item, and `.bottomBar` is an iOS-only placement — so
+            // on the Mac it silently rendered nowhere, and selecting a hundred
+            // videos meant clicking a hundred videos.
+            //
+            // ⚠️ The ToolbarItem itself is unconditional; only its label varies.
+            // A conditional `ToolbarItem` is what made the relocation Run button
+            // vanish on iOS, and this is the same class of control.
+            ToolbarItem(placement: .primaryAction) {
+                Button(allShownAreSelected ? "Deselect All" : "Select All (\(displayedAssets.count))") {
+                    selectedAssetIDs = allShownAreSelected
+                        ? [] : Set(displayedAssets.map(\.id))
+                }
+                .keyboardShortcut("a", modifiers: .command)
+                .disabled(displayedAssets.isEmpty)
+                .help(allShownAreSelected
+                      ? "Deselect everything"
+                      // ⭐ Says SHOWN, because that is what it does. Selecting
+                      // "all" after a search must mean the search results, or a
+                      // bulk declaration would reach the whole library.
+                      : "Select all \(displayedAssets.count) videos shown here")
+            }
+#endif
         }
+    }
+
+    /// Whether everything currently on screen is already selected.
+    ///
+    /// ⚠️ Reads `displayedAssets`, not `assets` — the grid is filtered and
+    /// searched, and "all" has to mean what the operator can see.
+    private var allShownAreSelected: Bool {
+        !displayedAssets.isEmpty && selectedAssetIDs.count == displayedAssets.count
     }
 
     /// Reads every visible file's size off the main thread.

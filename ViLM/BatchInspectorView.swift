@@ -133,9 +133,17 @@ struct BatchInspectorView: View {
             // which across a whole library is no correction at all.
             if let pending = pendingOverwrite {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(pending.count) of these already say what they are.")
+                    Text("\(pending.count) of \(selectedAssets.count) already say what they are.")
                         .font(.caption)
-                    Button("Change all \(pending.count) to \(pending.kind.displayName)") {
+                    // 🚨 The button names the number it ACTS ON — the whole
+                    // selection — not the number that triggered the refusal.
+                    //
+                    // It used to say "Change all \(pending.count)", which is the
+                    // already-declared count: with 50 selected and 1 declared it
+                    // read "Change all 1 to Scene" and then changed all 50. A
+                    // number the operator approves has to be the number that
+                    // happens, or the confirmation is worse than none.
+                    Button("Change all \(selectedAssets.count) to \(pending.kind.displayName)") {
                         applyContentKind(pending.kind, overwriting: true)
                     }
                     .buttonStyle(.borderedProminent)
