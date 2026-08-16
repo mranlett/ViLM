@@ -233,6 +233,32 @@ final class ContentNamingTests: XCTestCase {
         XCTAssertTrue(stem.contains("2019-04-12"), "the date is never dropped")
     }
 
+    /// 🚨 The step the previous test never reached. With an ordinary cast,
+    /// shortening the title to one word already fits, so truncation returns
+    /// before it ever drops a performer — and step 3 was silently dropping the
+    /// title along with them, reproducing the pre-title name and with it the
+    /// collision the title exists to resolve.
+    ///
+    /// ⚠️ Forced here with three near-ceiling names, so the one-word title
+    /// still overflows and performers must go. Found by the auditor.
+    func testAnOverlongCastKeepsTheTitleWhilePerformersAreDropped() {
+        let long = { (n: Int) in String(repeating: "Nameword", count: 11) + "\(n)" }
+        let outcome = ContentNaming.path(
+            for: asset(kind: .scene, file: "x.mkv",
+                       episode: "Some Rather Long Episode Title Here",
+                       released: "2019-04-12"),
+            in: context(.filed("Example Pictures"),
+                        [(long(1), "Female"), (long(2), "Female"), (long(3), "Female")]))
+
+        guard let name = path(outcome) else { return XCTFail("no path") }
+        let stem = (name as NSString).lastPathComponent
+        XCTAssertLessThanOrEqual(stem.utf8.count, PathComponentName.maximumBytes)
+        XCTAssertTrue(stem.contains("Some"),
+                      "the title must survive the performer drop — it is what "
+                      + "tells two scenes with one cast and one date apart")
+        XCTAssertTrue(stem.contains("2019-04-12"), "the date is never dropped")
+    }
+
     /// ⭐ Female and non-binary first, male last; alphabetical within a rank.
     ///
     /// 🚨 The male performer is named so he sorts FIRST alphabetically. An

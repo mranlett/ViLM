@@ -261,6 +261,30 @@ final class RelocationMoverTests: XCTestCase {
         XCTAssertTrue(exists("other.mp4"), "the refused run must not have moved anything")
     }
 
+    /// ⚠️ The other half of the reconciliation table. An atomic rename cannot
+    /// produce a file at BOTH paths, so this is unreachable in production — but
+    /// the branch exists, and an untested branch is one nobody has checked does
+    /// what it claims. It must REPORT rather than choose: deleting either copy
+    /// is a decision about data.
+    func testAFileAtBothPathsIsReportedAndNeitherCopyIsTouched() throws {
+        let asset = try addFile("old name.mp4")
+        var mover = RelocationMover(store: store)
+        mover.postMoveHook = { _ in throw CancellationError() }
+        _ = try mover.run(plan([move(asset, to: "Filed/new name.mp4")]),
+                          libraryURL: dir, runId: "run-1")
+
+        // Something puts a file back at the source while the row is unresolved.
+        try Data("a second copy".utf8).write(to: dir.appendingPathComponent("old name.mp4"))
+
+        let report = try store.reconcileInterruptedRelocations(libraryURL: dir)
+        XCTAssertEqual(report.ambiguous, [asset.id])
+        XCTAssertFalse(report.isClean)
+        XCTAssertTrue(exists("old name.mp4") && exists("Filed/new name.mp4"),
+                      "neither copy may be removed — that is a decision for a person")
+        XCTAssertEqual(try store.relocationJournal(state: .planned).count, 1,
+                       "and the row stays, so the evidence survives")
+    }
+
     // MARK: - 🚨 F5 — reversibility
 
     func testARunCanBePutBackExactly() throws {
@@ -282,6 +306,32 @@ final class RelocationMoverTests: XCTestCase {
         XCTAssertFalse(exists("Filed/a new.mp4"))
         XCTAssertEqual(try reloaded(a.id)?.relativePath, "first.mp4")
         XCTAssertEqual(try reloaded(b.id)?.relativePath, "nested/second.mp4")
+    }
+
+    /// 🚨 The revert is write-ahead too, asserted from inside the move itself.
+    ///
+    /// ⚠️ Added after the fix shipped WITHOUT one: reordering the journal write
+    /// back below the move killed no test, because in the happy path the order
+    /// is invisible. A fix with no failing test behind it is the shape this
+    /// project keeps logging.
+    func testTheReverseIntentIsRecordedBeforeTheFileMovesBack() throws {
+        let asset = try addFile("first.mp4")
+        let library = store!
+        _ = try RelocationMover(store: library).run(
+            plan([move(asset, to: "Filed/a.mp4")]), libraryURL: dir, runId: "run-1")
+
+        var plannedWhenMoving = -1
+        var mover = RelocationMover(store: library)
+        let realMove = mover.moveFile
+        mover.moveFile = { from, to in
+            plannedWhenMoving = (try? library.relocationJournal(state: .planned).count) ?? -1
+            try realMove(from, to)
+        }
+        _ = try mover.revert(runId: "run-1", libraryURL: dir)
+
+        XCTAssertEqual(plannedWhenMoving, 1,
+                       "the reverse intent must be on disk before the file moves back, "
+                       + "or a crash there orphans the file exactly as it would in a run")
     }
 
     /// 🚨 The revert reads the JOURNAL, not the generator. If it recomputed

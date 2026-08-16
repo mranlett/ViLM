@@ -344,23 +344,37 @@ public enum ContentNaming {
         if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
 
         // 2 · shorten the title at a word boundary, keeping everything else
-        if let title, !title.isEmpty {
-            var words = title.split(separator: " ").map(String.init)
-            while words.count > 1 {
-                words.removeLast()
-                candidate = join([castPart(cast), words.joined(separator: " "), date],
-                                 with: " - ")
-                if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
-            }
+        var words = (title ?? "").split(separator: " ").map(String.init)
+        while words.count > 1 {
+            words.removeLast()
+            candidate = join([castPart(cast), words.joined(separator: " "), date],
+                             with: " - ")
+            if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         }
+        // What is left of the title once it cannot be shortened further: one
+        // word, or nothing if there was never a title.
+        let shortestTitle = words.isEmpty ? nil : words.joined(separator: " ")
 
-        // 3 · performers from the end, whole names only
+        // 3 · performers from the end, whole names only — CARRYING the title.
+        //
+        // 🚨 This step used to join cast and date alone, silently dropping the
+        // title it had just spent step 2 preserving. A scene with three long
+        // names and a long title therefore came out with the pre-title name,
+        // reintroducing the very collision the title was added to resolve — and
+        // no test reached it, because step 2 returns early for any ordinary
+        // cast. Found by the auditor, and it is the same shape as adding a case
+        // to an enum and not revisiting every branch that reads it.
         var remaining = cast
         while !remaining.isEmpty {
             remaining.removeLast()
-            candidate = join([castPart(remaining), date], with: " - ")
+            candidate = join([castPart(remaining), shortestTitle, date], with: " - ")
             if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         }
+
+        // Nothing but the title and the date left. The date is never dropped;
+        // the title goes only if even that will not fit.
+        candidate = join([shortestTitle, date], with: " - ")
+        if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         return date ?? stem
     }
 

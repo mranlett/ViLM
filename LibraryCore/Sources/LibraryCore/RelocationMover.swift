@@ -310,9 +310,32 @@ public struct RelocationMover {
                 }
                 try FileManager.default.createDirectory(
                     at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+                // 🚨 Write-ahead, exactly as `perform` does — a revert is a
+                // relocation and needs the same protection.
+                //
+                // This moved the file FIRST and settled afterwards, so a throw
+                // from `settleRelocation` (or the process dying) left the file
+                // back at its original path with the catalogue still naming the
+                // new one, and no `planned` row for reconciliation to find. The
+                // file was simply orphaned. Found by the auditor; it is the same
+                // asymmetry the journal was built to remove, reintroduced in the
+                // one path that did not go through `perform`.
+                //
+                // ⚠️ Its own run id, so the reverse rows are not themselves
+                // picked up as movable work by a later revert of the SAME run.
+                let back = try store.recordRelocationIntent(
+                    runId: "revert-\(runId)", assetId: assetId,
+                    from: entry.toPath, to: entry.fromPath)
+                guard let backId = back.id else { throw RelocationMoveError.journalFailed }
+
                 try moveFile(current, original)
-                try store.settleRelocation(entryId, assetId: assetId,
+
+                // The reverse row settles as `.reverted` rather than `.done`, so
+                // "your last run" never reports an undo as a rename.
+                try store.settleRelocation(backId, assetId: assetId,
                                            newPath: entry.fromPath, state: .reverted)
+                try store.settleRelocationRowOnly(entryId, state: .reverted)
                 FrameFingerprintRekey.move(in: libraryURL,
                                            from: entry.toPath, to: entry.fromPath)
                 result.moved.append(assetId)
