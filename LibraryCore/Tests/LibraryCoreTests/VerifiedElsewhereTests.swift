@@ -162,4 +162,82 @@ final class VerifiedElsewhereTests: XCTestCase {
         XCTAssertEqual(cleared.rating, 4)
         XCTAssertEqual(cleared.tags, ["actor:Alice Example"])
     }
+
+    // MARK: - The same thing for a studio or a performer
+
+    private func profile() -> EntityProfile {
+        EntityProfile(id: "studio:Example Pictures")
+    }
+
+    func testAStudioCanBeVerifiedByHandToo() {
+        let updated = VerifiedElsewhere.applying(
+            ExternalVerification(source: "A Catalogue", reference: "270",
+                                 link: URL(string: "https://example.com/studio/270")),
+            to: profile())
+        XCTAssertEqual(updated.enrichmentState, .matched)
+        XCTAssertEqual(updated.enrichmentSource, "A Catalogue")
+        XCTAssertEqual(updated.enrichmentSourceId, "270")
+        XCTAssertTrue(VerifiedElsewhere.wasVerifiedByHand(updated, knownProviders: providers))
+    }
+
+    /// ⚠️ A profile has no `enrichmentUrl`, so the address goes into `links` —
+    /// the field that already exists for it, labelled with where it came from.
+    func testTheLinkIsRecordedInTheProfilesOwnLinkList() {
+        let updated = VerifiedElsewhere.applying(
+            ExternalVerification(source: "A Catalogue",
+                                 link: URL(string: "https://example.com/studio/270")),
+            to: profile())
+        XCTAssertEqual(updated.links.map(\.url), ["https://example.com/studio/270"])
+        XCTAssertEqual(updated.links.first?.label, "A Catalogue")
+    }
+
+    /// Identity is the URL, so re-recording the same page relabels rather than
+    /// listing it twice.
+    func testReRecordingTheSamePageDoesNotDuplicateTheLink() {
+        var updated = VerifiedElsewhere.applying(
+            ExternalVerification(source: "A Catalogue",
+                                 link: URL(string: "https://example.com/studio/270")),
+            to: profile())
+        updated = VerifiedElsewhere.applying(
+            ExternalVerification(source: "Another Catalogue",
+                                 link: URL(string: "https://example.com/studio/270")),
+            to: updated)
+        XCTAssertEqual(updated.links.count, 1)
+        XCTAssertEqual(updated.links.first?.label, "Another Catalogue")
+    }
+
+    /// 🚨 Clearing a PROFILE leaves the link, unlike a video. On a video
+    /// `enrichmentUrl` is the provenance field; on a profile the address sits
+    /// in the operator's own list beside links they added for their own
+    /// reasons, and deleting from that because a match was withdrawn throws
+    /// away something they never called provenance.
+    func testClearingAProfileLeavesTheOperatorsLink() {
+        let recorded = VerifiedElsewhere.applying(
+            ExternalVerification(source: "A Catalogue",
+                                 link: URL(string: "https://example.com/studio/270")),
+            to: profile())
+        let cleared = VerifiedElsewhere.clearing(from: recorded)
+        XCTAssertNil(cleared.enrichmentState)
+        XCTAssertNil(cleared.enrichmentSource)
+        XCTAssertNil(cleared.enrichmentSourceId)
+        XCTAssertEqual(cleared.links.count, 1, "the link is theirs, not the match's")
+    }
+
+    /// 🚨 A hand-recorded profile match must survive a later manual edit.
+    /// `EnrichmentInvalidation.afterManualEdit` clears the match when the state
+    /// needs attention — and `.matched` does not, so it returns early. Asserted
+    /// rather than assumed, because it is the interaction that would silently
+    /// undo the operator's work weeks later.
+    func testAHandRecordedProfileMatchSurvivesALaterEdit() {
+        let recorded = VerifiedElsewhere.applying(
+            ExternalVerification(source: "A Catalogue"), to: profile())
+        // ⚠️ An AKA is one of the two things `matchInputsChanged` watches, so
+        // this is the strongest form of the case: even an edit that WOULD
+        // invalidate an unresolved lookup leaves a recorded verification alone.
+        var edited = recorded
+        edited.akas = ["Another Spelling"]
+        let revised = EnrichmentInvalidation.afterManualEdit(previous: recorded, edited: edited)
+        XCTAssertEqual(revised.0, .matched, "editing must not discard the verification")
+        XCTAssertEqual(revised.1, "A Catalogue")
+    }
 }

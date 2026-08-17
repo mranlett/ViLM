@@ -153,4 +153,58 @@ public enum VerifiedElsewhere {
         // correction of their own record, not an overwrite of it.
         return asset.enrichmentSource?.caseInsensitiveCompare(incoming) == .orderedSame
     }
+
+    // MARK: - The same thing for a studio or a performer
+    //
+    // 🚨 The same gap, and the operator hits it from the other direction: a
+    // studio's own catalogue page identifies the STUDIO, not one video. 60 of
+    // 462 studios and 70 performer profiles carry no identity, and there was no
+    // way to say "I confirmed this one by hand, here."
+
+    /// ⚠️ A profile has no `enrichmentUrl`. The link goes into `links`, which
+    /// already exists for exactly this and whose label is documented as
+    /// operator- or provider-supplied — so nothing new is invented and no
+    /// migration is needed.
+    public static func applying(_ verification: ExternalVerification,
+                                to profile: EntityProfile,
+                                at moment: Date = Date()) -> EntityProfile {
+        var updated = profile
+        updated.enrichmentState = .matched
+        updated.enrichmentSource = verification.source
+        updated.enrichmentSourceId = verification.reference
+        updated.enrichmentCheckedAt = moment
+
+        if let link = verification.link?.absoluteString {
+            // Identity is the URL, so re-recording the same page relabels it
+            // rather than listing it twice.
+            updated.links.removeAll { $0.url == link }
+            updated.links.append(EntityLink(url: link, label: verification.source))
+        }
+        return updated
+    }
+
+    /// 🚨 Clearing undoes the PROVENANCE and leaves the link.
+    ///
+    /// ⚠️ Deliberately different from the video case, and the difference is
+    /// where the link lives. On a video `enrichmentUrl` IS the provenance
+    /// field, so clearing it is clearing the record. On a profile the address
+    /// sits in the operator's own list of links, beside ones they added for
+    /// their own reasons — deleting from that list because a match was
+    /// withdrawn would throw away something they never said was provenance.
+    public static func clearing(from profile: EntityProfile) -> EntityProfile {
+        var updated = profile
+        updated.enrichmentState = nil
+        updated.enrichmentSource = nil
+        updated.enrichmentSourceId = nil
+        updated.enrichmentCheckedAt = nil
+        return updated
+    }
+
+    public static func wasVerifiedByHand(_ profile: EntityProfile,
+                                         knownProviders: Set<String>) -> Bool {
+        guard let source = profile.enrichmentSource?.trimmingCharacters(
+            in: .whitespacesAndNewlines), !source.isEmpty else { return false }
+        guard profile.enrichmentState == .matched else { return false }
+        return !knownProviders.contains(source)
+    }
 }
