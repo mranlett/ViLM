@@ -156,7 +156,7 @@ extension AssetFilterCriteria {
         // What an external lookup concluded. A separate axis from review
         // status: one is whether YOU have seen it, the other whether a source
         // could identify it.
-        if !enrichment.accepts(asset.enrichmentState) { return false }
+        if !enrichment.accepts(asset.enrichmentState, route: asset.lookupRoute) { return false }
         if !effectiveLookupRoute.accepts(asset.lookupRoute) { return false }
 
         // Minimum rating (an unrated video counts as 0).

@@ -21,6 +21,7 @@ Every refresh re-fetches everything. The source publishes an `updated` timestamp
 A faster refresh is pleasant. 🔴 The real gain is that several features now want library-wide sweeps — *What Else Are They In* (~50), Get More Photos (~315), enrich-the-unenriched, upstream-deletion checks — and they compete for the same budget. A delta turns a recurring 2,700-request operation into a small one, which is what makes the others affordable.
 ## ⚠️ D2 — We must record when WE last checked, and we mostly already do
 `enrichmentCheckedAt` exists on profiles. ❓ **Open:** is there an equivalent on the video side, and is it reliably maintained? If not, this spec is really two — record the timestamp, then use it — and the first half must ship a release earlier so there is data to compare against.
+     ✅ I’m unaware of a video side equivalent
 🚨 A delta computed against a timestamp that is missing or wrong silently skips records that DID change, which is the worst possible failure for a refresh: it reports success and does nothing. That is this project's signature defect, and here it would be self-inflicted.
 ## 🔴 D3 — A full refresh must remain available and obvious
 Whenever a delta is wrong, the recovery is a full pass. ⚠️ If the only refresh becomes the delta, a bug in the comparison is unrecoverable through the UI.

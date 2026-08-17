@@ -38,6 +38,11 @@ public struct ExternalVerification: Equatable, Sendable {
 
 public enum VerifiedElsewhere {
 
+    /// 🚨 The one string that means "a person identified this against a source
+    /// we cannot query", named so the writer and the filter cannot drift. Two
+    /// literals is how the two come to disagree.
+    public static let handVerifiedRoute = "verified by hand"
+
     /// Why a verification cannot be recorded as given.
     public enum Refusal: Error, Equatable, Sendable {
         case noSource
@@ -105,7 +110,7 @@ public enum VerifiedElsewhere {
         // ⚠️ `lookupRoute` says how the last attempt REACHED this video, and a
         // person reading a page is a route like any other. Left as a plain
         // string for the same reason the source is: core does not enumerate.
-        updated.lookupRoute = "verified by hand"
+        updated.lookupRoute = handVerifiedRoute
         return updated
     }
 

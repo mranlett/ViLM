@@ -62,7 +62,11 @@ struct ActorFilterBuilderView: View {
                         Toggle("Missing Photos Only", isOn: $criteria.showMissingPhotosOnly)
                         Toggle("Missing Gender Only", isOn: $criteria.showMissingGenderOnly)
                         Picker("Lookup Result", selection: $criteria.enrichment) {
-                            ForEach(ActorFilterCriteria.EnrichmentFilter.allCases, id: \.self) { option in
+                            // ⚠️ `verifiedByHand` is a VIDEO-only case — a profile carries no lookup
+                            // route, so offering it here would be an option that can
+                            // never match anything.
+                            ForEach(ActorFilterCriteria.EnrichmentFilter.allCases
+                                        .filter { $0 != .verifiedByHand }, id: \.self) { option in
                                 Text(option.displayName).tag(option)
                             }
                         }

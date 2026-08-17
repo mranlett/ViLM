@@ -3,7 +3,7 @@
 
 ---
 spec: "File Naming & Metadata Storage Strategy"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/File-Naming-Metadata-Storage-Strategy-3b1adccaf42881d6a344ebf970d6d0b0
@@ -287,7 +287,8 @@ So the intent is committed to disk **before** the file moves. A crash then leave
 ⚠️ A new run refuses to start while an earlier one is unresolved.
 ### 🚨 The cross-volume check, and a deviation from this spec
 `moveItem` across volumes transparently degrades to copy-then-unlink — the expensive thing, done silently, surfacing only as a full disk. Volume identity is checked per move.
-⚠️ **This spec says fall back to copy-verify-remove; the implementation REFUSES instead.** Within one library both ends are on one volume by construction, so the fallback can never run — it would be a second, untestable copy of `VideoTransferService`'s routine. Refusing is the safe subset. **Open for the Human Operator:** build the fallback, or keep the refusal.
+⚠️ **This spec originally said fall back to copy-verify-remove; the implementation REFUSES instead.**
+✅ **DECIDED 2026-08-16 by the Human Operator: the refusal stands, and this spec is amended to match it.** Within one library both ends are on one volume by construction, so the fallback could never run — it would be a second, untestable copy of `VideoTransferService`'s routine, sitting unreachable in the one code path where being wrong costs the operator their library. Unreachable code in a file mover is a worse outcome than a refusal that says why. The copy-verify-remove requirement is withdrawn; if libraries are ever allowed to span volumes, that is a new decision and this section is where it gets reopened.
 ### F5 is driven by the journal, never by recomputing
 🚨 A revert that re-derived where each file *should* go would undo a badly-named run by faithfully reproducing the same bad names. It replays the recorded old→new full paths in reverse. Pinned by a test that mutates the record after the move and asserts the revert ignores it.
 Undo is offered on the same screen: a reversible operation whose reverse is hidden elsewhere is one nobody trusts enough to use.
@@ -335,8 +336,11 @@ The caller persists whatever `apply()` hands back. Returning the asset unchanged
 |  |  |
 | --- | --- |
 | Steps 1–3 | verified against the real library — **254 files moved across two runs**, zero stranded, zero unresolved |
-| Step 4 | built and unit-tested; **not yet exercised on device** |
-⚠️ Status therefore stays **Approved** rather than Implemented. Its own rule is that it becomes Implemented when the operator has verified a real run, and step 4 changes what happens on every future match — a file now moves as a consequence of confirming a match, which is the first thing in this feature that moves anything without a plan being read first.
-### ❓ Still open for the Human Operator
-1. The cross-volume **refusal** versus the spec's copy-verify-remove fallback (recorded under Step 3).
-2. **Metadata Sidecars** remains specified and unbuilt, so a renamed file still travels with no `.nfo` beside it. The spec says whatever performs the rename writes the sidecar — the mover is now that thing, and it does not.
+| Step 4 | ✅ **verified on device 2026-08-16** — studio folder created, file moved, sidecar written |
+⚠️ ~~Status therefore stays ~~~~**Approved**~~~~ rather than Implemented.~~ **Superseded — verified on device 2026-08-16, see below.** Its own rule is that it becomes Implemented when the operator has verified a real run, and step 4 changes what happens on every future match — a file now moves as a consequence of confirming a match, which is the first thing in this feature that moves anything without a plan being read first.
+### ✅ Both open questions closed, 2026-08-16
+1. ~~The cross-volume refusal versus the spec's copy-verify-remove fallback.~~ **Decided: the refusal stands and the spec is amended** (recorded under Step 3).
+2. **~~Metadata Sidecars** remains specified and unbuilt.~~ **Built and verified on device.** The mover now writes the `.nfo` as part of the relocation, and the operator confirmed on 2026-08-16 that matching a video produces the studio folder, the moved file, and the sidecar beside it.
+### Step 4 verified on device, 2026-08-16
+🚨 This spec's own rule is that it becomes **Implemented** when the operator has verified a real run, because step 4 changes what happens on every future match — a file moves as a consequence of confirming a match, without a plan being read first. That verification has now happened: studio folder created, file moved, sidecar written.
+⚠️ One defect was found by reviewing the results rather than by the run failing: the filename parser recorded a name in the FILE's casing on five of its six emit paths, splitting one performer across two spellings. Fixed under #76, with the affected data corrected. It is noted here because it is the kind of fault a successful-looking run hides — nothing errored, and the damage was only visible by diffing what was written against what the library already knew.
