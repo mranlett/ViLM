@@ -993,6 +993,21 @@ struct SingleInspectorView: View {
                         if let url = libraryURL { updateAsset(updated, at: url) }
                     })
 
+                    // ⭐ Directly beneath, because that is the order the work
+                    // happens in: you found a page, noted where, and are now
+                    // copying what it said.
+                    PasteCastPanel(asset: asset, libraryURL: libraryURL) { additions in
+                        var updated = asset
+                        var tags = updated.tags
+                        for tag in additions where !tags.contains(where: {
+                            $0.caseInsensitiveCompare(tag) == .orderedSame
+                        }) {
+                            tags.append(tag)
+                        }
+                        updated.tags = tags
+                        if let url = libraryURL { updateAsset(updated, at: url) }
+                    }
+
                     Divider()
 
                     VStack(alignment: .leading, spacing: 4) {
