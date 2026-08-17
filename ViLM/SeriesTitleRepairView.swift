@@ -21,6 +21,15 @@ struct SeriesTitleRepairView: View {
     let libraryURL: URL
     var onRefresh: () -> Void = {}
 
+    /// 🚨 Opens a video. This screen's own footer tells the operator to "open
+    /// the video and set them the way you want", and until now there was no way
+    /// to do it — the rows listed the problem and offered no way to reach it.
+    ///
+    /// ⚠️ The parent dismisses this sheet first. Presenting one sheet while
+    /// another is closing is how the second silently fails, which is why every
+    /// audit screen here hands the id back rather than pushing.
+    var onOpenVideo: (Asset.ID) -> Void = { _ in }
+
     @Environment(\.dismiss) private var dismiss
 
     @State private var report: SeriesTitleRepair.Report?
@@ -108,12 +117,29 @@ struct SeriesTitleRepairView: View {
             if !report.needsAPerson.isEmpty {
                 Section {
                     ForEach(report.needsAPerson.prefix(40)) { item in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.episode).font(.callout).lineLimit(1)
-                            Text("series: \(item.series)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
+                        Button {
+                            let id = item.assetId
+                            if repaired > 0 { onRefresh() }
+                            dismiss()
+                            onOpenVideo(id)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.episode).font(.callout).lineLimit(1)
+                                    Text("series: \(item.series)")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer()
+                                // ⚠️ Says it is a way in. A row that opens
+                                // something and does not look like it reads as
+                                // a list, which is what this was.
+                                Image(systemName: "chevron.forward")
+                                    .font(.caption).foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                     if report.needsAPerson.count > 40 {
                         Text("and \(report.needsAPerson.count - 40) more")
@@ -125,7 +151,7 @@ struct SeriesTitleRepairView: View {
                     // ⚠️ Reported rather than guessed. Both boxes hold different
                     // text, so choosing between them is a judgement, and being
                     // wrong discards a real title.
-                    Text("Both fields are filled with different text. The series might be a genuine one-off, so nothing here is changed automatically — open the video and set them the way you want.")
+                    Text("Both fields are filled with different text. The series might be a genuine one-off, so nothing here is changed automatically — tap one to open the video and set them the way you want.")
                 }
             }
         }

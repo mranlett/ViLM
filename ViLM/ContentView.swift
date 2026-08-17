@@ -417,9 +417,19 @@ struct ContentView: View {
                     TagRelationshipsView(libraryURL: url)
                 }
             }
-            .sheet(isPresented: $isShowingSeriesTitles) {
+            .sheet(isPresented: $isShowingSeriesTitles, onDismiss: {
+                // ⚠️ Deferred to onDismiss like the other audits: navigating
+                // behind a sheet is invisible until it closes.
+                pendingAuditVideo?()
+                pendingAuditVideo = nil
+            }) {
                 if let url = selectedLibraryURL {
-                    SeriesTitleRepairView(libraryURL: url, onRefresh: { reloadUnionAssets() })
+                    SeriesTitleRepairView(
+                        libraryURL: url,
+                        onRefresh: { reloadUnionAssets() },
+                        onOpenVideo: { assetID in
+                            pendingAuditVideo = { openAsset(assetID) }
+                        })
                 }
             }
             .sheet(isPresented: $isShowingSameIdentity) {
