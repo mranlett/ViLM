@@ -358,6 +358,24 @@ public struct ActorMetadataProposal: Equatable, Sendable {
 /// record useful — a birth date, a career span, a hair colour — describe a
 /// person and nothing else. The one thing here that an actor has no equivalent
 /// of is the hierarchy, and it is the reason this type exists.
+/// One studio a source names: an identity and a spelling.
+///
+/// 🚨 BOTH, and the identity is what matters. Resolving an arriving imprint by
+/// name would create a duplicate whenever the operator has renamed a studio
+/// locally — the source's spelling and theirs are then two rows for one
+/// studio, which is the exact mess studio matching exists to prevent (H7).
+public struct StudioRef: Equatable, Sendable, Identifiable {
+    public let sourceId: String
+    public let name: String
+
+    public var id: String { sourceId }
+
+    public init(sourceId: String, name: String) {
+        self.sourceId = sourceId
+        self.name = name
+    }
+}
+
 public struct StudioMetadataProposal: Equatable, Sendable {
     /// The source's own identifier for this studio.
     ///
@@ -388,6 +406,18 @@ public struct StudioMetadataProposal: Equatable, Sendable {
     /// point of matching studios directly rather than waiting for videos.
     public var parentName: ProposedField<String> = .absent
     public var parentSourceId: ProposedField<String> = .absent
+
+    /// 🚨 The imprints BENEATH this studio, where the source knows of any.
+    ///
+    /// ⭐ Reading `parent` alone discovers a network's imprints one matched
+    /// video at a time — 115 hierarchy rows accumulated that way. The source
+    /// can answer the whole question in one request, which is what this is for.
+    ///
+    /// ⚠️ Fetched ON REQUEST, one network at a time, never as a library-wide
+    /// sweep (D1). Pulling every imprint of every network would create studios
+    /// the library has no videos from, and a hierarchy is worth having because
+    /// it explains videos you hold.
+    public var children: ProposedField<[StudioRef]> = .absent
 
     /// The studio's logo.
     ///
