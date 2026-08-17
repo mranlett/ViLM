@@ -984,6 +984,17 @@ struct SingleInspectorView: View {
 
                     Divider()
 
+                    // #79 — the third state. Matched by a provider, or
+                    // unmatched, left no way to say "I looked this up myself
+                    // and here is where" — so that work was discarded and the
+                    // video came back in every queue.
+                    VerifiedElsewherePanel(asset: asset, libraryURL: libraryURL,
+                                           onChange: { updated in
+                        if let url = libraryURL { updateAsset(updated, at: url) }
+                    })
+
+                    Divider()
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Series Name").font(.subheadline).foregroundColor(.secondary)
                         TextField("e.g. Movie Name or TV Show", text: $seriesNameDraft)
