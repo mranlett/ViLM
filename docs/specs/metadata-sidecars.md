@@ -3,7 +3,7 @@
 
 ---
 spec: "Metadata Sidecars — portability, not recovery"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P3
 notion: https://app.notion.com/p/Metadata-Sidecars-portability-not-recovery-3baadccaf42881c19cc8f7d112c571e5
@@ -91,5 +91,20 @@ Personal writes none, and undeclared writes none. The question is identical to t
 | **S6** | named for its video, and the stale one removed |
 Also pinned: the rating doubles onto Kodi's 0–10 scale, the full date survives beside the coarse year, a series standing alone is **not** claimed as a set (that would invent a collection of one), and markup in a title is escaped — an unescaped ampersand produces a document no consumer can read, failing on the receiving side where nobody is watching.
 **17 tests.** Mutants killed: writing for personal or undeclared (3), emitting blank fields (2), leaving the stale document behind (3).
-### ⚠️ S1 is NOT built, and is filed separately
+### ⚠️ S1, at the time of writing — superseded below
 Accepting a sidecar on **first import** — where the database wins a reconciliation, and a sidecar is the only data for a file with no record — is a different feature. It means trusting a document this app did not write, which is a materially different risk from emitting one. Status therefore stays **Approved**: the half that closes the hole is done, and the half that reads is not.
+---
+## Completed 2026-08-21 — the read half, and the show document
+### S1 is built
+**#74** shipped the first-import half: a file with no catalogue record accepts its sidecar, and **only** then. **#75** backfilled the videos relocated before sidecars existed, which would otherwise never have got one.
+⚠️ S1's second clause — *"reconciling an existing record, the database wins and the difference is reported"* — is **half in force and half descoped, deliberately.** The database wins by construction: `LibraryScanner` does not read a known file's sidecar at all. The **reporting** was **#78**, closed 2026-08-21 as dormant by design, because the two questions it turns on have no good answer while nothing but ViLM writes sidecars — *where* would a difference be reported, and is one ever ACTED on, which reopens the authority question #74 settled. `SidecarImport.decide` is annotated at both ends as unreachable on purpose, so nobody reads its passing tests as evidence the app obeys it.
+### 🚨 D8 was rendered and never written — now built (`a583e07`)
+`MetadataSidecar.showDocument` existed, was documented against D8 and was asserted by a test **from the day it was written, and nothing ever called it.** No `tvshow.nfo` had been written, so every Episodic video was still losing studio and tags — exactly the loss D8 exists to prevent.
+Now written by the move that files the episode, at the **series root** (`Series/tvshow.nfo`, never the season folder). Three decisions the spec did not spell out, each mutation-checked:
+- 🔴 **D4 applies per contributing video, not per folder.** A series is not something the boundary knows about; each video is. Personal and undeclared content does not have its studio and tags leave inside a document written for its neighbours.
+- ⚠️ **The document describes the show, not the episode that just moved** — aggregated across the series, distinct and sorted, because it is rewritten on every move within that series.
+- 🚨 **The stale one goes only when the series is actually over.** A folder whose last episode left keeps metadata attached to nothing (S6, one level up); a series that still has episodes keeps its document.
+### What is verified, and what is not
+**2,237 tests, 0 failures.** The D8 tests move real files through `RelocationMover` into a real temporary library and read the documents back off disk, so this is exercised through the production path rather than mocked.
+⚠️ **Not yet run against the drive library's 38 episodic videos.** That is a data question rather than a code one — whether those records carry the series and episode numbers the grammar needs — but no `tvshow.nfo` has yet been written outside a test.
+⭐ D8 was the fourth function found this week that was complete, tested and called by nothing. See the mistakes log, pattern 16: **a test of a pure function proves the rule; it cannot tell you whether anything applies it.**
