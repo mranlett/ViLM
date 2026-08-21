@@ -31,6 +31,32 @@ public enum SidecarImport {
         case reported([Difference])
     }
 
+    /// 🚨 UNREACHABLE BY DESIGN — NOTHING CALLS THIS, AND THAT IS THE DECISION
+    /// (#78, closed 2026-08-21).
+    ///
+    /// `LibraryScanner` deliberately bypasses it: for a file with no record it
+    /// calls `applying` directly, and for a KNOWN file it does not read the
+    /// sidecar at all. So `.reported` is never produced, and `differences` is
+    /// reached only from tests.
+    ///
+    /// ⚠️ That is the safe subset, and it is also silent. Reconciling an
+    /// existing record means answering two questions nobody has answered:
+    /// **where would a difference be reported** — a scan ending "312
+    /// differences" is not actionable — and **is a difference ever ACTED on**,
+    /// which reopens the authority question #74 settled in the database's
+    /// favour. Neither is worth guessing at while nothing but this app writes
+    /// sidecars.
+    ///
+    /// ⭐ Kept rather than deleted because it carries the reasoning below about
+    /// which fields a document may be trusted for, which is the expensive part
+    /// and would have to be re-derived. It becomes live the moment a SECOND
+    /// thing writes sidecars — then wire it, and answer the two questions
+    /// first.
+    ///
+    /// 🔴 Do not read the tests on this as evidence the behaviour is in force.
+    /// A rule that is complete, tested and called by nothing is not a rule the
+    /// app obeys — see the mistakes log, pattern 16.
+    ///
     /// 🚨 THE FIELDS A SIDECAR IS TRUSTED FOR, and the one it is not.
     ///
     /// Title, series, plot, date, studio, cast, tags and rating are all

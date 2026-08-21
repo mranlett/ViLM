@@ -89,6 +89,13 @@ public class LibraryScanner {
                 // reconciling an existing record is a different job with a
                 // different answer, and doing it here would quietly make the
                 // document authoritative.
+                //
+                // ⚠️ `applying` is called directly and `SidecarImport.decide`
+                // is bypassed ON PURPOSE (#78). `decide` handles the
+                // record-exists case by reporting differences, and there is
+                // nowhere to report to — so the branch stays unreachable
+                // rather than half-built. See the note on `decide` for what
+                // would have to be answered before wiring it.
                 var imported = false
                 if !known.contains(relativePath),
                    let contents = readSidecar(relativePath, rootURL) {
