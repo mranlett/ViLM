@@ -3,7 +3,7 @@
 
 ---
 spec: "Verified Elsewhere — resolving a video against a source we do not plug into"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Verified-Elsewhere-resolving-a-video-against-a-source-we-do-not-plug-into-3bfadccaf42881e28fbaedb160414ca6

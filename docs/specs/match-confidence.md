@@ -3,7 +3,7 @@
 
 ---
 spec: "Match Confidence — how much to trust a fingerprint hit"
-status: Approved
+status: Implemented
 kind: Feature
 priority: P2
 notion: https://app.notion.com/p/Match-Confidence-how-much-to-trust-a-fingerprint-hit-3b7adccaf42881ab86efef4b1ea806b4

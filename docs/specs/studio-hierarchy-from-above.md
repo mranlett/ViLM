@@ -3,7 +3,7 @@
 
 ---
 spec: "Studio Hierarchy from Above — imprints and aliases"
-status: Approved
+status: Implemented
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Studio-Hierarchy-from-Above-imprints-and-aliases-3b7adccaf42881e9affdd281e16d0448
