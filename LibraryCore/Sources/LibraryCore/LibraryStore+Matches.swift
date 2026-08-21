@@ -302,19 +302,46 @@ extension LibraryStore {
     ///
     /// Returns entity ids and video ids separately, because the tools that
     /// would repair them are different.
-    public func nodesMatchedWithoutAnEdge() throws -> (entities: [String], videos: [UUID]) {
+    /// - Parameter knownProviders: the display names of the installed sources,
+    ///   so a record the OPERATOR resolved by hand (#79) is not reported as
+    ///   damage. A hand verification is `matched` with no edge by design —
+    ///   there is no queryable record behind it — so without this the feature
+    ///   that takes a video out of the audits puts it straight into this one.
+    ///
+    ///   🚨 `nil` means "the caller did not say", and then NOTHING is excluded.
+    ///   The directions differ here from `ActorBatchPolicy`: a run that skips
+    ///   too much protects the operator, but an **audit** that excludes too
+    ///   much hides real gaps, so an unsupplied list must report everything.
+    ///
+    ///   ⚠️ An EMPTY set is a different answer from `nil` and a meaningful one:
+    ///   no providers are installed, so every named source is the operator's.
+    public func nodesMatchedWithoutAnEdge(knownProviders: Set<String>? = nil)
+        throws -> (entities: [String], videos: [UUID]) {
         try dbQueue.read { db in
-            let entities = try String.fetchAll(db, sql: """
-                SELECT p.id FROM entity_profiles p
+            func isOperators(_ source: String?) -> Bool {
+                guard let knownProviders else { return false }
+                guard let source = source?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !source.isEmpty else { return false }
+                return !knownProviders.contains(source)
+            }
+
+            let entities = try Row.fetchAll(db, sql: """
+                SELECT p.id AS id, p.enrichment_source AS source FROM entity_profiles p
                  WHERE p.enrichment_state = 'matched'
                    AND NOT EXISTS (SELECT 1 FROM entity_match m WHERE m.entity_id = p.id)
                  ORDER BY p.id
                 """)
-            let videos = try String.fetchAll(db, sql: """
-                SELECT a.id FROM assets a
+                .filter { !isOperators($0["source"]) }
+                .map { $0["id"] as String }
+
+            let videos = try Row.fetchAll(db, sql: """
+                SELECT a.id AS id, a.enrichment_source AS source FROM assets a
                  WHERE a.enrichment_state = 'matched'
                    AND NOT EXISTS (SELECT 1 FROM video_match m WHERE m.video_id = a.id)
-                """).compactMap(UUID.init(uuidString:))
+                """)
+                .filter { !isOperators($0["source"]) }
+                .compactMap { UUID(uuidString: $0["id"] as String) }
+
             return (entities, videos)
         }
     }
@@ -370,8 +397,8 @@ extension LibraryStore {
     /// "0 videos" for nearly every gap — and "0 videos" is exactly what makes
     /// one look unrecoverable. The screen would then tell the operator to fix
     /// by hand what a single refresh would have fixed.
-    public func identityGaps() throws -> IdentityGapReport {
-        let (entities, _) = try nodesMatchedWithoutAnEdge()
+    public func identityGaps(knownProviders: Set<String>? = nil) throws -> IdentityGapReport {
+        let (entities, _) = try nodesMatchedWithoutAnEdge(knownProviders: knownProviders)
         guard !entities.isEmpty else { return IdentityGapReport(gaps: []) }
         let wanted = Set(entities)
 

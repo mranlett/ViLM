@@ -26,6 +26,8 @@ struct ProfileGraphHeaderView: View {
     @State private var isShowingEnrichment = false
     @State private var sourceGapProfile: EntityProfile?
     @State private var isShowingScopedMatch = false
+    @State private var imprintsProfile: EntityProfile?
+    @State private var verifyByHandProfile: EntityProfile?
     @State private var isShowingRenameDialog = false
     @State private var selectedFullImageIdentifier: String? = nil
     @State private var newGlobalName = ""
@@ -255,6 +257,54 @@ struct ProfileGraphHeaderView: View {
                                     Label("What else are they in?",
                                           systemImage: "questionmark.folder")
                                 }
+                            }
+                        }
+
+                        // ⭐ The studio's counterpart to "What else are they
+                        // in?" — the one relationship a company genuinely owns,
+                        // asked for in one request instead of discovered one
+                        // matched video at a time.
+                        //
+                        // ⚠️ Same gate as the performer case: only when the
+                        // record carries a source id. Without one there is
+                        // nothing to ask the source about, and offering it buys
+                        // a request that can only fail.
+                        //
+                        // ⚠️ The OWNER's record, never the merged cross-library
+                        // view — the same reason `ownerRawProfile` exists for
+                        // the performer case. The merged view can carry another
+                        // library's source id, and asking the source about THAT
+                        // record would file one library's imprints into
+                        // another's hierarchy.
+                        if isStudio, let provider = installedStudioProvider,
+                           let id = currentEntityId,
+                           let owner = ownerRawProfile(for: id),
+                           !(owner.enrichmentSourceId ?? "").isEmpty {
+                            Button {
+                                imprintsProfile = owner
+                            } label: {
+                                Label("Fetch Imprints from \(provider.displayName)",
+                                      systemImage: "building.2.crop.circle")
+                            }
+                        }
+
+                        // ⭐ #79 for a studio or a performer. The core half
+                        // shipped without a screen, so the gap it names — 60
+                        // studios and 70 performers carrying no identity — was
+                        // still open.
+                        //
+                        // 🚨 Deliberately NOT gated on carrying a source id.
+                        // Every other action here is offered only when the
+                        // record is already identified; this one exists FOR the
+                        // records that are not, and gating it the same way
+                        // would hide it from every profile it is for.
+                        if isEditableEntity, currentEntityId != nil,
+                           let id = currentEntityId,
+                           let owner = ownerRawProfile(for: id) {
+                            Button {
+                                verifyByHandProfile = owner
+                            } label: {
+                                Label("Verified It Yourself?", systemImage: "bookmark")
                             }
                         }
 
@@ -578,6 +628,28 @@ struct ProfileGraphHeaderView: View {
                 EntityProfileEditorView(libraryURL: libraryURL, entityId: id, profile: ownerRawProfile(for: id), onSave: saveProfile)
             }
         }
+        .sheet(item: $verifyByHandProfile) { profile in
+            VerifiedElsewhereProfileSheet(profile: profile) { updated in
+                // ⚠️ Written to the store that OWNS this profile, not to
+                // whichever library happens to be open — the same routing
+                // `ownerRawProfile` used to read it.
+                try? LibrarySession.shared.store(forProfile: updated.id)
+                    .saveEntityProfile(updated)
+                fetchProfile()
+                NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"),
+                                                object: nil)
+            }
+        }
+        .sheet(item: $imprintsProfile) { profile in
+            if let libraryURL {
+                StudioImprintsView(libraryURL: libraryURL, profile: profile) { changed in
+                    // Only when something was written — the lineage block is
+                    // what this feature changes, and reloading it after a
+                    // cancelled look would be work nobody asked for.
+                    if changed { fetchStudioLineage() }
+                }
+            }
+        }
         .sheet(isPresented: $isShowingScopedMatch) {
             // Every open library, like the Settings run — the scope is the set
             // of asset ids, and those already identify which library each video
@@ -746,6 +818,17 @@ struct ProfileGraphHeaderView: View {
 
     /// A lineage row. Each entry carries its video count, because a bare list
     /// of company names is trivia — the count is what makes it worth a tap.
+    ///
+    /// 🚨 An imprint the library owns NOTHING from says so in words, and is
+    /// drawn apart from the rest. Asking a network for its imprints
+    /// deliberately files studios with no videos behind them, and the
+    /// operator's decision was "create AND mark" precisely so a complete
+    /// hierarchy never implies a library that holds more than it does.
+    ///
+    /// ⭐ Derived from the count, never stored. The moment a video from that
+    /// imprint arrives the mark clears itself; a stored flag would be a second
+    /// fact to maintain and would eventually disagree with the number printed
+    /// beside it.
     private func lineageRow(title: String,
                             relatives: [StudioLineage.Relative],
                             color: Color) -> some View {
@@ -753,13 +836,16 @@ struct ProfileGraphHeaderView: View {
             Text(title).font(.subheadline).foregroundColor(.secondary).fontWeight(.medium)
             FlowLayout(spacing: 6) {
                 ForEach(relatives) { relative in
-                    let label = "\(relative.name) · \(relative.videoCount)"
+                    let held = relative.videoCount > 0
+                    let label = held
+                        ? "\(relative.name) · \(relative.videoCount)"
+                        : "\(relative.name) · none here"
                     #if os(iOS)
-                    TagBubble(label: label, color: color,
+                    TagBubble(label: label, color: held ? color : .secondary,
                               navRoute: .entityProfile(category: "studio",
                                                        name: relative.name))
                     #else
-                    TagBubble(label: label, color: color, onPivot: {
+                    TagBubble(label: label, color: held ? color : .secondary, onPivot: {
                         sidebarSelection = [.studio(relative.name)]
                     })
                     #endif
@@ -776,6 +862,12 @@ struct ProfileGraphHeaderView: View {
         PluginEnvironment.registry.installed
             .compactMap { $0 as? any ActorMetadataProvider }
             .first
+    }
+
+    /// The installed studio source, if any. Same rule as the actor one — an
+    /// available but uninstalled plugin gets no affordance (D3).
+    private var installedStudioProvider: (any StudioMetadataProvider)? {
+        PluginEnvironment.registry.installedStudioProviders().first
     }
 
     /// Whether a scoped video run could do anything. Same rule as everywhere

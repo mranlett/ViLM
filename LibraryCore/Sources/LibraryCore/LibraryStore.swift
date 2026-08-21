@@ -411,19 +411,27 @@ public class LibraryStore {
                 referenced.insert(tag)
             }
         }
-        let (performers, studios, parents): (Set<String>, Set<String>, Set<String>) =
+        let (performers, studios, parents, children):
+            (Set<String>, Set<String>, Set<String>, Set<String>) =
             try dbQueue.read { db in
                 (Set(try String.fetchAll(db, sql: "SELECT DISTINCT performer_id FROM video_performer")),
                  Set(try String.fetchAll(db, sql: "SELECT DISTINCT studio_id FROM video_studio")),
                  Set(try String.fetchAll(db, sql:
-                    "SELECT DISTINCT parent_studio_id FROM studio_parent WHERE valid_to IS NULL")))
+                    "SELECT DISTINCT parent_studio_id FROM studio_parent WHERE valid_to IS NULL")),
+                 // ⚠️ Both ends of the same rows. An imprint asking for its
+                 // network is as much a reference as a network naming its
+                 // imprints, and reading only one end is what made a filed
+                 // imprint deletable.
+                 Set(try String.fetchAll(db, sql:
+                    "SELECT DISTINCT studio_id FROM studio_parent WHERE valid_to IS NULL")))
             }
 
         return OrphanAudit.findings(.init(profiles: profiles,
                                           referencedByString: referenced,
                                           performersWithEdges: performers,
                                           studiosWithEdges: studios,
-                                          studiosWithChildren: parents))
+                                          studiosWithChildren: parents,
+                                          studiosWithParent: children))
     }
 
     /// Gives every studio the library uses a profile row, so it can be looked

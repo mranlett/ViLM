@@ -315,8 +315,18 @@ struct IdentityGapView: View {
     private func load() async {
         do {
             let url = libraryURL
+            // ⭐ Which source names are the app's. Anything else was typed by
+            // the operator (#79), and a record they verified by hand is not a
+            // gap — it is `matched` with no edge BY DESIGN, because there is no
+            // queryable record behind it. Read on the main actor; the registry
+            // is not the detached task's to touch.
+            let providers = Set(PluginEnvironment.registry.installed.compactMap {
+                ($0 as? any ActorMetadataProvider)?.displayName
+                    ?? ($0 as? any StudioMetadataProvider)?.displayName
+                    ?? ($0 as? any VideoMetadataProvider)?.displayName
+            })
             let found = try await Task.detached(priority: .utility) {
-                try LibraryStore(at: url).identityGaps()
+                try LibraryStore(at: url).identityGaps(knownProviders: providers)
             }.value
             await MainActor.run {
                 self.report = found

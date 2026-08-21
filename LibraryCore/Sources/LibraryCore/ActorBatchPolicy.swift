@@ -62,8 +62,33 @@ public enum ActorBatchPolicy {
     ///
     ///   ⭐ Examining them is cheap and decision-free: the id is already known,
     ///   so it is one direct fetch with no search and no disambiguation.
+    ///
+    /// - Parameter knownProviders: the display names of the installed sources.
+    ///   🔴 Anything else naming a source is a person's own statement (#79),
+    ///   and V3 says a later automated run may not overwrite one.
+    ///
+    ///   ⚠️ An EMPTY set errs toward skipping, which is the safe direction: a
+    ///   caller that forgets to supply it protects the operator's records
+    ///   rather than exposing them.
     public static func skipReason(for profile: EntityProfile,
-                                  identityNeedsEnrichment: Bool = false) -> String? {
+                                  identityNeedsEnrichment: Bool = false,
+                                  knownProviders: Set<String> = []) -> String? {
+        // 🚨 BEFORE the enrichment escape below, and that order is the whole
+        // point of this check existing.
+        //
+        // A hand-verified profile is `matched` with NO `entity_match` edge,
+        // which is precisely the shape `identityNeedsEnrichment` describes — so
+        // the escape would send the operator's own statement to be re-matched
+        // against the wired source, and a `.noMatch` outcome would then record
+        // `.noMatch`, clear the id, and ERASE the verification entirely.
+        //
+        // ⚠️ The escape's reason does not apply here. It exists for a record
+        // whose identity arrived without its details, where nobody knows which
+        // record was meant. Here somebody does: a person said so, against a
+        // source this app cannot query and must not second-guess.
+        if VerifiedElsewhere.wasVerifiedByHand(profile, knownProviders: knownProviders) {
+            return "you verified this one yourself"
+        }
         // ⚠️ Checked BEFORE the state switch. The state genuinely is `matched`
         // — that is not wrong, it is incomplete — so the exception has to
         // precede it rather than being folded into it.

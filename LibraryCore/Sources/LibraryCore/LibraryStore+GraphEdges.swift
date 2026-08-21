@@ -527,6 +527,133 @@ extension LibraryStore {
         return found
     }
 
+
+    // MARK: Studio hierarchy from above
+
+    /// Every studio the library holds, shaped for `StudioHierarchy.plan`.
+    ///
+    /// ⭐ The gathering half of the planner, which is pure and takes what it is
+    /// given. Four facts per studio, and each one decides a branch: the source
+    /// id resolves an arriving imprint BY IDENTITY (H7), the current parent
+    /// says whether anything would change, the provenance of that parent says
+    /// whether the operator chose it (D4), and whether any video is filed under
+    /// it is what makes an imprint the library owns nothing from visible as
+    /// such (H4).
+    ///
+    /// ⚠️ `hasVideos` reads the tag STRINGS, the same source as
+    /// `studioVideoCounts`, and deliberately not the `video_studio` edge. The
+    /// mark exists to be shown beside a count, and a mark derived from one
+    /// source next to a count derived from another would eventually contradict
+    /// it on screen — "owns nothing" against a row reading 3 videos. When the
+    /// writes move to the edge, both move together.
+    public func localStudios() throws -> [LocalStudio] {
+        let names = try entityNamesById(ofType: "studio")
+        let counts = try studioVideoCounts()
+
+        let (sourceIds, parents): ([String: String], [String: (String, String?)]) =
+            try dbQueue.read { db in
+                var ids: [String: String] = [:]
+                for row in try Row.fetchAll(db, sql: """
+                    SELECT id, enrichment_source_id FROM entity_profiles
+                     WHERE entity_type = 'studio'
+                       AND enrichment_source_id IS NOT NULL
+                       AND enrichment_source_id <> ''
+                    """) {
+                    ids[row["id"]] = row["enrichment_source_id"]
+                }
+                var ps: [String: (String, String?)] = [:]
+                for row in try Row.fetchAll(db, sql: """
+                    SELECT studio_id, parent_studio_id, source FROM studio_parent
+                     WHERE valid_to IS NULL
+                    """) {
+                    ps[row["studio_id"]] = (row["parent_studio_id"], row["source"])
+                }
+                return (ids, ps)
+            }
+
+        return names.map { id, name in
+            let parent = parents[id]
+            return LocalStudio(
+                id: id,
+                name: name,
+                sourceId: sourceIds[id],
+                parentId: parent?.0,
+                // 🔴 D4 — "the operator chose this" is the edge's provenance,
+                // not a column of its own. `.operator` is already defined as
+                // "entered or confirmed by the operator", so a second flag
+                // would be a copy of it, free to disagree.
+                parentWasHandSet: parent?.1 == EdgeProvenance.operator.rawValue,
+                hasVideos: (counts[id] ?? 0) > 0)
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// What actually happened when a hierarchy plan was applied.
+    public struct StudioHierarchyOutcome: Equatable, Sendable {
+        /// Imprints the library did not hold, now created and filed.
+        public var created: [String] = []
+        /// Imprints already held, now filed under the network.
+        public var linked: [String] = []
+        /// 🚨 Refused at the write, having passed the plan. The planner walks
+        /// the hierarchy it was handed; the database walks the one it has, and
+        /// between the two the operator may have changed it. Reported by name
+        /// rather than thrown, so one bad imprint does not discard the rest.
+        public var refused: [(name: String, reason: String)] = []
+
+        public var isEmpty: Bool { created.isEmpty && linked.isEmpty }
+
+        public static func == (a: Self, b: Self) -> Bool {
+            a.created == b.created && a.linked == b.linked
+                && a.refused.map(\.name) == b.refused.map(\.name)
+        }
+    }
+
+    /// Files a network's imprints beneath it.
+    ///
+    /// 🚨 Writes ONLY what the plan decided. Cycles, hand-set parents and
+    /// imprints already filed reached the plan and were left there; nothing is
+    /// re-decided here, because a rule applied in two places is a rule that
+    /// will be applied two ways.
+    ///
+    /// ⚠️ A created imprint is CONFIRMED, not merely minted. It arrived
+    /// carrying the source's own id for it — the same evidence
+    /// `StudioMatchReviewView` already acts on when it confirms a named parent
+    /// — so leaving it unclaimed would throw away an identity the library was
+    /// handed and send the operator to match it by name later.
+    @discardableResult
+    public func applyStudioHierarchy(_ plan: StudioHierarchyPlan,
+                                     under networkId: String,
+                                     source: String?) throws -> StudioHierarchyOutcome {
+        var outcome = StudioHierarchyOutcome()
+
+        for imprint in plan.create {
+            do {
+                try confirmStudio(imprint.ref.name, source: source,
+                                  sourceId: imprint.ref.sourceId)
+                guard let id = try entityId(named: imprint.ref.name, type: "studio") else {
+                    outcome.refused.append((imprint.ref.name, "could not be created"))
+                    continue
+                }
+                try setStudioParent(networkId, forStudio: id, source: .download)
+                outcome.created.append(imprint.ref.name)
+            } catch {
+                outcome.refused.append((imprint.ref.name, error.localizedDescription))
+            }
+        }
+
+        for imprint in plan.link {
+            guard let id = imprint.localId else { continue }
+            do {
+                try setStudioParent(networkId, forStudio: id, source: .download)
+                outcome.linked.append(imprint.ref.name)
+            } catch {
+                outcome.refused.append((imprint.ref.name, error.localizedDescription))
+            }
+        }
+
+        return outcome
+    }
+
     /// Counts, for asserting a migration reproduced what the strings said.
     public func edgeCount(_ kind: GraphEdgeKind) throws -> Int {
         try dbQueue.read { db in

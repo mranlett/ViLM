@@ -18,6 +18,9 @@
 //      survive as roots, so the deletion is quiet: the hierarchy vanishes and
 //      nothing says so.
 //
+//   🚨 An imprint the operator FILED under a network read as orphaned. See
+//      the studio case below: the hierarchy is a reference, both ways.
+//
 //   ⚠️ Only tag STRINGS were consulted. An actor reachable through a
 //      `video_performer` edge but not named in any tag array reads as orphaned,
 //      which is precisely the state the string-retirement migration produces.
@@ -135,17 +138,22 @@ public enum OrphanAudit {
         public let studiosWithEdges: Set<String>
         /// Studio ids that are the PARENT of at least one other studio.
         public let studiosWithChildren: Set<String>
+        /// Studio ids filed BENEATH a network — the other half of the same
+        /// fact, and the one that keeps a known-but-empty imprint alive.
+        public let studiosWithParent: Set<String>
 
         public init(profiles: [ProfileRef],
                     referencedByString: Set<String>,
                     performersWithEdges: Set<String> = [],
                     studiosWithEdges: Set<String> = [],
-                    studiosWithChildren: Set<String> = []) {
+                    studiosWithChildren: Set<String> = [],
+                    studiosWithParent: Set<String> = []) {
             self.profiles = profiles
             self.referencedByString = referencedByString
             self.performersWithEdges = performersWithEdges
             self.studiosWithEdges = studiosWithEdges
             self.studiosWithChildren = studiosWithChildren
+            self.studiosWithParent = studiosWithParent
         }
     }
 
@@ -186,6 +194,21 @@ public enum OrphanAudit {
                 // because the cascade promotes the imprints to roots rather than
                 // failing.
                 if input.studiosWithChildren.contains(id) { continue }
+                // 🚨 Nor is an imprint filed under one. Asking a network for
+                // its imprints deliberately creates studios the library owns
+                // no videos from — a leaf with no videos, no children and no
+                // tag string is EXACTLY the shape this audit offers to delete,
+                // so without this the next cleanup silently undoes the feature.
+                //
+                // ⭐ The rule is the mirror of the one above rather than a
+                // special case for how the row arrived: participating in the
+                // hierarchy at all, as parent or as child, is what makes a
+                // studio referred to. A row that arrived some other way and
+                // has a network is spared for the same honest reason.
+                //
+                // ⚠️ Removing one deliberately is still possible, and is the
+                // tombstone's job — an explicit deletion, not a sweep.
+                if input.studiosWithParent.contains(id) { continue }
             }
 
             out[kind, default: []].append(

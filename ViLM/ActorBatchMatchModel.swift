@@ -109,13 +109,23 @@ final class ActorBatchMatchModel: ObservableObject {
             // ask" must not read the same as "nobody objected".
             let exposures = (try? store.performerExposures()) ?? [:]
 
+            // ⭐ Which source names are the app's, so anything else reads as
+            // the operator's own. Built from the ACTOR providers — this run's
+            // sources — rather than from every installed plugin.
+            let knownProviders = Set(PluginEnvironment.registry.installed
+                .compactMap { ($0 as? any ActorMetadataProvider)?.displayName })
+
             for profile in profiles {
                 if cancelled { break }
                 current = displayName(profile)
 
                 if let reason = ActorBatchPolicy.skipReason(
                     for: profile,
-                    identityNeedsEnrichment: awaitingEnrichment.contains(profile.id)) {
+                    identityNeedsEnrichment: awaitingEnrichment.contains(profile.id),
+                    // 🔴 V3 (#79) — anything naming a source that is not an
+                    // installed provider was named by a person, and this run
+                    // may not overwrite what they said.
+                    knownProviders: knownProviders) {
                     report.record(.skipped(reason: reason))
                     continue
                 }
