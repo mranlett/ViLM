@@ -152,6 +152,44 @@ public enum MetadataSidecar {
         """
     }
 
+    /// 🚨 Kodi's name for a show-level document, in ONE place so the writer and
+    /// the remover cannot drift. Two literals is how the two come to disagree.
+    public static let showFileName = "tvshow.nfo"
+
+    /// The show document's path, at the SERIES root — not the season folder.
+    ///
+    /// ⚠️ Kodi reads `tvshow.nfo` from the show's own directory. The episodic
+    /// grammar files as `Series/Season NN/Episode.ext`, so this is the first
+    /// path component and never the second.
+    public static func path(forSeriesFolder folder: String) -> String {
+        "\(folder)/\(showFileName)"
+    }
+
+    /// The show document for a series, built from the videos filed under it (D8).
+    ///
+    /// 🚨 D4 applies PER CONTRIBUTING VIDEO, not to the folder. A series is not
+    /// a thing the boundary knows about; each video is, and one that may not
+    /// leave the device must not have its studio and tags leave inside a
+    /// document written for its neighbours.
+    ///
+    /// ⚠️ Returns nil when nothing is eligible, so an empty series folder
+    /// produces no file rather than an empty claim — S5's rule one level up.
+    ///
+    /// ⭐ Distinct and sorted. The document is rewritten every time a video in
+    /// the series moves, and unstable ordering would rewrite the file on every
+    /// run with no change in meaning.
+    public static func showDocument(series: String, from assets: [Asset]) -> String? {
+        let eligible = assets.filter { ProviderBoundary.allows($0.contentKind) }
+        guard !eligible.isEmpty else { return nil }
+
+        let studios = Set(eligible.flatMap { $0.studios }
+            .compactMap { $0.trimmed }.filter { !$0.isEmpty }).sorted()
+        let tags = Set(eligible.flatMap { $0.actions }
+            .compactMap { $0.trimmed }.filter { !$0.isEmpty }).sorted()
+
+        return showDocument(series: series, studios: studios, tags: tags)
+    }
+
     /// The sidecar's path for a video, beside it and named for it (D3, S6).
     ///
     /// 🚨 Named for the file it accompanies, so it travels with a copy. A

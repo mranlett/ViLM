@@ -216,8 +216,16 @@ public struct RelocationMover {
         try? FileManager.default.removeItem(at: stale)
 
         guard let store = try? LibraryStore(at: libraryURL),
-              let asset = try? store.fetchAllAssets().first(where: { $0.id == assetId })
+              let all = try? store.fetchAllAssets(),
+              let asset = all.first(where: { $0.id == assetId })
         else { return }
+
+        // D8 — the show-level document. Written from the same move that files
+        // the episode, for the same reason the episode's own sidecar is: a
+        // later pass cannot know which folder a video used to sit under, so it
+        // cannot clear the document left behind there.
+        writeShowDocuments(for: asset, at: newPath, from: oldPath,
+                           assets: all, libraryURL: libraryURL)
 
         let profiles = (try? store.fetchAllEntityProfiles()).map(EntityProfileIndex.init)
         let cast = asset.actors.map { name in
@@ -230,6 +238,65 @@ public struct RelocationMover {
 
         let target = libraryURL.appendingPathComponent(MetadataSidecar.path(forVideo: newPath))
         try? document.write(to: target, atomically: true, encoding: .utf8)
+    }
+
+    /// Keeps `tvshow.nfo` current for the series a video is joining, and clears
+    /// the one it is leaving behind (D8).
+    ///
+    /// 🚨 WHY THIS EXISTS AT ALL: an episode sidecar carries no studio and no
+    /// tags — Kodi keeps those on the show, not the episode — so without a show
+    /// document the Episodic grammar silently drops the two fields this library
+    /// is best at: studio on 88% of videos, and tags widely used.
+    ///
+    /// ⚠️ Best-effort and never throws, exactly like the episode's own sidecar.
+    /// Portability must not fail a move that has already happened.
+    private func writeShowDocuments(for asset: Asset, at newPath: String,
+                                    from oldPath: String, assets: [Asset],
+                                    libraryURL: URL) {
+        /// The series root is the FIRST path component — never the season.
+        func seriesFolder(_ path: String) -> String? {
+            let parts = (path as NSString).pathComponents.filter { $0 != "/" }
+            // Two components is `Folder/File.ext`, which is the scene and film
+            // shape. An episode is `Series/Season NN/File.ext`.
+            guard parts.count >= 3 else { return nil }
+            return parts.first
+        }
+
+        // 🚨 The stale one goes FIRST, and goes whether or not a new one is
+        // written. A series renamed, or its last episode refiled elsewhere,
+        // leaves a document that still names studios and tags for a folder
+        // that no longer holds the videos they came from — authoritative-
+        // looking metadata attached to nothing, which S6 calls worse than none.
+        if let leaving = seriesFolder(oldPath), leaving != seriesFolder(newPath) {
+            let remaining = assets.contains { other in
+                other.id != asset.id && seriesFolder(other.relativePath) == leaving
+            }
+            if !remaining {
+                try? FileManager.default.removeItem(
+                    at: libraryURL.appendingPathComponent(
+                        MetadataSidecar.path(forSeriesFolder: leaving)))
+            }
+        }
+
+        let seriesName = asset.videoName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let joining = seriesFolder(newPath), !seriesName.isEmpty else { return }
+
+        // ⚠️ Built from every video that will be filed under this series, not
+        // from the one that just moved. The document describes the show; a
+        // document carrying only the most recently moved episode's studio would
+        // change meaning every time a different episode was refiled.
+        let members = assets.filter { other in
+            other.id == asset.id
+                ? true
+                : seriesFolder(other.relativePath) == joining
+        }
+        guard let document = MetadataSidecar.showDocument(series: seriesName, from: members)
+        else { return }
+
+        try? document.write(
+            to: libraryURL.appendingPathComponent(
+                MetadataSidecar.path(forSeriesFolder: joining)),
+            atomically: true, encoding: .utf8)
     }
 
     /// Whether both ends sit on one volume.
