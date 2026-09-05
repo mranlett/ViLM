@@ -1,0 +1,58 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "F4 - Derive bitmap cache limits from device RAM",
+    "created": "2026-08-02T00:15:54Z",
+    "updated": "2026-08-02T00:16:08Z"
+  },
+  "plan": {
+    "title": "F4 - Derive bitmap cache limits from device RAM",
+    "status": "pending",
+    "tags": [
+      "performance",
+      "phase-2",
+      "F4",
+      "memory"
+    ],
+    "narratives": {
+      "Overview": "Three in-memory bitmap caches use fixed limits totalling ~288 MB, and one is unbounded by cost.",
+      "Problem": "ProfileImageView.swift:27 sets 192 MB; AppComponents.swift:199 sets 96 MB; and DashboardComponents.swift:181 -- missed by the audit -- sets countLimit = 500 with NO cost limit at all, which is effectively unbounded in bytes since cost varies with image size.\n\nOn a 3-4 GB device this invites Jetsam termination, page compression and background-app eviction.",
+      "Action": "Scale limits from ProcessInfo.processInfo.physicalMemory, give the third cache a totalCostLimit, and evict in response to memory-pressure notifications.",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917\nSynced locally: docs/specs/ios-performance-battery.md\nDerived from the Auditor's iOS Performance & Battery Audit; every finding independently re-verified against source at commit 34ba4a0 before specification."
+    },
+    "items": [
+      {
+        "title": "No cache uses a hardcoded absolute byte limit; all derive from device RAM",
+        "status": "proposed"
+      },
+      {
+        "title": "Every bitmap cache has a totalCostLimit, with cost as decoded byte size not object count",
+        "status": "proposed"
+      },
+      {
+        "title": "Caches evict on memory-warning / memory-pressure source",
+        "status": "proposed"
+      },
+      {
+        "title": "Peak resident memory during sustained scrolling under a stated ceiling on the lowest supported device",
+        "status": "proposed"
+      },
+      {
+        "title": "No functional regression: images still appear and cache-miss paths still fetch",
+        "status": "proposed"
+      }
+    ],
+    "metadata": {
+      "spec": "iOS Performance & Battery Optimization",
+      "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
+    },
+    "updated": "2026-08-02T00:16:08Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/7",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

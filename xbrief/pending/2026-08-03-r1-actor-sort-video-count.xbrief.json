@@ -1,0 +1,65 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Actor sort by video count is O(n^2)",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-08-03T21:40:00Z"
+  },
+  "plan": {
+    "title": "Sorting actors by video count blocks the UI and has crashed",
+    "status": "pending",
+    "tags": [
+      "bug",
+      "performance",
+      "actors",
+      "blocking"
+    ],
+    "metadata": {
+      "spec": "Actor & Tag Browsing - UX Corrections",
+      "specUrl": "https://app.notion.com/p/3b1adccaf428818480bcde52fc138392"
+    },
+    "narratives": {
+      "Overview": "Sorting 1,300+ actors by video count takes a very long time, cannot be scrolled during, and has crashed. Root cause is identified and quantified; this is not a spike.",
+      "Problem": "ActorGridView.assetsCount(for:) (ActorGridView.swift:591) scans EVERY asset and allocates a Set per asset. It is called from inside the sort comparator (ActorGridView.swift:259), twice per comparison.\n\n1,335 actors produce ~13,900 comparisons, so ~27,800 calls, each scanning 1,346 assets: approximately 37 MILLION asset inspections plus a Set allocation per asset per call.\n\nIt runs synchronously on the main thread inside a SwiftUI computed property, which is why the screen cannot scroll while it works.",
+      "Action": "Precompute the counts once per data change into a [String: Int], then let the comparator read it in O(1).\n\nOne pass over 1,346 assets, incrementing per actor and per AKA. Cost falls from ~37 million inspections to ~1,346 - roughly four orders of magnitude.\n\nDeliberately NOT a background queue, progress spinner or concurrency change. Those treat the symptom; the work should simply not exist.",
+      "Constraint": "AKA-matched videos must still be counted. The fix must not quietly change any displayed number.\n\nThe same shape of mistake exists in the .age, .dateAdded and .rating comparators - each does a dictionary lookup per comparison. Far cheaper, but fix them in the same pass.",
+      "Risk": "Stale counts if the map is not rebuilt when assets or profiles change. The invalidation point matters more than the map itself.",
+      "Test": "T1 - the precomputed count equals the current per-actor computation for every actor, including AKA-matched videos. This is what stops the fix silently changing the numbers.\nT2 - sorting 1,335 actors completes within an asserted main-thread budget, not an eyeballed one.",
+      "Source": "Spec R1. Code: ActorGridView.swift:259, :591. Library scale measured 2026-08-03: 1,335 actors, 1,346 videos."
+    },
+    "items": [
+      {
+        "title": "Build a per-actor video count map in one pass, including AKA matches",
+        "status": "proposed"
+      },
+      {
+        "title": "Comparator reads the map instead of calling assetsCount",
+        "status": "proposed"
+      },
+      {
+        "title": "Invalidate/rebuild the map when assets or profiles change",
+        "status": "proposed"
+      },
+      {
+        "title": "Apply the same treatment to .age, .dateAdded and .rating comparators",
+        "status": "proposed"
+      },
+      {
+        "title": "T1 equivalence test against the current computation",
+        "status": "proposed"
+      },
+      {
+        "title": "T2 sort-at-scale budget test",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-08-03T21:40:00Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/18",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Gallery tap opens the wrong photo",
+    "created": "2026-08-02T17:46:33Z",
+    "updated": "2026-08-02T17:46:33Z"
+  },
+  "plan": {
+    "title": "Actor photo gallery: tapping a thumbnail opens the wrong photo",
+    "status": "pending",
+    "tags": [
+      "bug",
+      "actors",
+      "ui"
+    ],
+    "metadata": {
+      "spec": "Reported defect - no Notion spec",
+      "specUrl": "https://github.com/mranlett/ViLM/issues"
+    },
+    "narratives": {
+      "Overview": "In an actor's photo gallery, tapping a thumbnail opens the WRONG photo in the full-screen browser. The user must swipe to reach the photo they actually tapped.",
+      "Problem": "Reported by the Human Operator:\n\n> With 4 photos on a profile, the first is treated as the profile photo and the gallery strip shows the other three. Tapping the MIDDLE of those three opens the LAST photo instead, and I have to swipe to get to the one I clicked on.\n\nAffects ProfileGraphHeaderView. The relevant path:\n\n- The strip renders `ForEach(galleryOnlyTokens(for: profile), id: \\.self)` and each Button sets `selectedFullImageIdentifier = url` (~line 225-227).\n- The sheet builds `allImageIdentifiers = [\"primary\"] + galleryOnlyTokens(for: profile)` and passes `initialIdentifier: selectedFullImageIdentifier ?? \"primary\"` (~line 294-301).\n- `FullScreenPhotoBrowser` seeds its page in `.onAppear` with `index = identifiers.firstIndex(of: initialIdentifier) ?? 0` (~line 356-358).\n\nOn paper that mapping is correct: both sides derive from the same `galleryOnlyTokens(for:)`, so the tapped token should resolve to its own index. The observed off-by-one means one of the assumptions does not hold at runtime.",
+      "Action": "NOT YET DIAGNOSED. Hypotheses, ranked, all UNVERIFIED:\n\n1. **Stale sheet content.** The sheet uses `.sheet(isPresented:)` with a computed Binding rather than `.sheet(item:)`. That form is known to capture its content before the latest state lands, showing the PREVIOUS selection. Notably an unused `IdentifiableString: Identifiable` struct sits at ~line 309, which suggests `.sheet(item:)` was the original approach — switching away from it would introduce exactly this class of bug. If the user's 'last photo' means 'the one I opened previously' rather than 'last in the strip', this is almost certainly it.\n\n2. **`.onAppear` ordering versus the pager.** `index` is `@State = 0` and only corrected in `.onAppear`. `WrappingPhotoPager` is a manual three-page carousel with its own `dragOffset` and `isSettling` state; if it initialises against index 0 before the correction lands, the correction may be applied inconsistently.\n\n3. **Duplicate tokens.** `ForEach(..., id: \\.self)` over a `[String]` with repeated values yields undefined identity, and `firstIndex(of:)` resolves duplicates to the earliest occurrence.\n\nFirst step is to determine which, by logging `initialIdentifier`, the resolved index, and `identifiers` at open.",
+      "Constraint": "Do not regress the endless wrap-around behaviour. `WrappingPhotoPager` renders exactly three pages and drives a manual drag offset specifically to avoid TabView animating a large index jump when it crosses a sentinel; a naive rewrite reintroduces that visual glitch.\n\nTapping the primary header photo (which sets the identifier to the literal \"primary\") must keep working.",
+      "Risk": "Cosmetic-to-usability, no data loss. But it makes the gallery feel broken on every single use, and the workaround (swiping to find the photo you tapped) is the kind of friction that reads as an unfinished app.",
+      "Test": "Reproduce with a profile having 4+ photos where the first equals the primary. Tap each thumbnail in turn and confirm the opened photo matches.\n\nIdentifier-to-index resolution is pure and should be extracted to LibraryCore and unit-tested, following the pattern used for ActorCSV, FrameGrid, AssetSort and MediaFormat.",
+      "Source": "Reported by the Human Operator, 2026-08-02. Code path traced but root cause NOT confirmed."
+    },
+    "items": [
+      {
+        "title": "Tapping a gallery thumbnail opens THAT photo, not a neighbour",
+        "status": "proposed"
+      },
+      {
+        "title": "Verified with a 4-photo profile: tapping the middle of the three gallery photos opens the middle one",
+        "status": "proposed"
+      },
+      {
+        "title": "The navigation title reads the correct 'N of M' on open",
+        "status": "proposed"
+      },
+      {
+        "title": "Tapping the primary header photo still opens the primary",
+        "status": "proposed"
+      },
+      {
+        "title": "Correct behaviour on the FIRST open of a session and on every subsequent open",
+        "status": "proposed"
+      },
+      {
+        "title": "Opening, dismissing, then opening a different photo shows the newly-tapped one, not the previous",
+        "status": "proposed"
+      },
+      {
+        "title": "A profile with duplicate gallery tokens still opens the tapped thumbnail",
+        "status": "proposed"
+      },
+      {
+        "title": "A regression test covers identifier-to-index resolution",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-08-02T17:46:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/13",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

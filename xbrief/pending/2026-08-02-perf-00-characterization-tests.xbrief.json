@@ -1,0 +1,59 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Phase 0 - Characterization tests before any refactor",
+    "created": "2026-08-02T00:15:54Z",
+    "updated": "2026-08-02T00:16:08Z"
+  },
+  "plan": {
+    "title": "Phase 0 - Characterization tests before any refactor",
+    "status": "pending",
+    "tags": [
+      "performance",
+      "phase-0",
+      "blocking",
+      "testing"
+    ],
+    "narratives": {
+      "Overview": "BLOCKING PREREQUISITE. Capture current behaviour as tests so the optimisations that follow can be proven not to change it. Required by personal standards: characterization tests precede refactoring legacy code.",
+      "Problem": "F1, F5 and F6 all rewrite how existing values are produced. Without a pinned record of current output, a regression is indistinguishable from an intended change.",
+      "Action": "Add to LibraryCore/Tests/LibraryCoreTests, extending the existing ContactSheetServiceTests and VideoDuplicateAnalyzerTests suites:\n\n- F1: frame timestamps and ordering produced for a 4x4 grid over fixture videos\n- F5: asset sort-by-size ordering for an unchanged library\n- F6: duration, dimensions and codec as AVFoundation reports them today\n\nThese must pass unchanged after every optimisation in this epic.",
+      "Test": "Run with `swift test --package-path LibraryCore`. The Auditor executes and reads real output.",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917\nSynced locally: docs/specs/ios-performance-battery.md\nDerived from the Auditor's iOS Performance & Battery Audit; every finding independently re-verified against source at commit 34ba4a0 before specification."
+    },
+    "items": [
+      {
+        "title": "Frame timestamp/order characterization test added",
+        "status": "proposed"
+      },
+      {
+        "title": "Sort-by-size ordering characterization test added",
+        "status": "proposed"
+      },
+      {
+        "title": "AV metadata characterization test added",
+        "status": "proposed"
+      },
+      {
+        "title": "All new tests green on an unmodified tree",
+        "status": "proposed"
+      },
+      {
+        "title": "Tests reference fixture media checked in or generated deterministically",
+        "status": "proposed"
+      }
+    ],
+    "metadata": {
+      "spec": "iOS Performance & Battery Optimization",
+      "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
+    },
+    "updated": "2026-08-02T00:16:08Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/3",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

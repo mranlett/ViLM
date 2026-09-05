@@ -1,0 +1,63 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "F5/F6 Stage B - Populate duration, dimensions and codec (slow)",
+    "created": "2026-08-02T00:15:54Z",
+    "updated": "2026-08-02T00:16:08Z"
+  },
+  "plan": {
+    "title": "F5/F6 Stage B - Populate duration, dimensions and codec (slow)",
+    "status": "pending",
+    "tags": [
+      "performance",
+      "phase-3",
+      "F6",
+      "backfill"
+    ],
+    "narratives": {
+      "Overview": "Populate the expensive half from AVFoundation during scan, plus eager backfill. Serves Inspector display reads from SQLite instead of reopening files.",
+      "Problem": "There are 12 AVURLAsset( construction sites -- InspectorView.swift:1010 and :1026, DuplicateDetectionView.swift:273, AppComponents.swift:76, EditVideoView.swift:256, plus ContactSheetService, VideoEditingService and VideoTransferService. Duration, tracks, natural size and preferred transform are re-parsed from container atoms on hover and selection.",
+      "Action": "Populate during scan; read from SQLite for display. Editing and transcoding paths continue constructing assets as needed -- only DISPLAY reads are served from the database.",
+      "Risk": "This stage opens ~1,300 files and parses headers, so it is materially slower than Stage A and its cost is codec-dependent; damaged or exotic files may fail. Because the migration already added the columns, this stage can be deferred or made lazy without any schema change -- the columns simply stay null.",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917\nSynced locally: docs/specs/ios-performance-battery.md\nDerived from the Auditor's iOS Performance & Battery Audit; every finding independently re-verified against source at commit 34ba4a0 before specification."
+    },
+    "items": [
+      {
+        "title": "duration, width, height and codec populated during scan",
+        "status": "proposed"
+      },
+      {
+        "title": "Inspector display of duration and dimensions constructs NO AVURLAsset",
+        "status": "proposed"
+      },
+      {
+        "title": "Editing and transcoding paths unaffected",
+        "status": "proposed"
+      },
+      {
+        "title": "Backfill resumable and cancellable, sharing Stage A's mechanism",
+        "status": "proposed"
+      },
+      {
+        "title": "Values match what AVFoundation reports today (characterization test over fixtures)",
+        "status": "proposed"
+      },
+      {
+        "title": "Unreadable or unsupported files are skipped and logged, never blocking the backfill",
+        "status": "proposed"
+      }
+    ],
+    "metadata": {
+      "spec": "iOS Performance & Battery Optimization",
+      "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
+    },
+    "updated": "2026-08-02T00:16:08Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/10",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

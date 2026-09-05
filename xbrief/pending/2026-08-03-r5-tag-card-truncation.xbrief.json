@@ -1,0 +1,56 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Tag cards truncate long tags",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-08-03T21:40:00Z"
+  },
+  "plan": {
+    "title": "Tag cards truncate long tags - measure the vocabulary before redesigning",
+    "status": "pending",
+    "tags": [
+      "ui",
+      "tags",
+      "design"
+    ],
+    "metadata": {
+      "spec": "Actor & Tag Browsing - UX Corrections",
+      "specUrl": "https://app.notion.com/p/3b1adccaf428818480bcde52fc138392"
+    },
+    "narratives": {
+      "Overview": "Tag words extend beyond the card and appear to fit only about seven characters. The card design is attractive but does not survive long tags.",
+      "Problem": "TagGalleryView.swift:234 sets .lineLimit(1) on the tag label inside an HStack carrying a leading icon and a trailing scope label. In a fixed-width grid cell the label has no room to grow and no permission to wrap.",
+      "Action": "MEASURE FIRST. The right treatment depends on how long tags actually get and how many are affected. Options in increasing order of change: lineLimit(2) plus minimumScaleFactor; move the icon above the text so the label gets full cell width; widen the cell / reduce columns; redesign for a text-first hierarchy.",
+      "Constraint": "The tag vocabulary is short today but is expected to grow substantially if tags are imported from an external provider. Design for the projected distribution, not only the current one.",
+      "Risk": "Designing for a 40-character tag that does not exist is wasted work; designing for 7 when 30 is coming is a second redesign.",
+      "Test": "T8 - the chosen treatment is asserted at the longest length in the measured vocabulary.",
+      "Source": "Spec R5. Code: TagGalleryView.swift:234."
+    },
+    "items": [
+      {
+        "title": "Measure the current tag length distribution",
+        "status": "proposed"
+      },
+      {
+        "title": "Project against expected growth",
+        "status": "proposed"
+      },
+      {
+        "title": "Choose and implement a treatment",
+        "status": "proposed"
+      },
+      {
+        "title": "Assert at the longest measured length",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-08-03T21:40:00Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/22",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

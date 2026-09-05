@@ -1,0 +1,59 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "F2 - Classify QoS across all 20 .userInitiated sites",
+    "created": "2026-08-02T00:15:54Z",
+    "updated": "2026-08-02T00:16:08Z"
+  },
+  "plan": {
+    "title": "F2 - Classify QoS across all 20 .userInitiated sites",
+    "status": "pending",
+    "tags": [
+      "performance",
+      "phase-1",
+      "F2",
+      "energy"
+    ],
+    "narratives": {
+      "Overview": "Long-running batch work runs at .userInitiated, pinning performance cores at high clock for multi-minute operations.",
+      "Problem": "The audit reported 3 sites. Verification found 20 across 12 files -- ActorGridView, ActorLibraryExportView, ActorLibraryImportView (x2), ActorSyncView (x2), AppComponents, ContentView, DashboardComponents, DashboardView, DuplicateDetectionView (x2), LibraryBackupView (x4), LibraryStatsView, LibraryTransferView (x3) -- with only 2 uses of .utility/.background in the entire app.\n\nThis is a codebase-wide default, not three oversights. .userInitiated means 'the user is blocked on this', which is right for a tap-to-response action and wrong for fingerprinting 1,000+ videos.",
+      "Action": "Classify every site as interactive (user waiting -- keep .userInitiated) or batch (long-running -- .utility, or .background where the user is not watching). Record the rationale per site. Document the convention in the repo so new work inherits it.",
+      "Constraint": "Success shows up as reduced thermal escalation and energy, NOT reduced wall-clock. A downgraded scan may legitimately take longer.",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917\nSynced locally: docs/specs/ios-performance-battery.md\nDerived from the Auditor's iOS Performance & Battery Audit; every finding independently re-verified against source at commit 34ba4a0 before specification."
+    },
+    "items": [
+      {
+        "title": "All 20 sites classified with per-site rationale recorded",
+        "status": "proposed"
+      },
+      {
+        "title": "No long-running batch operation remains at .userInitiated",
+        "status": "proposed"
+      },
+      {
+        "title": "Progress UI stays responsive; no stutter in progress indicators",
+        "status": "proposed"
+      },
+      {
+        "title": "Measured reduction in thermal-state escalation during a sustained duplicate scan",
+        "status": "proposed"
+      },
+      {
+        "title": "Convention documented in-repo so the default does not regress",
+        "status": "proposed"
+      }
+    ],
+    "metadata": {
+      "spec": "iOS Performance & Battery Optimization",
+      "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
+    },
+    "updated": "2026-08-02T00:16:08Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/5",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}
