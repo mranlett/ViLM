@@ -14,10 +14,24 @@ fi
 
 . "$REPO_ROOT/.githooks/_deft-run.sh"
 
-# ViLM-local: assert the personal gh account before any outbound GitHub work.
-# gh authenticates per-host and ignores the includeIf identity rule, so this is
-# the only thing standing between a push here and the work account (Art. V).
+# ViLM-local: pin GitHub identity to the personal account for this hook run.
+#
+# Matt's zsh defines a gh() wrapper that resolves the repo owner and injects
+# GH_TOKEN, but hooks run under sh, where that function does not exist — so
+# anything gh-shaped below (Directive's preflight-gh included) would otherwise
+# use the GLOBAL active account, which parallel 3Ci sessions set to MattR3Ci.
+# Exporting the personal token here makes identity deterministic for every
+# child process, independent of that shared global. (Art. V)
 "$REPO_ROOT/scripts/gh-account-guard.sh" || exit $?
+
+if command -v gh >/dev/null 2>&1; then
+    _vilm_tok="$(gh auth token --hostname github.com --user mranlett 2>/dev/null || true)"
+    if [ -n "$_vilm_tok" ]; then
+        GH_TOKEN="$_vilm_tok"
+        export GH_TOKEN
+    fi
+    unset _vilm_tok
+fi
 
 run_deft preflight-gh --pre-push-stdin --project-root "$REPO_ROOT"
 exit $?
