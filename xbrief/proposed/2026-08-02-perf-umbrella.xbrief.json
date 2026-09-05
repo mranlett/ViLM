@@ -1,0 +1,67 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "iOS Performance & Battery Optimization (umbrella)",
+    "created": "2026-08-02T00:15:54Z",
+    "updated": "2026-08-02T00:16:08Z"
+  },
+  "plan": {
+    "title": "iOS Performance & Battery Optimization (umbrella)",
+    "status": "proposed",
+    "tags": [
+      "performance",
+      "battery",
+      "epic",
+      "ios"
+    ],
+    "narratives": {
+      "Overview": "Reduce CPU, GPU, disk I/O and memory pressure on iOS so sustained operations stop pinning performance cores, overheating the device and draining battery -- without altering any functional contract.\n\nSix findings (F1-F6), delivered in four phases. Phase 0 is blocking: no optimisation may be marked Done before its baseline is recorded.",
+      "Constraint": "Acceptance bar is 'measurably better than baseline'; 20% is the aim, not a gate. Shortfalls are recorded in the backlog rather than dropped.\n\nNote the metric differs per finding: F2's gain appears in thermal state and energy, NOT wall-clock. A correctly downgraded batch scan may take LONGER while consuming less. That is success, not regression.\n\nReference baseline (comparisons valid only against this trio plus a recorded iOS version): iPhone 16 Pro; ~1,300 videos at ~450 MB each (~585 GB); ~1,300 actor profiles with ~2 JPGs each.",
+      "Action": "Phase 0 baseline + characterization -> Phase 1 F1/F2 (highest energy yield) -> Phase 2 F3/F4 (self-contained, low risk) -> Phase 3 F5/F6 (schema-backed metadata; largest and riskiest, sequenced last).",
+      "Risk": "Per personal standards: characterization tests precede refactoring, no behaviour change inside a refactor commit, and layout/energy are validated on a physical iPhone before merge. Simulator numbers are not evidence.\n\nEvery change here touches long-running or cached paths; the project's defect inventory shows this codebase's risk concentrates at DB/filesystem seams and in tasks that outlive their views.",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917\nSynced locally: docs/specs/ios-performance-battery.md\nDerived from the Auditor's iOS Performance & Battery Audit; every finding independently re-verified against source at commit 34ba4a0 before specification."
+    },
+    "items": [
+      {
+        "title": "Phase 0 complete: baseline recorded and characterization tests green",
+        "status": "proposed"
+      },
+      {
+        "title": "F1 concurrent decode bounded and cached",
+        "status": "proposed"
+      },
+      {
+        "title": "F2 all 20 QoS sites classified, convention documented",
+        "status": "proposed"
+      },
+      {
+        "title": "F3 fingerprint-loop writes batched",
+        "status": "proposed"
+      },
+      {
+        "title": "F4 cache limits derived from device RAM",
+        "status": "proposed"
+      },
+      {
+        "title": "F5/F6 six columns migrated, populated in two stages",
+        "status": "proposed"
+      },
+      {
+        "title": "Charter data-model entry updated once Phase 3 lands",
+        "status": "proposed"
+      }
+    ],
+    "metadata": {
+      "spec": "iOS Performance & Battery Optimization",
+      "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
+    },
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/1",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

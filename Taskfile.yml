@@ -1,0 +1,11 @@
+version: '3'
+
+# Taskfile for this project.
+# Installed by deft-install --yes (Epic-4). Add your own tasks below or in
+# additional included files. The deft include makes all framework tasks
+# (task check, task vbrief:*, task doctor, etc.) available from the project root.
+
+includes:
+  deft:
+    taskfile: ./.deft/core/Taskfile.yml
+    optional: true

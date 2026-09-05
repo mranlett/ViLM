@@ -54,30 +54,33 @@ vbrief/.eval/results/
 xbrief/.eval/results/
 .deft/core/
 
-# Deft / Directive tooling — local-only, never committed.
-# Directive is installed per-machine via `directive init` and reconstitutes
-# these itself. Keeping them out of the repo keeps ViLM free of agent-tooling
-# noise. NOTE: xbrief/ work state is therefore local-only and not versioned.
-.deft/
-.agents/
-xbrief/
-AGENTS.md
-Taskfile.yml
-greptile.json
-.prettierignore
-.gitattributes
-.githooks/
+# Deft / Directive: only the surfaces `directive init` regenerates stay out.
+# Changed 2026-09-05 — xbrief/, .deft/ (minus the vendored deposit), AGENTS.md,
+# Taskfile.yml, .githooks/, .gitattributes and .prettierignore are now TRACKED.
+# Directive's integrity gates (verify:forward-coverage, verify:scope-provenance,
+# verify:orphan-active) are all defined against the MERGE BASE. An untracked
+# xbrief/ has no merge base, so ignoring it did not merely hide work state —
+# it disabled the gates. The vendored deposit .deft/core/ stays ignored above:
+# that one IS canonical (hybrid deposit #1942, reconstituted like node_modules).
 
-# Agent/assistant host configs installed by Directive
+# Generated redirect stubs — each is a 6-line pointer into .deft/core/SKILL.md,
+# which is itself untracked, so tracking these would version a dangling ref.
+.agents/
+.github/skills/
+
+# Agent/assistant host configs installed by Directive — per-machine, per-host.
 .claude/
 .codex/
 .cursor/
 .grok/
-.github/skills/
 .deft-run-summary.json
 .deft-directive-disable
 
-# Directive-installed CI (unrequested on this repo)
+# Third-party tool config, not Directive's.
+greptile.json
+
+# Directive-installed CI — still unrequested. Enabling Actions on a public repo
+# is a separate decision; nothing in the local gate set depends on these.
 .github/workflows/deft-core-guard.yml
 .github/codeql/codeql-config.yml
 
@@ -103,3 +106,21 @@ LocalPlugins.xcconfig
 # property of the file, not of its path. `docs/specs/` and `docs/app/` stay tracked here.
 docs/standards/
 # --- end managed by notion-sync ---
+
+# Deft framework: ignore local-only caches and scratch directories
+.deft/occupancy.json
+.deft/authz/
+.deft/delivery-attempts/
+.deft/metrics/
+.deft/escalations/
+.deft/approved-scope/*.bak
+.deft/approved-scope/*.next.tmp
+.deft/approved-scope/.*.pair.lock.tmp
+.deft/approved-scope/.*.pair.lock.tmp.stale
+.deft/approved-scope/.*.publishing.bak
+.claude/worktrees/
+.claude/settings.local.json
+vbrief/.triage-cache/staleness-tickler-state.json
+vbrief/.triage-cache/release-availability-state.json
+xbrief/.triage-cache/staleness-tickler-state.json
+xbrief/.triage-cache/release-availability-state.json

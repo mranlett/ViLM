@@ -1,0 +1,94 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Spike: starred photo does not persist",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-09-05T22:10:40Z"
+  },
+  "plan": {
+    "title": "SPIKE: starring a gallery photo does not change the profile photo after first save",
+    "status": "pending",
+    "tags": [
+      "bug",
+      "spike",
+      "actors",
+      "photos"
+    ],
+    "metadata": {
+      "spec": "Actor & Tag Browsing - UX Corrections",
+      "specUrl": "https://app.notion.com/p/3b1adccaf428818480bcde52fc138392"
+    },
+    "narratives": {
+      "Overview": "On first creation of a gallery, starring any photo sets the profile picture. After the gallery has been saved once, starring a different photo no longer changes it. Photos added later do not respect the change either.",
+      "Problem": "What is verified: the star is a direct assignment (EntityProfileEditorView.swift:236) - `photoUrl = url`, with `photoUrl == url` driving the filled/unfilled state. The control writes the right variable, so the failure is DOWNSTREAM of the tap: in save, in the download/token rewrite, or in what is re-read on reopen.\n\nRoot cause is NOT established.",
+      "Action": "SPIKE FIRST. Reproduce the failure and identify the actual mechanism before writing any fix.\n\nA plausible mechanism - explicitly a hypothesis, not a diagnosis - is the local-token scheme: after the first save, photos are downloaded into the library and galleryUrls may hold local tokens rather than original URLs, so `photoUrl == url` no longer compares the same strings. preserveLocalPrimaryIfBeingReplaced (:704) is guarded by `(initialProfile?.photoUrl ?? \"\").isEmpty` - it runs ONLY when there was no primary before, which is suspiciously close to 'works the first time, not after'.",
+      "Constraint": "Two performance findings in this project were wrong when investigated, and each cost a wasted fix. Do not treat the hypothesis above as the diagnosis.",
+      "Risk": "The previous primary must not be lost when replaced. A local-only primary with no source URL is unrecoverable once overwritten.",
+      "Test": "T3 - starring changes the profile photo on a brand-new gallery, on a saved gallery, and on a gallery with photos added since. The middle case is the reported failure.\nT4 - replacing a local-only primary preserves the old file.",
+      "Source": "Spec R4. Code: EntityProfileEditorView.swift:236, :704. Related but distinct from issue #13 (tapping a thumbnail opens the wrong photo)."
+    },
+    "items": [
+      {
+        "title": "Reproduce the failure on a saved gallery",
+        "status": "proposed"
+      },
+      {
+        "title": "Identify the actual mechanism - do not assume the token hypothesis",
+        "status": "proposed"
+      },
+      {
+        "title": "Report findings before implementing",
+        "status": "proposed"
+      },
+      {
+        "title": "Implement the fix with T3 and T4",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:40Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/21",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ],
+    "acceptance": {
+      "commands": [],
+      "none_stated": true,
+      "source_rung": "derived",
+      "derived_reason": "derived 4 independently testable clauses from the task statement before product edit (#3323)",
+      "clauses": [
+        {
+          "id": 1,
+          "text": "Reproduce the failure on a saved gallery",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 2,
+          "text": "Identify the actual mechanism - do not assume the token hypothesis",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 3,
+          "text": "Report findings before implementing",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 4,
+          "text": "Implement the fix with T3 and T4",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        }
+      ],
+      "ambiguity_attestation": "none_found"
+    }
+  }
+}

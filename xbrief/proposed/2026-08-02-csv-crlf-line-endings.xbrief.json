@@ -1,0 +1,68 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "CRLF line endings break CSV import",
+    "created": "2026-08-02T16:05:13Z",
+    "updated": "2026-08-02T16:05:14Z"
+  },
+  "plan": {
+    "title": "CSV import silently does nothing for CRLF (Windows) line endings",
+    "status": "proposed",
+    "tags": [
+      "bug",
+      "csv",
+      "data-fidelity"
+    ],
+    "metadata": {
+      "spec": "Found during #11 implementation",
+      "specUrl": "https://github.com/mranlett/ViLM/issues/11"
+    },
+    "narratives": {
+      "Overview": "CSV import silently does nothing when the file uses Windows (CRLF) line endings. No error, no toast, no rows changed -- the operation reports success and imports zero actors.",
+      "Problem": "Swift treats \"\\r\\n\" as a SINGLE Character (grapheme cluster U+D U+A). ActorCSV.parse tests `char == \"\\n\" || char == \"\\r\"`, which is false for that combined character, so a CRLF is never recognised as a row separator.\n\nThe whole document therefore collapses into ONE row, with the line endings ending up inside cell values. importCSV then calls dropFirst() to skip the header, which discards that single row -- leaving nothing to import. The user sees no error because nothing failed; there was simply no data.\n\nThe surrounding code clearly INTENDS to support CRLF (it looks ahead for a \"\\n\" after a \"\\r\"), so this is a latent bug rather than a deliberate limitation.\n\nVerified: Array(\"a,b\\r\\nc,d\") yields ['a', ',', 'b', '\\r\\n', 'c', ',', 'd'] -- 7 Characters, with the CRLF as one element matching neither comparison.",
+      "Action": "Detect the combined CRLF character as a row separator alongside LF and bare CR. Prefer testing `char.isNewline`, which is true for CRLF, LF, CR and the Unicode line separators, over comparing against specific literals.\n\nSeparately, consider surfacing an error when an import parses to zero data rows: the silence is what made this bug invisible, and the same silence would hide the next parsing failure.",
+      "Constraint": "Do not regress the quoted-cell behaviour: a newline INSIDE a quoted cell must stay part of the value, not split the row. The existing test testParseKeepsEmbeddedNewlineInsideQuotes covers this.",
+      "Risk": "Data risk is silent, not destructive -- nothing is written, so no data is lost. The hazard is a user believing an import succeeded when it did nothing.\n\nAffects any CSV touched by a tool that writes CRLF: Excel on Windows, many export utilities, and files moved through Windows systems. Directly threatens the export-edit-reimport workflow.",
+      "Test": "A characterization test already pins the broken behaviour (testKNOWNDEFECT_CRLFLineEndingsCollapseIntoASingleRow in ActorCSVTests). Invert it to a positive assertion as part of the fix.\n\nRun: swift test --package-path LibraryCore",
+      "Source": "Found while writing characterization tests for the AKA/tag round-trip (#11). Out of that issue's scope, so pinned and filed separately rather than silently expanding it."
+    },
+    "items": [
+      {
+        "title": "parse() splits rows on CRLF as well as LF and bare CR",
+        "status": "proposed"
+      },
+      {
+        "title": "A CRLF document produces the same rows as the identical LF document",
+        "status": "proposed"
+      },
+      {
+        "title": "testKNOWNDEFECT_CRLFLineEndingsCollapseIntoASingleRow is replaced by a passing positive test",
+        "status": "proposed"
+      },
+      {
+        "title": "A CRLF file with quoted cells containing embedded newlines still parses correctly",
+        "status": "proposed"
+      },
+      {
+        "title": "Mixed line endings within one file parse correctly",
+        "status": "proposed"
+      },
+      {
+        "title": "An import that yields zero data rows surfaces an error rather than succeeding silently",
+        "status": "proposed"
+      },
+      {
+        "title": "Round-trip: export, convert to CRLF, re-import produces identical profiles",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/12",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

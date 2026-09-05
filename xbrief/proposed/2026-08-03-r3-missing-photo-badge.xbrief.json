@@ -1,0 +1,56 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Sidebar count of actors missing photos",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-08-03T21:40:00Z"
+  },
+  "plan": {
+    "title": "Sidebar should count actors missing a photo, mirroring the unreviewed-videos badge",
+    "status": "proposed",
+    "tags": [
+      "ui",
+      "actors",
+      "navigation"
+    ],
+    "metadata": {
+      "spec": "Actor & Tag Browsing - UX Corrections",
+      "specUrl": "https://app.notion.com/p/3b1adccaf428818480bcde52fc138392"
+    },
+    "narratives": {
+      "Overview": "All Assets shows a count of unreviewed videos. Actors should show a comparable count of actors missing a photo.",
+      "Problem": "There is no at-a-glance signal of how much actor data is incomplete, so the gap is invisible until someone goes looking.",
+      "Action": "Mirror the existing unreviewed-videos badge exactly - same placement, same styling. This is a consistency fix, not a new pattern.",
+      "Constraint": "Must be federation-aware: with several libraries attached the sidebar shows a union, and the count has to match. The count must be computed, never assumed - a recent enrichment run filled 137 photo URLs, so the live number has moved.",
+      "Risk": "Low.",
+      "Test": "T7 - correct with zero missing, with some, and across attached libraries.",
+      "Source": "Spec R3. Consider whether tapping applies the missing-photo filter, and whether it should count 'actors needing attention' (R7) instead."
+    },
+    "items": [
+      {
+        "title": "Compute the missing-photo count, federation-aware",
+        "status": "proposed"
+      },
+      {
+        "title": "Render mirroring the unreviewed-videos badge",
+        "status": "proposed"
+      },
+      {
+        "title": "Decide whether tapping applies the filter",
+        "status": "proposed"
+      },
+      {
+        "title": "T7 across zero / some / federated",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/20",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

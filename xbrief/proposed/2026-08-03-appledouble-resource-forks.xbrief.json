@@ -1,0 +1,57 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Verify AppleDouble stubs are excluded",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-08-03T21:40:00Z"
+  },
+  "plan": {
+    "title": "Verify ._ AppleDouble resource forks are excluded from library scanning",
+    "status": "proposed",
+    "tags": [
+      "bug",
+      "scanner",
+      "verification",
+      "data-integrity"
+    ],
+    "metadata": {
+      "spec": "File Naming & Metadata Storage Strategy",
+      "specUrl": "https://app.notion.com/p/3b1adccaf42881d6a344ebf970d6d0b0"
+    },
+    "narratives": {
+      "Overview": "An attached volume held 3,925 files matching video extensions, of which 1,824 (46%) were macOS ._ AppleDouble resource forks - zero-content stubs created when writing to a non-native filesystem.",
+      "Problem": "It is NOT currently known whether the library scanner excludes them. If it does not, the library may be counting, fingerprinting and generating thumbnails for ~1,800 phantom files.\n\nThis is an observation, not a diagnosis. Verify before changing anything.",
+      "Action": "Determine whether LibraryScanner filters ._ prefixed files. If it does, close this and record the finding. If it does not, add the exclusion and assess whether existing libraries carry phantom asset rows needing cleanup.",
+      "Constraint": "If phantom rows already exist, removing them is a data change and needs its own decision - do not delete rows as a side effect of fixing the scanner.",
+      "Risk": "Low to verify. If phantom rows exist, cleanup is the riskier half and should be separated.",
+      "Test": "T8 - ._ AppleDouble files are never treated as videos.\nIf cleanup is needed: a test that removal targets only zero-content stubs and never a real asset.",
+      "Source": "Spec, incidental finding. Measured 2026-08-03 on an attached ExFAT volume."
+    },
+    "items": [
+      {
+        "title": "Determine whether the scanner excludes ._ files",
+        "status": "proposed"
+      },
+      {
+        "title": "If not, add the exclusion with a test",
+        "status": "proposed"
+      },
+      {
+        "title": "Assess whether existing libraries hold phantom asset rows",
+        "status": "proposed"
+      },
+      {
+        "title": "If they do, file cleanup separately",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/16",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

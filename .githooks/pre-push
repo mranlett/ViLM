@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+# .githooks/pre-push -- refspec-aware default-branch push gate (#2049 / #1019 / #1814).
+#
+# Pre-push does NOT invoke verify:branch (#747). HEAD-only default-branch
+# protection remains on pre-commit; pre-push relies on preflight-gh for
+# refspec-aware protection (#1814 Option A). Pure POSIX shell; prefers global
+# `deft` on PATH, falls back to local packages/cli/dist/bin.js (#2067).
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then
+    echo "deft pre-push: unable to resolve repo root via 'git rev-parse'." >&2
+    exit 1
+fi
+
+. "$REPO_ROOT/.githooks/_deft-run.sh"
+
+# ViLM-local: pin GitHub identity to the personal account for this hook run.
+#
+# Matt's zsh defines a gh() wrapper that resolves the repo owner and injects
+# GH_TOKEN, but hooks run under sh, where that function does not exist — so
+# anything gh-shaped below (Directive's preflight-gh included) would otherwise
+# use the GLOBAL active account, which parallel 3Ci sessions set to MattR3Ci.
+# Exporting the personal token here makes identity deterministic for every
+# child process, independent of that shared global. (Art. V)
+"$REPO_ROOT/scripts/gh-account-guard.sh" || exit $?
+
+if command -v gh >/dev/null 2>&1; then
+    _vilm_tok="$(gh auth token --hostname github.com --user mranlett 2>/dev/null || true)"
+    if [ -n "$_vilm_tok" ]; then
+        GH_TOKEN="$_vilm_tok"
+        export GH_TOKEN
+    fi
+    unset _vilm_tok
+fi
+
+run_deft preflight-gh --pre-push-stdin --project-root "$REPO_ROOT"
+exit $?

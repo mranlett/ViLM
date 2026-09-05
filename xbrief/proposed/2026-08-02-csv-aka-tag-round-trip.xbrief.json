@@ -1,0 +1,89 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Actor CSV AKA and tag round-trip",
+    "created": "2026-08-02T13:57:17Z",
+    "updated": "2026-08-02T13:57:18Z"
+  },
+  "plan": {
+    "title": "Actor CSV export is lossy - add AKA and tag round-trip",
+    "status": "proposed",
+    "tags": [
+      "bug",
+      "csv",
+      "data-fidelity",
+      "actors"
+    ],
+    "metadata": {
+      "spec": "Actor CSV export is lossy - AKA and tag round-trip",
+      "specUrl": "https://app.notion.com/p/3afadccaf4288162980bd957ae0eb99e"
+    },
+    "narratives": {
+      "Overview": "The actor CSV export omits three collection fields the library actively curates -- akas, tags and galleryUrls -- so a CSV is a lossy representation of an actor and the documented 'export, edit in Numbers, re-import' workflow silently discards curated data.\n\nAdd AKAs and tags to the format. Gallery URLs stay out: they carry no identifying information, and .actorpkg already handles full-fidelity actor transfer including image bytes.",
+      "Problem": "Export (ActorGridView.swift:607) writes a nine-column header with no column for any of the three. Import (ActorGridView.swift:713-715) rebuilds every profile with `tags: existing?.tags ?? []`, `galleryUrls: existing?.galleryUrls ?? []` and `akas: existing?.akas ?? []` -- copied from the existing record, never read from the file.\n\nThe import guard is CORRECT given the format: because the CSV cannot carry these fields, preserving them is the only safe choice, and it is what defends the C3 data-loss class from the defect inventory. The defect is in the FORMAT, not the guard.\n\nAKAs matter most because they are how multiple names attach to one actor profile. Without them, any external tool reading the export cannot tell that two names denote the same person, and may propose a duplicate.",
+      "Action": "Append AKAs at index 9 and Tags at index 10, pipe-delimited. Teach importCSV to read both and union them with the existing lists.\n\nDecisions from the approved spec:\n- D1 Delimiter: pipe. Avoids quoting entirely; a stage name may contain a comma ('Smith, Jr.') but never a pipe.\n- D2 Scope: AKAs and tags IN, galleryUrls OUT.\n- D3 Merge: union with existing, de-duplicated. {John, Jon} + {John, Jonathan} -> John | Jon | Jonathan.\n- D4 Indices: AKAs=9, Tags=10. The enrichment spec's columns therefore shift to 11-15.",
+      "Constraint": "importCSV reads by INDEX, not by header -- it drops line 1 and reads columns[0..8], guarded only by `columns.count >= 4`.\n\n- Never insert or reorder a column: a bio would land in homePage.\n- Column 0 is the identity key. Rewriting it creates a NEW actor rather than updating one.\n- The count guard must rise as columns are wired up.\n- Nine-column files produced before this change must still import; a missing new column is not an error.",
+      "Risk": "Union means an AKA or tag cannot be REMOVED via CSV -- removal stays an in-app action. Chosen deliberately: replace-semantics would turn a mistakenly-cleared cell into silent data loss, the exact failure mode this fix exists to prevent.\n\nDo not regress the C3 guard: a THROWING profile fetch must still abort the import rather than proceed with empty collections.",
+      "Test": "Characterization first, per personal standards: pin current export/import behaviour before changing it.\n\nCover failure states, not just the happy path -- a value containing a literal pipe, duplicates, an entry equal to the primary name, a malformed row, and a row below the count guard.\n\nRun: swift test --package-path LibraryCore",
+      "Source": "Notion spec: https://app.notion.com/p/3afadccaf4288162980bd957ae0eb99e\nSynced locally: docs/specs/csv-aka-round-trip.md\nApproved 2026-08-02 with decisions D1-D4 closed."
+    },
+    "items": [
+      {
+        "title": "Export writes AKAs at index 9, pipe-delimited, from EntityProfile.akas",
+        "status": "proposed"
+      },
+      {
+        "title": "Export writes Tags at index 10, pipe-delimited, from EntityProfile.tags",
+        "status": "proposed"
+      },
+      {
+        "title": "Import reads both and unions with existing, de-duplicated",
+        "status": "proposed"
+      },
+      {
+        "title": "galleryUrls remains preserved-from-existing and absent from the CSV",
+        "status": "proposed"
+      },
+      {
+        "title": "A value containing a literal pipe round-trips or is rejected explicitly, never silently split",
+        "status": "proposed"
+      },
+      {
+        "title": "An entry equal to the primary Name is dropped rather than stored",
+        "status": "proposed"
+      },
+      {
+        "title": "Round-trip fidelity: export then import with no edits leaves AKA and tag lists byte-identical",
+        "status": "proposed"
+      },
+      {
+        "title": "A blank cell never clears an existing list",
+        "status": "proposed"
+      },
+      {
+        "title": "Nine-column CSVs from before this change still import without error",
+        "status": "proposed"
+      },
+      {
+        "title": "A reordered or renamed header is rejected rather than silently misread",
+        "status": "proposed"
+      },
+      {
+        "title": "Column 0 is never rewritten by any import path",
+        "status": "proposed"
+      },
+      {
+        "title": "C3 guard intact: a throwing profile fetch aborts the import",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/11",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}

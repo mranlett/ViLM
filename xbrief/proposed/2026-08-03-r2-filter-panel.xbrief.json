@@ -1,0 +1,61 @@
+{
+  "xBRIEFInfo": {
+    "version": "0.8",
+    "description": "Actor filter panel ordering and age modes",
+    "created": "2026-08-03T21:40:00Z",
+    "updated": "2026-08-03T21:40:00Z"
+  },
+  "plan": {
+    "title": "Reorder the actor filter panel and rework the age filter",
+    "status": "proposed",
+    "tags": [
+      "ui",
+      "actors",
+      "filters",
+      "design"
+    ],
+    "metadata": {
+      "spec": "Actor & Tag Browsing - UX Corrections",
+      "specUrl": "https://app.notion.com/p/3b1adccaf428818480bcde52fc138392"
+    },
+    "narratives": {
+      "Overview": "Frequently-used filters sit below infrequently-used ones, and the age filter answers a question nobody asks.",
+      "Problem": "Current ordering buries common controls. The age filter assumes CURRENT age, which is close to meaningless for browsing archived work.",
+      "Action": "Reorder: data-repair filters in a collapsed accordion at top (missing photo, missing gender, enrichment state from R7), then minimum rating, tag (absorbing search), gender, hair colour, country, then video count near the bottom.\n\nAge becomes ONE control with a stored mode selector, not three sliders:\n- current age\n- age at career start (1,100 actors have the data today)\n\nAge at time of release filters VIDEOS, not actors, and belongs in the video panel - deferred, see below.",
+      "Constraint": "The mode must be STORED with the filter, so changing modes cannot silently alter what a saved filter means.\n\nSearch folding into tags needs a decision on what happens to actor-name searches.",
+      "Risk": "Age at release is blocked: release date cannot be parsed from filenames - measured, 5 of 2,101 files carry a year. It requires external video matching or manual entry.",
+      "Test": "T6 - panel order comes from a declared list a test can assert, so a future edit cannot silently reorder it.",
+      "Source": "Spec R2."
+    },
+    "items": [
+      {
+        "title": "Reorder the panel from a declared list",
+        "status": "proposed"
+      },
+      {
+        "title": "Data-repair accordion at top",
+        "status": "proposed"
+      },
+      {
+        "title": "Single age control with stored mode selector",
+        "status": "proposed"
+      },
+      {
+        "title": "Decide the fate of non-tag searches",
+        "status": "proposed"
+      },
+      {
+        "title": "T6 ordering assertion",
+        "status": "proposed"
+      }
+    ],
+    "updated": "2026-09-05T22:10:33Z",
+    "references": [
+      {
+        "uri": "https://github.com/mranlett/ViLM/issues/19",
+        "type": "x-xbrief/github-issue",
+        "TrustLevel": "external"
+      }
+    ]
+  }
+}
