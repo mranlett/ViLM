@@ -73,6 +73,9 @@ greptile.json
 .codex/
 .cursor/
 .grok/
+.github/skills/
+.deft-run-summary.json
+.deft-directive-disable
 
 # Directive-installed CI (unrequested on this repo)
 .github/workflows/deft-core-guard.yml
@@ -88,3 +91,15 @@ ViLM/LocalPlugins.swift
 ViLM/LocalPlugins/
 *.local.xcconfig
 LocalPlugins.xcconfig
+
+# --- managed by notion-sync ---
+# Generated from the unified Notion Constitution / Standards and NEVER committed.
+# ⚠️ This repo is PUBLIC and these files carry 3Ci operational detail — PAC deploy
+# discipline, the gh identity procedure, the agy audit contract. Committing them is a
+# Constitution Art. V breach in the direction people forget: the usual worry is personal
+# code reaching work, and this is the reverse.
+# The rule names this ONE subtree on purpose. A bare `docs/` rule was applied across the
+# 3Ci repos on 2026-08-14 and staged 11 hand-written files for deletion — provenance is a
+# property of the file, not of its path. `docs/specs/` and `docs/app/` stay tracked here.
+docs/standards/
+# --- end managed by notion-sync ---
