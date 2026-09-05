@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "F5/F6 - Add six asset metadata columns (one migration)",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "performance",
       "phase-3",
@@ -47,7 +47,7 @@
       "spec": "iOS Performance & Battery Optimization",
       "specUrl": "https://app.notion.com/p/3afadccaf42881f7bd59f1bee7f3a917"
     },
-    "updated": "2026-08-02T00:16:08Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/8",

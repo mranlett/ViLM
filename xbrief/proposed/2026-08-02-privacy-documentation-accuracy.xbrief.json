@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "PRIVACY.md and the charter claim the app is offline; it is not",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "documentation",
       "privacy"
@@ -51,7 +51,7 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-02T19:09:43Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/15",

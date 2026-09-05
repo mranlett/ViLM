@@ -3,7 +3,7 @@
     "version": "0.8",
     "description": "Spike: tag page Actors tab lists wrong actors",
     "created": "2026-08-03T21:40:00Z",
-    "updated": "2026-08-03T21:40:00Z"
+    "updated": "2026-09-05T22:10:41Z"
   },
   "plan": {
     "title": "SPIKE: tag page's Actors tab lists actors from matching videos, not actors matching the tag",
@@ -45,13 +45,50 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-03T21:40:00Z",
+    "updated": "2026-09-05T22:10:41Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/23",
         "type": "x-xbrief/github-issue",
         "TrustLevel": "external"
       }
-    ]
+    ],
+    "acceptance": {
+      "commands": [],
+      "none_stated": true,
+      "source_rung": "derived",
+      "derived_reason": "derived 4 independently testable clauses from the task statement before product edit (#3323)",
+      "clauses": [
+        {
+          "id": 1,
+          "text": "Locate the actor derivation for the tag page",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 2,
+          "text": "Determine whether studios and plain tags share it",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 3,
+          "text": "Derive actors from the tag, not from filtered assets",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 4,
+          "text": "T5 across every entity type that shares the derivation",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        }
+      ],
+      "ambiguity_attestation": "none_found"
+    }
   }
 }

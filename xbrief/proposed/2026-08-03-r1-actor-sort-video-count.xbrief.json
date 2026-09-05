@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "Sorting actors by video count blocks the UI and has crashed",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "bug",
       "performance",
@@ -53,7 +53,7 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-03T21:40:00Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/18",

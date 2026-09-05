@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "Reorder the actor filter panel and rework the age filter",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "ui",
       "actors",
@@ -49,7 +49,7 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-03T21:40:00Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/19",

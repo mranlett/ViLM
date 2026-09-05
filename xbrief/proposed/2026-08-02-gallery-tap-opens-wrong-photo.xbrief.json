@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "Actor photo gallery: tapping a thumbnail opens the wrong photo",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "bug",
       "actors",
@@ -60,7 +60,7 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-02T17:46:33Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/13",

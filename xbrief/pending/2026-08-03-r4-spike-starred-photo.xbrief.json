@@ -3,7 +3,7 @@
     "version": "0.8",
     "description": "Spike: starred photo does not persist",
     "created": "2026-08-03T21:40:00Z",
-    "updated": "2026-08-03T21:40:00Z"
+    "updated": "2026-09-05T22:10:40Z"
   },
   "plan": {
     "title": "SPIKE: starring a gallery photo does not change the profile photo after first save",
@@ -45,13 +45,50 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-03T21:40:00Z",
+    "updated": "2026-09-05T22:10:40Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/21",
         "type": "x-xbrief/github-issue",
         "TrustLevel": "external"
       }
-    ]
+    ],
+    "acceptance": {
+      "commands": [],
+      "none_stated": true,
+      "source_rung": "derived",
+      "derived_reason": "derived 4 independently testable clauses from the task statement before product edit (#3323)",
+      "clauses": [
+        {
+          "id": 1,
+          "text": "Reproduce the failure on a saved gallery",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 2,
+          "text": "Identify the actual mechanism - do not assume the token hypothesis",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 3,
+          "text": "Report findings before implementing",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        },
+        {
+          "id": 4,
+          "text": "Implement the fix with T3 and T4",
+          "artifact_path": null,
+          "ambiguous": false,
+          "provenance": "statement"
+        }
+      ],
+      "ambiguity_attestation": "none_found"
+    }
   }
 }

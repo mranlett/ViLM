@@ -7,7 +7,7 @@
   },
   "plan": {
     "title": "CSV import silently does nothing for CRLF (Windows) line endings",
-    "status": "pending",
+    "status": "proposed",
     "tags": [
       "bug",
       "csv",
@@ -56,7 +56,7 @@
         "status": "proposed"
       }
     ],
-    "updated": "2026-08-02T16:05:14Z",
+    "updated": "2026-09-05T22:10:33Z",
     "references": [
       {
         "uri": "https://github.com/mranlett/ViLM/issues/12",
