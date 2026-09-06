@@ -9,3 +9,15 @@ includes:
   deft:
     taskfile: ./.deft/core/Taskfile.yml
     optional: true
+
+tasks:
+  spec-drift:
+    desc: "Fail when a recorded status disagrees with the tree (specs, xBRIEFs, schema). --offline skips the gh rule."
+    cmds:
+      - python3 scripts/spec_drift_check.py {{.CLI_ARGS}}
+
+  spec-drift:selftest:
+    desc: "Prove the spec-drift rules can both fire and stay silent, offline."
+    cmds:
+      - python3 scripts/spec_drift_check.py --selftest
+      - python3 -m unittest discover -s scripts -p "test_*.py"
