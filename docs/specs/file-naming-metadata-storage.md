@@ -139,7 +139,27 @@ Open standards win where they exist; ViLM defines a grammar only where none does
 | **Episodic** | `Series Name/Season 01/Series Name - S01E02 - Episode Title.mkv` | Kodi / Plex |
 | **Personal** | `Event or Description (2019).mkv` | Kodi `<movie>` shape |
 | **Scene** | `Studio/Studio - Performers - Title - YYYY-MM-DD.ext` | **ViLM-defined** |
-**Performers appear only in the scene grammar.** The standards exclude them from film and episodic, which matches the principle that performers are identity for a scene and description for a film — and settles the instability worry, since a film's cast of dozens has no principled way to pick one.
+### ⭐ D11a — The principle, restated 2026-09-06
+**Human Operator, after design-critique arc **[**#89**](https://github.com/mranlett/ViLM/issues/89)**:**
+> **Performer credits are canonical metadata for commercial content regardless of content kind. Filename grammars expose only the metadata required for stable filesystem identity and interoperability. Film and episodic filenames therefore omit performers and follow established Kodi/Plex conventions; scene filenames may include a deterministic performer projection because performer identity materially distinguishes otherwise weakly titled scenes. Full performer credits remain in the catalogue and portable metadata.**
+⭐ **The filenames do not change. The reasoning does.** Film, episodic and personal names still omit performers; scene names still carry them. What is withdrawn is the claim that this reflects performers being *less real* for the other kinds.
+### 🚨 What this replaces, and why it was wrong
+This clause previously read:
+> ~~Performers appear only in the scene grammar. The standards exclude them from film and episodic, which matches the principle that performers are identity for a scene and description for a film — and settles the instability worry, since a film's cast of dozens has no principled way to pick one.~~
+It fused two separate questions. The **filename consequence** is sound — putting a cast into `Film Title (2019).mkv` would make the name worse and abandon a working Kodi/Plex convention. The **data-model conclusion** does not follow: "identity for a scene, description for a film" demotes cast to second-class metadata for most of the library, and **the implementation never agreed with it.** `RelocationPlan` resolves cast independently of content kind, and the mover supplies cast to the sidecar independently of the filename grammar. Only the prose dissented.
+### The layering this makes explicit
+The filesystem is a **deliberately lossy projection of the metadata model, not a definition of it**:
+| Layer | Carries |
+| --- | --- |
+| Canonical asset metadata | title, series, dates, studio, **complete performer credits**, tags |
+| Content-kind policy | which facts are structurally identifying for that kind |
+| Filename projection | a minimal, deterministic, interoperability-oriented subset |
+| Sidecar projection | rich portable metadata, including the complete cast where appropriate |
+| Application / database | the authoritative discovery, filter and search representation |
+The alternative — *content kind → different notions of what counts as real metadata* — is what the old wording implied and what this replaces.
+### ❓ Open, and deliberately not settled here
+The **scene** performer projection is the part now under question. `ContentNaming.orderedPerformers` ranks female and non-binary performers first, then sorts alphabetically, then caps at three — so **a filesystem identity rule depends on performer gender classification**. Correcting someone's gender, or adding a performer who sorts earlier, renames an otherwise unchanged scene. That weakens the stability this grammar exists to provide.
+🔴 **The obvious alternative is unavailable.** Ordering by source billing was re-checked during arc #89 by live schema introspection: `PerformerAppearance` exposes exactly `performer` and `as`. **There is no billing or order field.** So the code comment's "`billing` is populated on none of 3,771 rows" understates it — nothing can populate it. Candidate orderings must be derivable from immutable or slowly-changing facts, and that needs its own design pass rather than a patch here.
 ### Missing fields omit their delimiter too
 A missing field removes **the segment and its adjacent separator**. A generated name never contains `' -  - '`, never begins or ends with `' - '`, and never carries a dangling `', '` from an empty performer list. Stated because the naive join produces exactly those, and they then fail to parse back — the round-trip F1 exists to catch.
 ```javascript
