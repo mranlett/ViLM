@@ -209,5 +209,30 @@ The audit put F1/F2 first as "highest energy yield". Measurement says the **acto
 5. **F5 / F6 (#8–10)** — schema-backed metadata, unchanged.
 6. ~~F3 (#6)~~ — **close as by-design.**
 ---
+# 🚨 SECOND REVISION — BOTH TOP-RANKED LEVERS REFUTED (probes 2026-08-21, recorded here 2026-09-06)
+⚠️ **This section existed only in closed GitHub issues for six weeks.** R6 above still ranks *F4 re-aimed (#7)* first and *F7 (#14)* third. **Both premises were disproven on device**, and the actual cause was found and written into #14 — where nothing looks. A reader of this specification would have picked up a dead finding. That is the same drift the project has now built `task spec-drift` to catch, and this instance is one the check cannot catch: a specification that is *wrong* still resolves every identifier it cites.
+## R7 · F4 (#7) closed — the cache was not the cause, and downsampling was not the remedy
+R2 re-aimed F4 from cache *size* to cache *ineffectiveness* and ranked it the highest measured cost. Closing note on #7:
+> **Closing: premise disproven twice by measurement, and the attempted fix was reverted.** The actor-gallery cost is real but is not the image cache — see #14 for why, and the call-tree step that would name the actual cause.
+🔴 **The attempted remedy is the instructive part, because it looked right and did nothing.** Downsampling at read time shrank the OUTPUT bitmap but not the DECODE: `CGImageSourceCreateThumbnailAtIndex` still reads and parses the entire JPEG. Measured result — **churn flat at 19.47 → 20.68 GiB while retained memory rose 9×**. Smaller results, identical work to produce them, and a regression in the one number that did move.
+## R8 · F7 (#14) closed — view-graph churn is normal, and the real cause is named
+R5 raised F7 on the reading that 80.4% of CPU in main-thread SwiftUI work meant *redundant* view updates. `_printChanges()` was added to `ActorGridView` and `ActorGridItemView` and a full two-pass scroll captured on device:
+- **Parent: ~4 evaluations across the entire scroll.** The hypothesis that `ActorGridView.body` recomputed its filter pipeline per scroll tick is dead — it runs four times.
+- **Cells: many **`@self changed`**, no **`@identity`**, parent not re-running.** That is `LazyVGrid` materialising cells as they enter the viewport, roughly once per appearance across **~2,678 appearances**. Expected behaviour, not redundant churn.
+⭐ **The decisive measurement: the ~31,000 allocations per cell happen INSIDE a single materialisation, not across repeated ones.** The cost is not how often a cell is built; it is what building one costs.
+### The cause, quoted from #14
+> One cell materialisation runs `ProfileImageView.task` → `existingProfilePhotoURL` (filesystem checks across every open library) → `Data(contentsOf:)` (full JPEG read) → `UIImage(data:)` (full decode).
+### What the disk confirms (measured 2026-09-06, drive library)
+| `.catalog/` directory | Files | Size |
+| --- | --- | --- |
+| `profiles/` — the sources being decoded | 9,499 | **4.2 GB**, largest 4–5 MB each |
+| `thumbnails/` — videos only, keyed by asset UUID | 2,082 | 669 MB |
+🔴 **There is no pre-generated derivative for actor profile photos.** The grid decodes a multi-megabyte JPEG to draw a small cell, and the existing `ThumbnailLoader` downsample path only looks cheap for videos because those sources are already ~320 KB.
+## R9 · Re-sequenced again — R6's ranking is void
+Of R6's six items: **#1 (F4 re-aimed) and #3 (F7) are closed as disproven**; F3 was closed by-design as R3 recommended; F1, F2 and F5/F6 shipped. What remains of this specification is one finding, and it is new:
+1. 🔴 **F8 · Profile photos are decoded at full size per cell materialisation** — issue **#84**, remedy in flight as PR **#85**: pre-generate `.catalog/profileThumbs/<base>@<size>.jpg` and decode that. Attacks the decode itself rather than the output size, which is the specific thing #7's attempt failed to do.
+⚠️ **#84 is NOT verified against the number it exists to move.** Acceptance is allocation churn materially below the **19.47–20.68 GiB** baseline — that range is what "no improvement" looked like — and confirming it needs an on-device Instruments capture. **Two remedies have already died at exactly this step.** Until that capture exists, treat F8 as proposed, not solved.
+## ❓ Open thread inherited from R2
+R2's recommended first step was: *"scroll one screenful repeatedly and watch Total Bytes; if it climbs on already-decoded content, the cache is missing on its own entries."* **No record of that probe being run has been found.** It matters independently of F8: with live heap at 28.59 MB against a 288 MB ceiling, the cache is nowhere near full, so if it is also missing on its own entries there is a second defect that a cheaper decode would mask rather than fix.
 ## Evidence
 Verified 2026-08-01 against `~/Development/ViLM/ViLM` at commit `34ba4a0`. Source of findings: the Auditor's engineering review, linked above. Verification commands and full inventories are reproducible by grep over the paths cited in each finding.
