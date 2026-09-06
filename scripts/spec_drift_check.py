@@ -104,6 +104,16 @@ BODY_STATUS = [
 # Proposed migrations ("### v27 — the edge tables") are NOT staleness claims.
 EVIDENCE_SCHEMA = re.compile(r"(?:schema[^.\n]{0,40})?code read at v(\d+)", re.I)
 
+# A status phrase QUOTED as a past state is not a live claim. Correcting a spec
+# in place and saying what it used to say is this project's house style (see
+# "What building it corrected" in library-graph.md), and the first version of R1
+# flagged its own audit trail: a banner corrected to Approved still tripped the
+# rule because the correction note quoted the words it had replaced.
+HISTORICAL = re.compile(
+    r"had read|previously read|superseded|corrected|no longer says|used to (?:read|say)",
+    re.I,
+)
+
 
 def looks_like_code(tok: str) -> bool:
     if tok.endswith(".swift"):
@@ -206,13 +216,25 @@ def current_schema_version(root: Path) -> int | None:
 FAIL_PAIR = ("approved", "in review")
 
 
+def _live_match(pattern: re.Pattern, body: str) -> bool:
+    """True when `pattern` matches somewhere that is not a quoted past state."""
+    for m in pattern.finditer(body):
+        start = body.rfind("\n", 0, m.start()) + 1
+        end = body.find("\n", m.end())
+        line = body[start:end if end != -1 else len(body)]
+        if not HISTORICAL.search(line):
+            return True
+    return False
+
+
 def rule_status_contradiction(spec: dict) -> tuple[list[str], list[str]]:
     """Returns (fails, warns)."""
     fm_status = spec["status"].lower()
     if not fm_status:
         return [], []
     for pattern, claimed in BODY_STATUS:
-        if pattern.search(spec["body"]) and claimed.lower() != fm_status:
+        hit = _live_match(pattern, spec["body"])
+        if hit and claimed.lower() != fm_status:
             msg = (f"R1 {spec['file']}: frontmatter says '{spec['status']}' but the "
                    f"body asserts '{claimed}'")
             if (fm_status, claimed.lower()) == FAIL_PAIR:

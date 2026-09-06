@@ -3,7 +3,7 @@
 
 ---
 spec: "Delta Refresh — stop re-fetching what has not changed"
-status: Approved
+status: In Review
 kind: Enhancement
 priority: P3
 notion: https://app.notion.com/p/Delta-Refresh-stop-re-fetching-what-has-not-changed-3b7adccaf428811eb8b4e55205651565

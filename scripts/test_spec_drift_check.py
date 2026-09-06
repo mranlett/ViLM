@@ -87,6 +87,28 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(fails, "a stale banner must not fail the gate")
         self.assertTrue(warns)
 
+    def test_r1_ignores_a_quoted_past_status(self):
+        # The correction note in performer-detail.md quotes the banner it
+        # replaced. R1 flagged its own audit trail until this was fixed.
+        corrected = spec(
+            "Approved",
+            '> ✅ APPROVED by the Human Operator.\n'
+            '> ⚠️ Banner corrected 2026-09-06. It had read "In Review — awaiting '
+            'Human Operator approval" while the Status property said Approved.',
+        )
+        fails, warns = sdc.rule_status_contradiction(corrected)
+        self.assertEqual(([], []), (fails, warns),
+                         "a quoted past status must not read as a live claim")
+
+    def test_r1_still_fires_when_a_live_claim_sits_beside_a_quoted_one(self):
+        mixed = spec(
+            "Approved",
+            '> Status: In Review — awaiting Human Operator approval.\n'
+            '> Note: it had read "In Review — awaiting Human Operator approval".',
+        )
+        fails, _ = sdc.rule_status_contradiction(mixed)
+        self.assertTrue(fails, "the unquoted live claim must still fail")
+
     def test_r1_silent_when_consistent(self):
         clean = spec("Implemented", "Nothing to declare.")
         self.assertEqual(([], []), sdc.rule_status_contradiction(clean))
