@@ -11,42 +11,97 @@ notion: https://app.notion.com/p/Performer-Detail-the-fields-we-do-not-ask-for-3
 
 # Performer Detail — the fields we do not ask for
 
-> ✅ **APPROVED by the Human Operator** (Constitution Art. II). See the recorded decisions under *Open — Human Operator* below: `death_date` and `scene_count` are both adopted, and `scenes` is explicitly dropped ("Skip scenes as not providing value").
+> 📝 **DRAFT — rewritten 2026-09-06 after the first cut shipped and the remaining scope was rejected.** The earlier version is superseded, not deleted: what it got wrong is recorded below under *What building it corrected*, in the same spirit as the Library Graph.
 > 
-> ⚠️ **Banner corrected 2026-09-06.** It had read *"In Review — awaiting Human Operator approval"* while the Status property already said Approved and the decisions below were already recorded — one fact with two expressions, disagreeing, and nothing comparing them. `task spec-drift` (rule R1) now compares them.
-> 
-> The Tier 2 performer items, grouped because they are one selection set and share one design question. ⚠️ Individually most are "one line"; together they are a decision about what a performer record is FOR.
-## The fields
-| Field | Buys | Ecosystem support |
+> This spec asked which fields a performer record should request from the source. **That question is now answered and mostly closed.** The first cut is delivered; the physical attributes are rejected; one item remains and it belongs elsewhere.
+## Where this stands
+| Field | Verdict | State |
 | --- | --- | --- |
-| `scene_count` | ⭐ Disambiguation — "400 scenes" vs "3" separates two of a name faster than a birth year | ❌ not requested |
-| `death_date` | Definitive career end. *Impossible Data* treats a missing end as "still working" | ✅ requested |
-| `height`, `eye_color`, `measurements`, `cup_size`, `breast_type` | More identifying marks — the argument that justified tattoos and piercings | ✅ requested |
-| `studios` | Feeds studio-signature analysis, and #27's disambiguator directly | ❌ not requested |
-| `scenes` | ⚠️ Might collapse `knownWorks` into one query | ❌ not requested |
-⚠️ **"Not requested" is weak evidence, not a verdict.** The reference consumer tags scenes; it does not manage a library or disambiguate by filmography. Absence may reflect their needs. But it does mean those four carry **no external confirmation that they are populated**, and the report is explicit that they should be sampled before being relied on.
+| `death_date` | ✅ Adopted — D5, fixes a real wrongness | **Delivered.** `deathDate`  • `careerEndYear` in `LibraryCore`, 16 tests in `PerformerDetailTests.swift` |
+| `scene_count` | ✅ Adopted — D1's strongest disambiguator | **Delivered.** `sceneCount`, offered for review so its age is visible |
+| `height`, `eye_color`, `cup_size`, `breast_type` | 🚫 **REJECTED 2026-09-06** — see D6 | Not built, and not to be built. `height` already exists for other reasons |
+| `measurements` | 🚫 Void — **the field does not exist upstream** | n/a. See *What building it corrected*, C1 |
+| `scenes` | 🚫 Dropped — D4, no evidence, `knownWorks` already works | n/a |
+| `studios` | ✅ Adopted 2026-09-06 — **sampled, 100% populated, arrives as ids** | Not built. Edge-scoping rule still open (D7); UI half routes to another spec |
 ## 🔴 D1 — Identification is the criterion, not completeness
-The project already made this argument once, for tattoos and piercings: recorded because **identification is the recurring difficulty**, not because more biography is better. The same test applies here — a field earns its place if it helps tell two performers of one name apart, or answers a question the operator actually asks.
-⭐ By that test `scene_count` is the strongest thing on the list and has the weakest external support. **Sample it.**
-## ⚠️ D2 — Time-varying data needs an as-of, and the schema cannot say so
-`measurements`, `cup_size`, `height` and `eye_color` change or are reported inconsistently. The tattoos work already established the pattern — `marksAsOf` pairs a description with `enrichmentCheckedAt` so it reads as a snapshot rather than a standing fact.
-🔴 **Anything adopted here follows that pattern or it is not adopted.** A body measurement presented as a current fact is worse than not having it.
-## D3 — `measurements` is a structured type, and that matters
-The ecosystem survey found it is its own type upstream, not a string. ⭐ Structured means comparable rather than merely displayable — but only if we store it structured. Flattening it to a string on the way in throws away the only thing that makes it more than decoration.
-❓ **Open:** worth a structured field, or is display enough? Recommend display-only until something wants to compare them; ⚠️ store the raw structure rather than a rendered string, so the choice is reversible.
-## ⚠️ D4 — `Performer.scenes` is an optimisation with no evidence behind it
-It might collapse `knownWorks` — built for the disambiguation picker, now also serving *What Else Are They In* — into a single query.
-🚨 The report is explicit: **no ecosystem support, sample before relying on it.** And `knownWorks` currently works. Replacing a working call with an unproven field to save a request is the wrong trade unless the field is proven first.
-## D5 — `death_date` is small and fixes a real wrongness
-*Impossible Data* treats a missing career end as "still working". For a performer who has died that is not merely absent, it is **wrong**, and it is the kind of wrong nothing would ever surface.
+Unchanged, and it is the decision that did all the work here. A field earns its place if it helps tell two performers of one name apart, or fixes something that is actually wrong. Not because more biography is better.
+The project made this argument once already, for tattoos and piercings. **D6 is D1 applied honestly to the rest of the list.**
+## 🚫 D6 — The physical attributes are descriptive, not identifying
+**Human Operator, 2026-09-06:** *"the physical attributes are simply descriptive - tattoos and piercings do a better job."*
+That is D1 reaching its conclusion. Tattoos and piercings are already recorded, already serve identification, and are **more discriminating than height or eye colour will ever be** — a marking is close to unique, a hair or eye colour partitions the population into a handful of buckets. Adding four weakly-discriminating fields to support a job two strong ones already do is completeness, which D1 exists to refuse.
+⭐ **Consequence: D2 and D3 are retired with them.** Both existed only to govern this group:
+- **D2** (time-varying data needs an as-of) governed `measurements`, `cup_size`, `height`, `eye_color`. Nothing time-varying is now adopted, so it has nothing left to constrain. The pattern it named — `marksAsOf` paired with `enrichmentCheckedAt` — is real, is built, and stands for the tattoos work that established it.
+- **D3** (structured vs display for `measurements`) is **void twice over**: the Human Operator answered *"display is enough"*, and the field it argued about does not exist. Recorded because the reasoning was sound about a thing that turned out not to be there.
+## D4 — `scenes` is an optimisation with no evidence behind it
+Settled and unchanged. `knownWorks(actorId:limit:)` works, serves the disambiguation picker and *What Else Are They In*, and replacing a working call with an unproven field to save a request is the wrong trade. **Human Operator:** *"Skip scenes as not providing value."*
+## D5 — `death_date` is small and fixes a real wrongness — DELIVERED
+*Impossible Data* treated a missing career end as "still working", which for someone who has died is not absent but **false**. Now: a death date ends the career, a recorded end still outranks it, a year-only date works, an unparseable one is ignored rather than guessed, and a video dated after a death is reported as impossible.
+## ❓ D7 — `studios`: the field may belong here, the UI does not
+**Human Operator, on sampling:** *"Studios - we need to clearly identify in the UI if we retrieve studios that we don't have videos for as part of the 'what you're missing' type of information."*
+That answer contains two separable things, and they have different homes.
+**The field** passes D1 where the physical attributes failed — a performer's studio set feeds studio-signature analysis and disambiguation directly. It carried the same weakness `scene_count` did: ❌ not requested by the reference consumer, so no external confirmation it is populated.
+### ✅ Sampled 2026-09-06 — the field is fully populated, and arrives as ids
+20 performers drawn at random from the 1,356 `StashDB` rows in `entity_match`, fetched in **one batched GraphQL request** (aliased, because the client's declared rate has never been tested against a real limit — see *Delta Refresh*).
+| Measure | Result |
+| --- | --- |
+| Non-empty `studios` | **20/20 (100%)** — zero empty, zero missing performers |
+| Studios per performer | min **2**, median **52**, max **201** |
+| Scene attribution | **4,225 / 4,225 (100%)** of sampled scenes attributed to a studio |
+⭐ **The shape settles the resolution question.** `Performer.studios` is `[PerformerStudio!]!` where `PerformerStudio { studio: Studio!, scene_count: Int! }`, and `Studio` carries an **`id`**. So an upstream studio resolves to a node **by external id, not by name** — which is exactly the strong signal the Library Graph's C4 says supersedes name matching. `studio_source_id`, `ensureStudioProfile`, `confirmStudio` and `connectStudioEdges` already exist. There is no name-guessing problem here, and no `pending_studio_association` analogue is needed.
+⚠️ **C3 confirmed a third time.** "Not requested by the reference consumer" has now failed to predict adoption value for `scene_count` (adopted, proved out) and for `studios` (100% populated). It is weak evidence and should stop being cited as though it were a verdict.
+➡️ Schema introspection at the same time confirmed **C1**: there is no `measurements` field. The source exposes `cup_size`, `band_size`, `waist_size`, `hip_size`, `breast_type`, `height` and `eye_color` separately — three more than this spec ever knew about, all rejected under D6 regardless.
+### 🚨 What the sample actually found — volume, not resolution
+The median sampled performer belongs to **52 studios** and the largest to **201**, against **21 studio matches in the entire catalogue**. These are not studio labels; they are every imprint a performer ever appeared under — *Bree Sky VR*, *Adult Time x Nubiles P*, *Moms Bang Teens*, *Underwater Glamour*.
+🔴 A sweep over all 1,356 matched performers would therefore mint **on the order of tens of thousands of studio edges, most pointing at imprints the library owns nothing from.** That is precisely the risk *What Else Are They In* named when it scoped itself actors-only — *"A studio's catalogue is far larger and the same over-report analysis has not been done for it"* — and this sample **is** that analysis, taken from the performer side.
+### ✅ Decided 2026-09-06 — only studios we have videos from earn an edge
+**Human Operator:** *"only edges for studios we have videos from"*.
+⭐ **This does not sacrifice the "what you're missing" signal, because that surface never needed an edge.** *What Else Are They In* is read-only by assertion — W8: *"Nothing in the feature writes to the library… it is a read-only feature and should stay one."* The gap against the source is **computed live**; the graph persists only what the library actually owns. Two different jobs, and this rule assigns each to the side that should do it. It also keeps the 52-studios-per-performer flood out of the graph entirely.
+The candidates considered were:
+- every studio the source reports (faithful, and floods the graph);
+- only studios the library already has videos from (cheap, but discards exactly the "what you're missing" signal);
+- only studios above a `scene_count` threshold — the per-studio count arrives **in the same payload**, so the discriminator is free.
+⚠️ D10 bears on this directly: production and redistribution are two different studios and both are real, so an imprint with one scene is not automatically noise.
+### 🚨 The rule has a precondition: we cannot currently tell which studios we have
+The incoming payload identifies a studio by **StashDB id**. The library mostly cannot answer in those terms:
+| Measure | Count |
+| --- | --- |
+| Studio nodes | 1,116 |
+| Studios with ≥1 video — **the set this rule filters on** | **328** |
+| …of those, carrying a StashDB id | **17** |
+So for 311 of 328 there is nothing to join on but the name. ⚠️ This is the Library Graph's **C4** recurring exactly as written — *"the id column is recent and populates only as records are re-matched, so the validated set would be empty… until a full re-match campaign."* Name resolution is retired for **minting** a studio; it is still live for **recognising** one we already have.
+### ✅ Backfill dry run, 2026-09-06 — tractable
+All 311 unmatched video-bearing studios put through `searchStudio`, batched 25 per request.
+| Outcome | Count | Disposition |
+| --- | --- | --- |
+| Exact single name match | **286 (91%)** | Safe to apply automatically |
+| Single non-exact result | 0 | — |
+| Ambiguous (>1 candidate) | 14 (4%) | Operator decision. Short or generic names — `Bang`, `Archangel`, `Aiden Vids` |
+| No result | 11 (3%) | See below — not all are missing |
+⭐ **After the backfill, 303 of 328 video-bearing studios (92%) resolve by id**, and the rule becomes a clean id join.
+🔴 **A modelling finding among the misses.** `Fansly` is not absent from the source — it is a **`Site`**, which is a *separate type from* `Studio` (113 of them). The local studio vocabulary mixes studios with platforms and sites. The other four checked (`GirlvsGirl`, `HushPass`, `ImmoralLive`, `Kinky4K`) are genuinely in neither type. **A studio and a site are not the same kind of thing**, and this spec should not quietly make them one — it is the same shape as D10's imprint/network distinction.
+⚠️ **The backfill was NOT applied.** The match rows belong in the live catalogue, which is not present on the development machine, and hand-writing 328 rows would bypass `confirmStudio`'s audit path — a verification step that mutates shared state (MISTAKES 17). The dry run establishes tractability and produces the mapping; **applying it is in-app work**, and the 14 ambiguous cases need an operator pass first.
+🚫 **The UI requirement does not belong in this spec, and cannot be satisfied from here.** "Studios we have no videos for" is a gap-against-the-source surface. That feature exists — *What Else Are They In* — and it **explicitly excluded studios by recorded decision**:
+> ✅ **Scope — ACTORS ONLY.** A studio's catalogue is far larger and the same over-report analysis has not been done for it.
+So the requirement asks for precisely what that spec deferred, and its stated precondition — an over-report analysis for studio catalogues — has never been done. ⚠️ Building it here would repeat the shape the *Delta Refresh* spec names: *"building against an unmeasured constraint is how the studio-overlap work went wrong the first time."*
+**Recommendation:** amend *What Else Are They In* to carry the studios extension, gated on that over-report analysis. Keep only the field question here.
+## What building it corrected
+> Recorded 2026-09-06. Places this spec was **wrong** and implementation proved it, kept rather than quietly rewritten so the reasoning survives. Discovered by introspecting the live schema while building the first cut, and noted in `PerformerDetailTests.swift` — where they sat unread for a month, because nothing carries a code finding back to the spec.
+### C1 — `measurements` does not exist
+D3 argued at length that it is "its own type upstream, not a string", that structure is what makes it comparable, and that flattening it would throw away the only thing making it more than decoration. **There is no such field.** The source exposes `cup_size`, `breast_type` and `height` separately. An entire decision was reasoned about a field nobody had looked for.
+### C2 — `eye_color` and `breast_type` are enums, not free text
+The spec treated the group as free-text attributes needing an as-of. Two of them are **closed vocabularies upstream**. That would have changed the storage question materially had the group survived D6 — a validated enum is a lexicon problem, not a snapshot problem.
+### C3 — "Not requested" was weak evidence, and stayed weak
+The spec said so and then leaned on it anyway. `scene_count` was ❌ not requested and is the strongest thing that shipped. **Ecosystem support predicted adoption value in the wrong direction**, and the sampling that would have settled it was recommended for three fields and performed for none.
 ## Test strategy
-- **P1** — Time-varying fields carry an as-of and are presented as a snapshot.
-- **P2** — A field the source omits leaves the existing value alone rather than blanking it.
-- **P3** — `death_date` ends a career span, and *Impossible Data* stops calling that performer active.
-- **P4** — Nothing adopted here overwrites an operator-entered value.
-- **P5** — A structured value is stored structured, not pre-rendered.
+- ✅ **P2** — A field the source omits leaves the existing value alone rather than blanking it. *Delivered.*
+- ✅ **P3** — `death_date` ends a career span, and *Impossible Data* stops calling that performer active. *Delivered.*
+- ✅ **P4** — Nothing adopted here overwrites an operator-entered value. *Delivered — an unticked proposal is not applied.*
+- 🚫 **P1** — Time-varying fields carry an as-of. *Retired with D2; nothing time-varying is adopted.*
+- 🚫 **P5** — A structured value is stored structured. *Retired with D3; the field does not exist.*
+- ❓ **P6** (new, only if D7's field is adopted) — A performer's studio set is stored as edges to studio nodes, not as names, per the Library Graph's D2. ✅ **Decision 2026-09-06** — the node connection is much more valuable than a text name field. Use nodes.
 ## ❓ Open — Human Operator
-1. Which of these do you actually want? 🔴 Recommend a first cut of **`death_date`**** + ****`scene_count`** — one fixes a wrongness, the other helps the disambiguation problem that keeps recurring — and leave the physical attributes until something needs them.
-  1. ✅ **Decision - **both are interesting data points
-2. Sample `scene_count`, `studios` and `scenes` for population before committing to any of the three?
-  1. ✅ **Decision - **Skip scenes as not providing value but I like the others. Studios - we need to clearly identify in the UI if we retrieve studios that we don’t have videos for as part of the “what you’re missing” type of information
+1. ~~Which of these do you actually want?~~ ✅ **Decision** — both `death_date` and `scene_count`. *Delivered.*
+2. ~~Sample before committing?~~ ✅ **Decision** — *"Skip scenes as not providing value but I like the others."*
+3. ~~Structured or display for ~~~~`measurements`~~~~?~~ ✅ **Decision** — *"display is enough"*. Moot: the field does not exist (C1).
+4. ✅ **Decision 2026-09-06** — the physical attributes are rejected. *"Simply descriptive - tattoos and piercings do a better job."*
+5. ❓ **OPEN — ****`studios`****.** Adopt the field here (with sampling first), and move the "studios we have no videos for" UI to *What Else Are They In* as an amendment gated on the studio over-report analysis? **If yes, this spec closes as Implemented once the field ships. If the field is also declined, it closes now. **✅ **Decision 2026-09-06** — the field should be adopted here
