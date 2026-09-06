@@ -11,7 +11,9 @@ notion: https://app.notion.com/p/Performer-Detail-the-fields-we-do-not-ask-for-3
 
 # Performer Detail — the fields we do not ask for
 
-> ⚠️ **Status: In Review — awaiting Human Operator approval** (Constitution Art. II).
+> ✅ **APPROVED by the Human Operator** (Constitution Art. II). See the recorded decisions under *Open — Human Operator* below: `death_date` and `scene_count` are both adopted, and `scenes` is explicitly dropped ("Skip scenes as not providing value").
+> 
+> ⚠️ **Banner corrected 2026-09-06.** It had read *"In Review — awaiting Human Operator approval"* while the Status property already said Approved and the decisions below were already recorded — one fact with two expressions, disagreeing, and nothing comparing them. `task spec-drift` (rule R1) now compares them.
 > 
 > The Tier 2 performer items, grouped because they are one selection set and share one design question. ⚠️ Individually most are "one line"; together they are a decision about what a performer record is FOR.
 ## The fields

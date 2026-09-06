@@ -3,7 +3,7 @@
 
 ---
 spec: "iOS Performance & Battery Optimization"
-status: Approved
+status: In Review
 kind: Epic
 priority: P1
 notion: https://app.notion.com/p/iOS-Performance-Battery-Optimization-3afadccaf42881f7bd59f1bee7f3a917
