@@ -209,6 +209,15 @@ The audit put F1/F2 first as "highest energy yield". Measurement says the **acto
 5. **F5 / F6 (#8–10)** — schema-backed metadata, unchanged.
 6. ~~F3 (#6)~~ — **close as by-design.**
 ---
+# ⏸️ DEFERRED 2026-09-06 — performance is not a current concern
+**Human Operator:** *"I am not currently concerned about performance considerations."*
+Status stays **In Review**, which is the accurate reading: this specification carries one live finding (F8) that has never been measured. It is deliberately not Archived — the analysis below is the expensive part and the next person to care about this screen should start from it rather than from the audit that opened it.
+**Where the work stopped:**
+- **#84** closed as **not planned**. Not "completed" — a remedy exists but was never verified, and marking it done would put a false record exactly where #7 and #14 already misled a reader.
+- **PR #85** closed **unmerged**. The code is complete and green (2,248 tests, macOS build, 11 new tests) and the branch `feat/profile-thumbnail-derivatives` is retained. Reopening is a one-liner.
+- **The Instruments capture was never taken.** That is the only thing standing between F8 and an answer, and it is also the step at which the two previous remedies died.
+⚠️ **If this is picked up again, read R7 before proposing anything.** The obvious fix — downsample at read time — has already been tried and measured failing. Two plausible hypotheses have now been refuted on device. **This screen has a track record of defeating reasoning that was not measured**, and the baseline to beat is 19.47–20.68 GiB.
+---
 # 🚨 SECOND REVISION — BOTH TOP-RANKED LEVERS REFUTED (probes 2026-08-21, recorded here 2026-09-06)
 ⚠️ **This section existed only in closed GitHub issues for six weeks.** R6 above still ranks *F4 re-aimed (#7)* first and *F7 (#14)* third. **Both premises were disproven on device**, and the actual cause was found and written into #14 — where nothing looks. A reader of this specification would have picked up a dead finding. That is the same drift the project has now built `task spec-drift` to catch, and this instance is one the check cannot catch: a specification that is *wrong* still resolves every identifier it cites.
 ## R7 · F4 (#7) closed — the cache was not the cause, and downsampling was not the remedy
