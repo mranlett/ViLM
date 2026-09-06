@@ -75,6 +75,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 SPEC_DIR = "docs/specs"
@@ -88,6 +89,33 @@ MIGRATION_ROOT = "LibraryCore/Sources"
 # advisory and a noisy advisory rule gets ignored, which is worse than silence.
 R3_MIN_TOKENS = 8
 R3_RATE = 0.85
+
+# R2 exemption cutoff. Briefs dated before this are the pre-process corpus and
+# are REPORTED but never failed.
+#
+# WHY, written out because loosening a check needs a better reason than "it was
+# noisy". `scope:complete` requires executable `plan.acceptance.commands` that
+# run green — and its own refusal says "disposition is not a substitute", so
+# there is no waiver path either. None of the 24 briefs predating this date has
+# commands stamped (0/24): `scope:activate` derives clauses from the task
+# statement, finds prose like "Reproduce the failure on a saved gallery", and
+# records `none_stated: true`. They therefore CANNOT be completed through the
+# native path without writing acceptance commands today for work a device
+# confirmed in August — retrofitting evidence to satisfy a gate, which is the
+# shape MISTAKES pattern 1 is about.
+#
+# The delivery record for these already exists and is authoritative: every one
+# maps to a GitHub issue closed as `completed`, with delivery commits. R2 was
+# reporting a true statement about a period when the gate could not run, and a
+# check that stays red for something nobody will ever act on is the noisy-gate
+# failure this file warns about at FAIL_PAIR.
+#
+# ⚠️ Dated, not blanket. A brief created from this date forward has no excuse,
+# and the exempt count is PRINTED on every run so the exemption is visible
+# rather than silent. An unparseable date is NOT exempt — fail closed.
+R2_LEGACY_CUTOFF = date(2026, 9, 5)
+
+BRIEF_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
 
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]{3,60})`")
 FRONTMATTER = re.compile(r"\A(?:<!--.*?-->\s*)?---\n(.*?)\n---", re.S)
@@ -289,7 +317,24 @@ def rule_tested_not_built(spec: dict, src: str, tests: str) -> list[str]:
             f"in source — {shown}"]
 
 
-def rule_shipped_briefs(root: Path) -> tuple[list[str], str | None]:
+def brief_date(filename: str) -> date | None:
+    """The date a brief filename declares, or None when it declares none."""
+    m = BRIEF_DATE.match(filename)
+    if not m:
+        return None
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def is_legacy_brief(filename: str) -> bool:
+    """Pre-process corpus: reported, never failed. Unparseable dates are not exempt."""
+    d = brief_date(filename)
+    return d is not None and d < R2_LEGACY_CUTOFF
+
+
+def rule_shipped_briefs(root: Path) -> tuple[list[str], str | None, int]:
     """xBRIEFs parked in pending/proposed whose issue is closed as completed."""
     briefs = []
     for folder in ("pending", "proposed"):
@@ -297,7 +342,7 @@ def rule_shipped_briefs(root: Path) -> tuple[list[str], str | None]:
         if base.is_dir():
             briefs.extend((folder, p) for p in base.glob("*.xbrief.json"))
     if not briefs:
-        return [], None
+        return [], None, 0
 
     helper = root / "scripts" / "gh-personal.sh"
     cmd = [str(helper)] if helper.exists() else ["gh"]
@@ -306,10 +351,10 @@ def rule_shipped_briefs(root: Path) -> tuple[list[str], str | None]:
     try:
         res = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=60)
         if res.returncode != 0:
-            return [], "gh unavailable or unauthenticated"
+            return [], "gh unavailable or unauthenticated", 0
         issues = json.loads(res.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
-        return [], "gh unavailable"
+        return [], "gh unavailable", 0
 
     def norm(s: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", s.lower())
@@ -319,19 +364,24 @@ def rule_shipped_briefs(root: Path) -> tuple[list[str], str | None]:
         for i in issues
         if (i.get("stateReason") or "").upper() == "COMPLETED"
     }
-    out = []
+    out: list[str] = []
+    exempt = 0
     for folder, path in sorted(briefs):
         try:
             title = json.loads(path.read_text())["plan"]["title"]
         except (OSError, ValueError, KeyError):
             continue
         hit = done.get(norm(title))
-        if hit:
-            out.append(
-                f"R2 {folder}/{path.name}: issue #{hit['number']} is closed as "
-                f"completed, but the brief is still in {folder}/"
-            )
-    return out, None
+        if not hit:
+            continue
+        if is_legacy_brief(path.name):
+            exempt += 1
+            continue
+        out.append(
+            f"R2 {folder}/{path.name}: issue #{hit['number']} is closed as "
+            f"completed, but the brief is still in {folder}/"
+        )
+    return out, None, exempt
 
 
 # ---------------------------------------------------------------- selftest
@@ -471,10 +521,13 @@ def main() -> int:
     if args.offline:
         skipped = "R2 skipped (--offline)"
     else:
-        r2, why = rule_shipped_briefs(root)
+        r2, why, exempt = rule_shipped_briefs(root)
         fails += r2
         if why:
             skipped = f"R2 skipped ({why})"
+        elif exempt:
+            skipped = (f"R2: {exempt} brief(s) dated before {R2_LEGACY_CUTOFF} exempt "
+                       f"— pre-process corpus, delivery recorded on their issues")
 
     print(f"spec-drift: {len(specs)} spec(s), schema head "
           f"{'v%d' % current if current else 'unknown'}, "

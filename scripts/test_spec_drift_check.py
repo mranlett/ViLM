@@ -150,6 +150,32 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(sdc.rule_resolves_like_built(s, SOURCE, TESTS))
 
 
+class LegacyBriefExemptionTests(unittest.TestCase):
+    """R2's dated exemption. Loosening a gate needs its boundary pinned."""
+
+    def test_a_brief_before_the_cutoff_is_exempt(self):
+        self.assertTrue(sdc.is_legacy_brief("2026-08-03-r4-spike-starred-photo.xbrief.json"))
+
+    def test_a_brief_on_the_cutoff_is_not_exempt(self):
+        # The cutoff day itself has no excuse — the gate was enforceable by then.
+        self.assertFalse(sdc.is_legacy_brief("2026-09-05-something.xbrief.json"))
+
+    def test_a_brief_after_the_cutoff_is_not_exempt(self):
+        self.assertFalse(sdc.is_legacy_brief("2026-10-01-something.xbrief.json"))
+
+    def test_an_undated_brief_is_not_exempt(self):
+        # Fail closed: a name that declares no date must not buy an exemption.
+        self.assertFalse(sdc.is_legacy_brief("no-date-here.xbrief.json"))
+
+    def test_an_impossible_date_is_not_exempt(self):
+        self.assertFalse(sdc.is_legacy_brief("2026-13-45-nonsense.xbrief.json"))
+
+    def test_the_date_parses_from_the_filename_prefix(self):
+        self.assertEqual(sdc.brief_date("2026-08-03-x.xbrief.json"),
+                         sdc.date(2026, 8, 3))
+        self.assertIsNone(sdc.brief_date("x.xbrief.json"))
+
+
 class SchemaTests(unittest.TestCase):
     def test_reads_the_highest_registered_migration(self):
         with tempfile.TemporaryDirectory() as tmp:
