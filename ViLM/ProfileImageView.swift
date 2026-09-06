@@ -164,8 +164,41 @@ struct ProfileImageView<Content: View, Placeholder: View>: View {
         // 1. Look for the cached file in ANY open library (the merged actor
         // view can reference photos that live only in an attachment).
         if let existing = LibrarySession.shared.existingProfilePhotoURL(fileName: fileName) {
+
+            // 1a. 🚨 Prefer a grid-sized derivative (#84). A source photo here
+            // averages 4.2 GB / 9,499 files with the largest at 4–5 MB, and
+            // decoding one per cell materialisation is what cost 30.7 %/hr and
+            // ~19.9 GiB of allocations on a two-pass scroll. Downsampling at
+            // read time does NOT fix that — it was tried in #7 and measured
+            // failing, because the whole JPEG is still parsed. Only a smaller
+            // file makes the decode cheap.
+            //
+            // Freshness is compared, never assumed: the primary filename is
+            // fixed per entity, so a present-but-stale derivative would serve
+            // the old face after a re-star (#21).
+            if let derivative = ProfileThumbnailStore.freshDerivativeURL(
+                    forSourceFileName: fileName, sourceURL: existing) {
+                if let image = await loadImageAsync(from: derivative) {
+                    setLocalImage(image)
+                    return
+                }
+                // ⚠️ Discard the DERIVATIVE only. The source is below and may be
+                // the library's only copy; deleting it to repair a cache is how
+                // a performance fix becomes data loss.
+                ProfileThumbnailStore.discardDerivative(at: derivative)
+            }
+
             if let image = await loadImageAsync(from: existing) {
                 setLocalImage(image)
+                // 1b. Heal in the background so the next materialisation is
+                // cheap. Deliberately after the image is shown: the user is
+                // never waiting on generation, and a scroll that never revisits
+                // this cell has still paid nothing extra.
+                let entity = entityId
+                Task.detached(priority: .utility) {
+                    await ProfileThumbnailStore.generateIfNeeded(
+                        sourceFileName: fileName, sourceURL: existing, profileId: entity)
+                }
                 return
             } else {
                 // File exists but failed to decode (e.g. corrupted/0 bytes). Delete it to allow redownload.

@@ -274,6 +274,38 @@ final class LibrarySession: ObservableObject {
         url(forProfile: id)?.appendingPathComponent(".catalog/profiles")
     }
 
+    // MARK: - Profile thumbnail derivatives (#84)
+    //
+    // A grid cell must not decode a 4–5 MB source JPEG to draw itself. These
+    // mirror the profiles accessors exactly, one directory across, because the
+    // lookup rules are the same: read from any open library in precedence
+    // order, write to the owning one.
+
+    /// Every open library's profile-derivative directory, in precedence order.
+    var profileThumbsDirs: [URL] {
+        allURLs.map { $0.appendingPathComponent(ProfileThumbnailNaming.relativePath) }
+    }
+
+    /// The first open library holding this derivative. Nil when none does.
+    ///
+    /// ⚠️ Presence only — the caller MUST still check freshness against the
+    /// source's modification date via `ProfileThumbnailNaming.isFresh`. The
+    /// primary photo's filename is fixed per entity, so "the file is there" is
+    /// not "the file is current"; that conflation is #21 exactly.
+    func existingProfileThumbnailURL(fileName: String) -> URL? {
+        for dir in profileThumbsDirs {
+            let candidate = dir.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    /// Where a NEW derivative for this profile should be written: the owning
+    /// library's derivative directory.
+    func profileThumbsDir(forProfile id: String) -> URL? {
+        url(forProfile: id)?.appendingPathComponent(ProfileThumbnailNaming.relativePath)
+    }
+
     // MARK: - Per-asset catalog artifacts
 
     func thumbnailURL(for assetID: Asset.ID) -> URL? {
