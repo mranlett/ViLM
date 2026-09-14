@@ -342,7 +342,7 @@ final class ContentNamingTests: XCTestCase {
                 for: asset(kind: .personal, file: "x.mov", episode: "Beach Trip",
                            released: "2019-07-01"),
                 in: context(placement, [("Alice Example", "Female")]))
-            XCTAssertEqual(path(outcome), "Personal/Beach Trip (2019).mov",
+            XCTAssertEqual(path(outcome), "Personal/Beach Trip - Alice Example (2019).mov",
                            "placement \(placement) leaked into a personal path")
         }
     }
