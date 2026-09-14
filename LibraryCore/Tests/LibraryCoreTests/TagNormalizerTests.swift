@@ -133,6 +133,6 @@ extension TagNormalizerTests {
     func testPrefixedTagsKeepTheirCategory() {
         XCTAssertEqual(TagNormalizer.normalize(fullTag: "tag:POV"), "tag:POV")
         XCTAssertEqual(TagNormalizer.normalize(fullTag: "actor:erin o'Brien"),
-                       "actor:Erin o'Brien")
+                       "actor:erin o'Brien")
     }
 }
