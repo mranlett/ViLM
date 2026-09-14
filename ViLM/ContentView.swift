@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingPhotoTopUp = false
+    @State private var isShowingMetadataHealth = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
     @State private var isShowingIdentityGaps = false
@@ -501,6 +502,18 @@ struct ContentView: View {
                     reloadUnionAssets()
                 }
             }
+            .sheet(isPresented: $isShowingMetadataHealth) {
+                if let url = selectedLibraryURL {
+                    MetadataHealthDashboardView(
+                        libraryURL: url,
+                        onFixDuplicates: { isShowingAliasSplits = true },
+                        onFixOrphans: { isShowingTagCleanup = true },
+                        onFixIdentityGaps: { isShowingIdentityGaps = true },
+                        onIdentityUpgrade: { isShowingIdentityUpgrade = true },
+                        onFixStudioConflicts: { isShowingStudioAudit = true }
+                    )
+                }
+            }
             .sheet(isPresented: $isShowingAliasSplits) {
                 if let url = selectedLibraryURL {
                     AliasSplitMergeView(libraryURL: url) {
@@ -852,6 +865,7 @@ struct ContentView: View {
                 onAliasSplits: { isShowingAliasSplits = true },
                 onRefreshMatched: { isShowingVideoRefresh = true },
                 onIdentityGaps: { isShowingIdentityGaps = true },
+                onMetadataHealth: { isShowingMetadataHealth = true },
                 onIdentityUpgrade: { isShowingIdentityUpgrade = true },
                 onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                 onReadFilenames: { isShowingReadFilenames = true },
