@@ -47,12 +47,6 @@ extension LibraryStore {
                                    arguments: [losingId])
                 }
                 
-                try db.execute(sql:
-                    "UPDATE OR IGNORE studio_parent SET studio_id = ? WHERE studio_id = ?",
-                    arguments: [survivingId, losingId])
-                try db.execute(sql: "DELETE FROM studio_parent WHERE studio_id = ?",
-                               arguments: [losingId])
-                
                 try db.execute(sql: "DELETE FROM studio_parent WHERE parent_studio_id = studio_id")
                 
                 // Tombstone
