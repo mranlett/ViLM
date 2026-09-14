@@ -78,6 +78,8 @@ public enum NamingSkip: Equatable, Sendable {
     /// A single performer's name alone exceeds the ceiling, so truncating would
     /// produce a different person's name rather than a shorter one.
     case performerNameTooLong(String)
+    /// A film or personal asset's only title is a legacy filename that contains performers.
+    case legacyTitleContainsPerformers
 
     public var reason: String {
         switch self {
@@ -89,6 +91,8 @@ public enum NamingSkip: Equatable, Sendable {
             return "Nothing to name it after — no title, no series, and no usable filename."
         case let .performerNameTooLong(name):
             return "One performer's name alone is longer than a filename may be (\(name))."
+        case .legacyTitleContainsPerformers:
+            return "The only title available is a filename containing performers — needs a real title to avoid baking performers into the new filename."
         }
     }
 }
@@ -140,9 +144,11 @@ public enum ContentNaming {
     /// `Film Title (2019)/Film Title (2019).mkv`
     private static func film(_ asset: Asset, _ c: NamingContext, _ ext: String) -> NamingOutcome {
         guard let title = usableTitle(asset) else { return .skipped(.noUsableName) }
-        // ⚠️ The year is the trailing segment, so its absence truncates the name
-        // rather than leaving a placeholder. `Title` alone is legal.
-        let stem = join([title, year(asset).map { "(\($0))" }], with: " ")
+        if isLegacyTitleWithPerformers(title: title, asset: asset, context: c) {
+            return .skipped(.legacyTitleContainsPerformers)
+        }
+        
+        let stem = truncateFilmOrPersonal(title: title, year: year(asset))
         guard let component = PathComponentName.sanitised(stem) else {
             return .skipped(.noUsableName)
         }
@@ -158,7 +164,11 @@ public enum ContentNaming {
     /// `context.studio` at all.
     private static func personal(_ asset: Asset, _ c: NamingContext, _ ext: String) -> NamingOutcome {
         guard let title = usableTitle(asset) else { return .skipped(.noUsableName) }
-        let stem = join([title, year(asset).map { "(\($0))" }], with: " ")
+        if isLegacyTitleWithPerformers(title: title, asset: asset, context: c) {
+            return .skipped(.legacyTitleContainsPerformers)
+        }
+        
+        let stem = truncateFilmOrPersonal(title: title, year: year(asset))
         guard let folder = PathComponentName.sanitised(c.personalFolder),
               let component = PathComponentName.sanitised(stem) else {
             return .skipped(.noUsableName)
@@ -395,6 +405,55 @@ public enum ContentNaming {
     }
 
     // MARK: - Helpers
+
+    /// Checks if the given title is a legacy fallback (i.e. the file stem) that contains any credited performers.
+    private static func isLegacyTitleWithPerformers(title: String, asset: Asset, context: NamingContext) -> Bool {
+        // If it's explicitly set in episode or videoName, it's not a legacy fallback.
+        if let t = asset.episode?.trimmed, !t.isEmpty, t == title { return false }
+        if let s = asset.videoName?.trimmed, !s.isEmpty, s == title { return false }
+        
+        let stem = (asset.fileName as NSString).deletingPathExtension.trimmed
+        if title != stem { return false }
+        
+        // It is a fallback. Check if it contains any performer name.
+        for performer in context.performers {
+            if title.localizedCaseInsensitiveContains(performer.name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Truncates a film or personal title at a word boundary, while guaranteeing the year is never dropped.
+    private static func truncateFilmOrPersonal(title: String, year: String?) -> String {
+        let yearPart = year.map { "(\($0))" }
+        var candidate = join([title, yearPart], with: " ")
+        if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
+        
+        var words = title.split(separator: " ").map(String.init)
+        while words.count > 1 {
+            words.removeLast()
+            candidate = join([words.joined(separator: " "), yearPart], with: " ")
+            if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
+        }
+        
+        let shortestTitle = words.isEmpty ? nil : words.joined(separator: " ")
+        candidate = join([shortestTitle, yearPart], with: " ")
+        if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
+            return candidate
+        }
+        
+        // If even a single word + year doesn't fit, we must character-truncate the word,
+        // because we can never drop the year.
+        if let shortestTitle = shortestTitle {
+            let budget = PathComponentName.maximumBytes - (yearPart.map { $0.utf8.count + 1 } ?? 0)
+            let truncatedTitle = PathComponentName.truncated(shortestTitle, toBytes: budget)
+            return join([truncatedTitle, yearPart], with: " ")
+        }
+        
+        // No title at all, just return the year part if we have it
+        return join([title, yearPart], with: " ")
+    }
 
     /// The best name the record can offer: the episode title, else the series,
     /// else the existing filename stem.
