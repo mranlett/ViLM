@@ -48,12 +48,12 @@ extension LibraryStore {
                 }
                 
                 try db.execute(sql:
-                    "UPDATE OR IGNORE studio_parent SET child_studio_id = ? WHERE child_studio_id = ?",
+                    "UPDATE OR IGNORE studio_parent SET studio_id = ? WHERE studio_id = ?",
                     arguments: [survivingId, losingId])
-                try db.execute(sql: "DELETE FROM studio_parent WHERE child_studio_id = ?",
+                try db.execute(sql: "DELETE FROM studio_parent WHERE studio_id = ?",
                                arguments: [losingId])
                 
-                try db.execute(sql: "DELETE FROM studio_parent WHERE parent_studio_id = child_studio_id")
+                try db.execute(sql: "DELETE FROM studio_parent WHERE parent_studio_id = studio_id")
                 
                 // Tombstone
                 try db.execute(sql: "INSERT OR IGNORE INTO tombstoned_profiles (id) VALUES (?)",
