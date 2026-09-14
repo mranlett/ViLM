@@ -6,11 +6,17 @@ struct MetadataHealthDashboardView: View {
 
     let libraryURL: URL
 
-    var onFixDuplicates: (() -> Void)?
-    var onFixOrphans: (() -> Void)?
-    var onFixIdentityGaps: (() -> Void)?
-    var onIdentityUpgrade: (() -> Void)?
-    var onFixStudioConflicts: (() -> Void)?
+    var duplicateView: AnyView?
+    var orphanView: AnyView?
+    var identityGapsView: AnyView?
+    var identityUpgradeView: AnyView?
+    var studioConflictsView: AnyView?
+    
+    @State private var showingDuplicates = false
+    @State private var showingOrphans = false
+    @State private var showingIdentityGaps = false
+    @State private var showingIdentityUpgrade = false
+    @State private var showingStudioConflicts = false
     
     @State private var preflight: MigrationPreflight?
     @State private var orphansCount: Int = 0
@@ -36,6 +42,11 @@ struct MetadataHealthDashboardView: View {
                 .task { await run() }
         }
         .macSheet(minWidth: 500, minHeight: 400)
+        .sheet(isPresented: $showingDuplicates) { if let view = duplicateView { view } }
+        .sheet(isPresented: $showingOrphans) { if let view = orphanView { view } }
+        .sheet(isPresented: $showingIdentityGaps) { if let view = identityGapsView { view } }
+        .sheet(isPresented: $showingIdentityUpgrade) { if let view = identityUpgradeView { view } }
+        .sheet(isPresented: $showingStudioConflicts) { if let view = studioConflictsView { view } }
     }
 
     @ViewBuilder
@@ -54,8 +65,7 @@ struct MetadataHealthDashboardView: View {
                             Label("Ready for Identity Upgrade!", systemImage: "checkmark.seal.fill")
                                 .foregroundStyle(.green)
                             Button("Run Identity Upgrade…") {
-                                onIdentityUpgrade?()
-                                dismiss()
+                                showingIdentityUpgrade = true
                             }
                         } else {
                             if duplicatesCount > 0 {
@@ -64,8 +74,7 @@ struct MetadataHealthDashboardView: View {
                                         .foregroundStyle(.orange)
                                     Spacer()
                                     Button("Merge Duplicates") {
-                                        onFixDuplicates?()
-                                        dismiss()
+                                        showingDuplicates = true
                                     }
                                     .buttonStyle(.bordered)
                                 }
@@ -94,8 +103,7 @@ struct MetadataHealthDashboardView: View {
                             .foregroundStyle(orphansCount > 0 ? .orange : .green)
                         Spacer()
                         Button("Remove Orphans") {
-                            onFixOrphans?()
-                            dismiss()
+                            showingOrphans = true
                         }
                         .buttonStyle(.bordered)
                     }
@@ -105,19 +113,17 @@ struct MetadataHealthDashboardView: View {
                             .foregroundStyle(identityGapsCount > 0 ? .orange : .green)
                         Spacer()
                         Button("Fix Gaps") {
-                            onFixIdentityGaps?()
-                            dismiss()
+                            showingIdentityGaps = true
                         }
                         .buttonStyle(.bordered)
                     }
                     
-                    if let _ = onFixStudioConflicts {
+                    if let _ = studioConflictsView {
                         HStack {
                             Label("Studio Spelling/Conflicts", systemImage: "building.2.crop.circle")
                             Spacer()
                             Button("Audit Studios") {
-                                onFixStudioConflicts?()
-                                dismiss()
+                                showingStudioConflicts = true
                             }
                             .buttonStyle(.bordered)
                         }

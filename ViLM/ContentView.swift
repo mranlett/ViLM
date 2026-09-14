@@ -504,13 +504,27 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isShowingMetadataHealth) {
                 if let url = selectedLibraryURL {
-                    MetadataHealthDashboardView(
+                                        MetadataHealthDashboardView(
                         libraryURL: url,
-                        onFixDuplicates: { isShowingAliasSplits = true },
-                        onFixOrphans: { isShowingTagCleanup = true },
-                        onFixIdentityGaps: { isShowingIdentityGaps = true },
-                        onIdentityUpgrade: { isShowingIdentityUpgrade = true },
-                        onFixStudioConflicts: { isShowingStudioAudit = true }
+                        duplicateView: AnyView(AliasSplitMergeView(libraryURL: url) {
+                            loadEntityProfiles(from: url)
+                            reloadUnionAssets()
+                        }),
+                        orphanView: AnyView(TagCleanupView(
+                            libraryURL: url,
+                            assets: assets,
+                            onRefresh: {
+                                reloadUnionAssets()
+                                loadEntityProfiles(from: url)
+                            }
+                        )),
+                        identityGapsView: AnyView(IdentityGapsView(libraryURL: url) {
+                            loadEntityProfiles(from: url)
+                        }),
+                        identityUpgradeView: AnyView(IdentityUpgradeView(libraryURL: url)),
+                        studioConflictsView: AnyView(StudioAuditView(libraryURL: url) {
+                            reloadUnionAssets()
+                        })
                     )
                 }
             }
