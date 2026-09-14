@@ -56,8 +56,7 @@ extension LibraryStore {
                 try db.execute(sql: "DELETE FROM studio_parent WHERE parent_studio_id = studio_id")
                 
                 // Tombstone
-                try db.execute(sql: "INSERT OR IGNORE INTO tombstoned_profiles (id) VALUES (?)",
-                               arguments: [losingId])
+                try recordTombstone(EntityTombstone(entityId: losingId, replacedBy: survivingId), in: db)
                 
                 // Delete old profile
                 try oldProfile.delete(db)
