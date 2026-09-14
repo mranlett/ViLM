@@ -499,7 +499,7 @@ public enum ActorCSV {
         let ageAtStart: Int? = cell(15).flatMap(Int.init) ?? existing?.ageAtCareerStart
 
         return EntityProfile(
-            id: entityId(forName: name),
+            id: existing?.id ?? UUID().uuidString,
             // ⭐ The file's own Name column, which is what the operator edited.
             displayName: name,
             bio: bio,

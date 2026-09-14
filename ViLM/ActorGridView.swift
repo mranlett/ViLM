@@ -825,8 +825,9 @@ struct ActorGridView: View {
                         // profile", and the full-row save below then wiped the
                         // actor's tags/photos/AKAs (DEFECT_INVENTORY C3, the
                         // third instance of this bug class).
-                        let existing = try merged[entityId] ?? store.fetchEntityProfile(for: entityId)
-
+                        let existing = try merged.values.first(where: { $0.name == name }) ??
+                                       store.fetchEntityProfile(named: name, type: "actor")
+                        
                         // Field-by-field merge lives in LibraryCore (ActorCSV.merge) and is
                         // unit-tested there: blank cells leave existing values alone, AKAs and
                         // tags are UNIONED with what's already stored, and gallery URLs — which
@@ -836,7 +837,8 @@ struct ActorGridView: View {
                             existing: existing,
                             decorateCountry: CountryFlagHelper.withFlag
                         ) else { continue }
-                        merged[entityId] = profile
+                        
+                        merged[profile.id] = profile
                     }
                 }
 
