@@ -41,6 +41,42 @@ public enum AssetSort {
         return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
     }
 
+    /// Ordering by structured metadata: Studio -> Series Name -> Season -> Episode -> Title -> Actors -> Filename.
+    public static func metadataOrderPrecedes(_ a: Asset, _ b: Asset) -> Bool {
+        // 1. Studio Name
+        let sa = a.studios.first ?? ""
+        let sb = b.studios.first ?? ""
+        if sa != sb { return sa.localizedStandardCompare(sb) == .orderedAscending }
+        
+        // 2. Series Name
+        let va = a.videoName ?? ""
+        let vb = b.videoName ?? ""
+        if va != vb { return va.localizedStandardCompare(vb) == .orderedAscending }
+        
+        // 3. Season Number
+        let sea = a.seasonNumber ?? Int.max
+        let seb = b.seasonNumber ?? Int.max
+        if sea != seb { return sea < seb }
+        
+        // 4. Episode Number
+        let ea = a.episodeNumber ?? Int.max
+        let eb = b.episodeNumber ?? Int.max
+        if ea != eb { return ea < eb }
+        
+        // 5. Episode Title
+        let ta = a.episode ?? ""
+        let tb = b.episode ?? ""
+        if ta != tb { return ta.localizedStandardCompare(tb) == .orderedAscending }
+        
+        // 6. Actors
+        let aca = a.actors.joined(separator: ", ")
+        let acb = b.actors.joined(separator: ", ")
+        if aca != acb { return aca.localizedStandardCompare(acb) == .orderedAscending }
+        
+        // 7. Fallback to Filename
+        return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
+    }
+
     /// The ascending comparison for a given option.
     ///
     /// - Parameter fileSizes: sizes by asset id. A missing entry counts as 0, which
@@ -56,7 +92,7 @@ public enum AssetSort {
         case .seriesOrder:
             return seriesOrderPrecedes(a, b)
         case .name:
-            return a.fileName.localizedStandardCompare(b.fileName) == .orderedAscending
+            return metadataOrderPrecedes(a, b)
         case .date:
             return a.createdAt < b.createdAt
         case .size:
