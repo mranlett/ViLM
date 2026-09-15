@@ -424,4 +424,120 @@ final class ContentNamingTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - D11b — performers persist in film and personal names too
+
+    func testAFilmWithCastIncludesPerformersBeforeTheYear() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "The Long Weekend",
+                       released: "2019-04-12"),
+            in: context(.unprocessed, [("Alice Example", "Female")]))
+        XCTAssertEqual(path(outcome),
+                       "The Long Weekend - Alice Example (2019)/The Long Weekend - Alice Example (2019).mkv")
+    }
+
+    /// The same delimiter-collision protection `scene()` already has (D3) —
+    /// a title's own " - " must not read as the title/cast boundary.
+    func testAFilmTitleContainingTheDelimiterDoesNotCollideWithCast() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "Before - After",
+                       released: "2020-01-01"),
+            in: context(.unprocessed, [("Alice Example", "Female")]))
+        XCTAssertEqual(path(outcome),
+                       "Before – After - Alice Example (2020)/Before – After - Alice Example (2020).mkv")
+    }
+
+    // MARK: - D11b round trip — recovering what the grammars wrote
+
+    func testRecoveringAFilmNameReturnsTitleCastAndYear() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            "The Long Weekend - Alice Example, Bea Example (2019)")
+        XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertEqual(recovered.cast, ["Alice Example", "Bea Example"])
+        XCTAssertEqual(recovered.year, "2019")
+    }
+
+    func testRecoveringAFilmNameWithNoCastReturnsAnEmptyCast() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName("The Long Weekend (2019)")
+        XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertEqual(recovered.cast, [])
+        XCTAssertEqual(recovered.year, "2019")
+    }
+
+    /// The write side folds a title's own " - " to " – " precisely so this
+    /// still parses unambiguously — the recovered title carries the fold,
+    /// not the original delimiter, the same accepted tradeoff D3 already
+    /// made for scene names.
+    func testRecoveringATitleThatContainedTheDelimiterStillRoundTrips() {
+        let generated = try! XCTUnwrap(path(ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "Before - After", released: "2020-01-01"),
+            in: context(.unprocessed, [("Alice Example", "Female")]))))
+        let stem = String(generated.split(separator: "/").first!)
+        let recovered = ContentNaming.recoverFilmOrPersonalName(stem)
+        XCTAssertEqual(recovered.title, "Before – After")
+        XCTAssertEqual(recovered.cast, ["Alice Example"])
+        XCTAssertEqual(recovered.year, "2020")
+    }
+
+    /// `truncateFilmOrPersonal` drops the whole cast, never part of it, when
+    /// even a one-word title can't fit alongside it — recovery reports
+    /// exactly what survived, not what was true before the ceiling was hit.
+    func testRecoveringATruncatedFilmNameReturnsWhateverSurvivedTruncation() {
+        let longName1 = String(repeating: "A", count: 130)
+        let longName2 = String(repeating: "B", count: 130)
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "Weekend", released: "2019-01-01"),
+            in: context(.unprocessed, [(longName1, "Female"), (longName2, "Female")]))
+        let stem = String(try! XCTUnwrap(path(outcome)).split(separator: "/").first!)
+        XCTAssertEqual(stem, "Weekend (2019)",
+                       "cast that cannot fit is dropped whole, keeping the title and year")
+        let recovered = ContentNaming.recoverFilmOrPersonalName(stem)
+        XCTAssertTrue(recovered.cast.isEmpty)
+        XCTAssertEqual(recovered.title, "Weekend")
+        XCTAssertEqual(recovered.year, "2019")
+    }
+
+    func testRecoveringAnEpisodicNameWithCastAndTitleRecoversBoth() {
+        let recovered = ContentNaming.recoverEpisodicName(
+            "Harbour Nights - S01E02 - Alice Example, Bea Example - Late Checkout")
+        XCTAssertEqual(recovered?.series, "Harbour Nights")
+        XCTAssertEqual(recovered?.season, 1)
+        XCTAssertEqual(recovered?.episode, 2)
+        XCTAssertEqual(recovered?.cast, ["Alice Example", "Bea Example"])
+        XCTAssertEqual(recovered?.title, "Late Checkout")
+        XCTAssertNil(recovered?.ambiguousSegment)
+    }
+
+    func testRecoveringAnEpisodicNameWithNeitherCastNorTitleRecoversJustTheMarker() {
+        let recovered = ContentNaming.recoverEpisodicName("Harbour Nights - S02E11")
+        XCTAssertEqual(recovered?.series, "Harbour Nights")
+        XCTAssertEqual(recovered?.season, 2)
+        XCTAssertEqual(recovered?.episode, 11)
+        XCTAssertEqual(recovered?.cast, [])
+        XCTAssertNil(recovered?.title)
+    }
+
+    /// 🚨 The one genuine ambiguity D11b's episodic grammar has: with a
+    /// single segment surviving truncation, this reports it unresolved
+    /// rather than guessing which field it was — see the doc comment on
+    /// `recoverEpisodicName`.
+    func testRecoveringAnEpisodicNameWithOneSurvivingSegmentIsAmbiguousWithoutARoster() {
+        let recovered = ContentNaming.recoverEpisodicName("Harbour Nights - S01E02 - Late Checkout")
+        XCTAssertEqual(recovered?.cast, [])
+        XCTAssertNil(recovered?.title)
+        XCTAssertEqual(recovered?.ambiguousSegment, "Late Checkout")
+    }
+
+    func testRecoveringAnEpisodicNameWithOneSurvivingSegmentResolvesAgainstAKnownRoster() {
+        let recovered = ContentNaming.recoverEpisodicName(
+            "Harbour Nights - S01E02 - Alice Example",
+            knownPerformerNames: ["Alice Example", "Bea Example"])
+        XCTAssertEqual(recovered?.cast, ["Alice Example"])
+        XCTAssertNil(recovered?.title)
+        XCTAssertNil(recovered?.ambiguousSegment)
+    }
+
+    func testRecoveringANonEpisodicStringReturnsNil() {
+        XCTAssertNil(ContentNaming.recoverEpisodicName("Not An Episodic Name At All"))
+    }
 }

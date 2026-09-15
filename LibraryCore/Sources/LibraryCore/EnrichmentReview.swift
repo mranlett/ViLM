@@ -256,11 +256,11 @@ public enum ActorEnrichment {
             birthYear: take(Field.birthYear, proposal.birthYear, profile.birthYear),
             countryOfOrigin: take(Field.countryOfOrigin, proposal.countryOfOrigin, profile.countryOfOrigin),
             rating: profile.rating,              // user-authored, never proposable
-            tags: merged(Field.tags, proposal.tags, profile.tags ?? []),
+            tags: merged(Field.tags, proposal.tags, profile.tags),
             // Union, like tags and AKAs: enrichment can add photos but never
             // remove one the user curated.
-            galleryUrls: unionGallery(profile.galleryUrls ?? [], adding: acceptingGalleryURLs),
-            akas: merged(Field.akas, proposal.akas, profile.akas ?? []),
+            galleryUrls: unionGallery(profile.galleryUrls, adding: acceptingGalleryURLs),
+            akas: merged(Field.akas, proposal.akas, profile.akas),
             createdAt: profile.createdAt,
             birthDate: take(Field.birthDate, proposal.birthDate, profile.birthDate),
             careerSpanRaw: take(Field.careerSpanRaw, proposal.careerSpanRaw, profile.careerSpanRaw),
@@ -287,8 +287,8 @@ public enum ActorEnrichment {
             deathDate: take(Field.deathDate, proposal.deathDate, profile.deathDate),
             sceneCount: take(Field.sceneCount, proposal.sceneCount, profile.sceneCount),
             links: accepting.contains(Field.links)
-                ? EntityLink.merged(profile.links ?? [], adding: proposal.externalLinks.value ?? [])
-                : (profile.links ?? [])
+                ? EntityLink.merged(profile.links, adding: proposal.externalLinks.value ?? [])
+                : profile.links
         )
     }
 
