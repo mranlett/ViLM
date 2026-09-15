@@ -47,19 +47,32 @@ enum AliasMerge {
     /// unioned, edges move, and a tombstone stops the losing name returning on
     /// the next sync. All of that already exists; the only thing this adds is
     /// handing it the form it actually matches on, and believing its answer.
-    static func perform(losing: String, surviving: String,
+    static func perform(losingId: String, survivingId: String,
                         in libraryURL: URL) -> Outcome {
-        // ⚠️ Refused rather than attempted. Renaming a name to itself is a
-        // no-op the store early-returns on, which would then be reported as
-        // "nothing changed" — a confusing way to say "that made no sense".
-        guard losing.caseInsensitiveCompare(surviving) != .orderedSame else {
-            return .nothingChanged(losing: losing)
-        }
+        guard losingId != survivingId else { return .failed("Cannot merge a profile into itself") }
+        
         do {
-            let outcome = try LibraryStore(at: libraryURL).renameTagGlobally(
-                oldTag: EntityProfile.actorTag(losing),
-                newTag: EntityProfile.actorTag(surviving))
-            return outcome.changedAnything ? .merged : .nothingChanged(losing: losing)
+            let store = try LibraryStore(at: libraryURL)
+            // If the names are identical, renameTagGlobally won't do anything, 
+            // so we merge directly by ID.
+            if let losingProfile = try store.fetchEntityProfile(for: losingId),
+               let survivingProfile = try store.fetchEntityProfile(for: survivingId) {
+                
+                let losingName = losingProfile.displayName ?? ""
+                let survivingName = survivingProfile.displayName ?? ""
+                
+                if losingName.caseInsensitiveCompare(survivingName) == .orderedSame {
+                    let changed = try store.mergeProfiles(losingId: losingId, survivingId: survivingId)
+                    return changed ? .merged : .nothingChanged(losing: losingName)
+                } else {
+                    let outcome = try store.renameTagGlobally(
+                        oldTag: EntityProfile.actorTag(losingName),
+                        newTag: EntityProfile.actorTag(survivingName))
+                    return outcome.changedAnything ? .merged : .nothingChanged(losing: losingName)
+                }
+            } else {
+                return .failed("Could not find profiles")
+            }
         } catch {
             return .failed(error.localizedDescription)
         }

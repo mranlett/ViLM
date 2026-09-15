@@ -62,10 +62,12 @@ public struct AliasSplitCandidate: Equatable, Sendable, Identifiable {
     public enum Evidence: Int, Equatable, Sendable, Comparable {
         /// The source merged these two records AND their names overlap.
         case both = 0
+        /// Exact name match between two profiles.
+        case exactNameCollision = 1
         /// The source merged these two records.
-        case upstreamMerge = 1
+        case upstreamMerge = 2
         /// One profile's name appears in the other's alias list.
-        case aliasOverlap = 2
+        case aliasOverlap = 3
 
         public static func < (a: Evidence, b: Evidence) -> Bool {
             a.rawValue < b.rawValue
@@ -158,10 +160,18 @@ public enum AliasSplitAudit {
             TagNormalizer.identityKey(value)
         }
 
-        // Folded name → profile id, so a case difference is not a second person.
+        // Folded name → ALL profile ids with exactly this name.
+        var exactCollisions: [String: [String]] = [:]
+        // Folded name → ONE profile id (to maintain the legacy alias overlap lookup exactly as before).
         var byName: [String: String] = [:]
+        
         for profile in input.profiles {
-            byName[fold(profile.name)] = profile.id
+            let f = fold(profile.name)
+            if let existing = byName[f] {
+                exactCollisions[f, default: [existing]].append(profile.id)
+            } else {
+                byName[f] = profile.id
+            }
         }
 
         func claimant(_ id: String) -> AliasSplitCandidate.Claimant? {
@@ -184,7 +194,36 @@ public enum AliasSplitAudit {
             }
         }
 
-        var candidates = claims.compactMap { aliasId, claimantIds -> AliasSplitCandidate? in
+        var exactCandidates: [AliasSplitCandidate] = []
+        for (_, groupIds) in exactCollisions {
+            let profiles = groupIds.compactMap(claimant).sorted {
+                if $0.isMatched != $1.isMatched { return $0.isMatched }
+                if $0.videoCount != $1.videoCount { return $0.videoCount > $1.videoCount }
+                return $0.id < $1.id
+            }
+            guard profiles.count >= 2 else { continue }
+            
+            let winner = profiles[0]
+            for loser in profiles.dropFirst() {
+                let survivor = input.upstreamMerges[loser.id]
+                var ev: AliasSplitCandidate.Evidence = .exactNameCollision
+                var finalSurvivor: String? = nil
+                
+                if survivor == winner.id {
+                    ev = .both
+                    finalSurvivor = survivor
+                }
+                
+                exactCandidates.append(AliasSplitCandidate(
+                    alias: loser,
+                    claimants: [winner],
+                    evidence: ev,
+                    upstreamSurvivorId: finalSurvivor
+                ))
+            }
+        }
+
+        var candidates = exactCandidates + claims.compactMap { aliasId, claimantIds -> AliasSplitCandidate? in
             guard let alias = claimant(aliasId) else { return nil }
             let found = claimantIds.compactMap(claimant)
                 // Most-evidenced first: a confirmed profile with a filmography

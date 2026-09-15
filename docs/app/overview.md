@@ -73,3 +73,5 @@ Verdict — Shipped & Active. Highly mature native Apple application with modula
 ViLM/README.md, ViLM/PRIVACY.md, ViLM/LibraryCore/Package.swift, ViLM/LibraryCore/Sources/LibraryCore/*.swift, ViLM/LibraryCore/Tests/LibraryCoreTests/*.swift, ViLM/ViLM/*.swift, plans/*.md, docs/standards/standards.md.
 - 📄 ViLM — iOS Performance & Battery Audit (Engineering Review) (Notion sub-page)
 - 📄 ViLM — Actor Metadata Enrichment Pipeline (External Tool Spec) (Notion sub-page)
+- 📄 ViLM — Issues 91 & 92 Defect Fixes (Engineering Review) (Notion sub-page)
+- 📄 ViLM — Actor Duplication & Scene Default (Engineering Review) (Notion sub-page)

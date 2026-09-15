@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingPhotoTopUp = false
+    @State private var isShowingMetadataHealth = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
     @State private var isShowingIdentityGaps = false
@@ -501,6 +502,32 @@ struct ContentView: View {
                     reloadUnionAssets()
                 }
             }
+            .sheet(isPresented: $isShowingMetadataHealth) {
+                if let url = selectedLibraryURL {
+                                        MetadataHealthDashboardView(
+                        libraryURL: url,
+                        duplicateView: AnyView(AliasSplitMergeView(libraryURL: url) {
+                            loadEntityProfiles(from: url)
+                            reloadUnionAssets()
+                        }),
+                        orphanView: AnyView(TagCleanupView(
+                            libraryURL: url,
+                            assets: assets,
+                            onRefresh: {
+                                reloadUnionAssets()
+                                loadEntityProfiles(from: url)
+                            }
+                        )),
+                        identityGapsView: AnyView(IdentityGapsView(libraryURL: url) {
+                            loadEntityProfiles(from: url)
+                        }),
+                        identityUpgradeView: AnyView(IdentityUpgradeView(libraryURL: url)),
+                        studioConflictsView: AnyView(StudioAuditView(libraryURL: url) {
+                            reloadUnionAssets()
+                        })
+                    )
+                }
+            }
             .sheet(isPresented: $isShowingAliasSplits) {
                 if let url = selectedLibraryURL {
                     AliasSplitMergeView(libraryURL: url) {
@@ -852,6 +879,7 @@ struct ContentView: View {
                 onAliasSplits: { isShowingAliasSplits = true },
                 onRefreshMatched: { isShowingVideoRefresh = true },
                 onIdentityGaps: { isShowingIdentityGaps = true },
+                onMetadataHealth: { isShowingMetadataHealth = true },
                 onIdentityUpgrade: { isShowingIdentityUpgrade = true },
                 onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                 onReadFilenames: { isShowingReadFilenames = true },

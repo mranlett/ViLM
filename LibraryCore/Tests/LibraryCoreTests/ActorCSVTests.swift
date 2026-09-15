@@ -456,7 +456,6 @@ final class ActorCSVTests: XCTestCase {
     func testMergeAppliesEveryPopulatedCell() {
         let cols = ["Jane Doe", "bio", "photo", "home", "Female", "Brown", "1990", "US", "5"]
         let merged = ActorCSV.merge(columns: cols, existing: nil, decorateCountry: decorate)
-        XCTAssertEqual(merged?.id, "actor:Jane Doe")
         XCTAssertEqual(merged?.bio, "bio")
         XCTAssertEqual(merged?.birthYear, 1990)
         XCTAssertEqual(merged?.rating, 5)

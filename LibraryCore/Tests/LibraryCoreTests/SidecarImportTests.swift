@@ -239,7 +239,7 @@ final class SidecarImportTests: XCTestCase {
         let imported = try XCTUnwrap(try store.fetchAllAssets().first)
         XCTAssertEqual(imported.episode, "Late Checkout")
         XCTAssertEqual(imported.studios, ["Example Pictures"])
-        XCTAssertNil(imported.contentKind, "still undeclared")
+        XCTAssertEqual(imported.contentKind, .scene, "defaults to scene")
 
         // 🚨 The second scan must not consult the document at all. Editing the
         // record and re-scanning is exactly how an operator would discover

@@ -22,6 +22,9 @@ struct SettingsView: View {
     var onAliasSplits: (() -> Void)?
     var onRefreshMatched: (() -> Void)?
     var onIdentityGaps: (() -> Void)?
+    
+    var onMetadataHealth: (() -> Void)?
+    
     /// The v28 identity upgrade gate. Read-only today.
     ///
     /// ⚠️ Declared beside `onIdentityGaps` deliberately — Swift requires
@@ -168,6 +171,9 @@ struct SettingsView: View {
                     header: Text("Fix Problems"),
                     footer: Text("Each finds records that are wrong rather than merely incomplete, shows them, and changes nothing until you say so. Studio repairs are reached from Studio Health, which knows which of them have anything to do.")
                 ) {
+                    toolButton("Metadata Health Dashboard", icon: "heart.text.square", action: onMetadataHealth)
+                        .disabled(session.isFederated)
+                        
                     toolButton("Repair Tag Spelling", icon: "textformat.abc", action: onTagCaseCleanup)
                     // ⚠️ One library only, like the other profile-mutating
                     // tools. Attached, the audit reads the MAIN library alone —
