@@ -34,7 +34,6 @@ struct AliasSplitMergeView: View {
     /// ids silently matched nothing. Before the re-key an id WAS `actor:Name`
     /// and this worked; afterwards it became a uid and the merge quietly
     /// stopped doing anything, while the dialog showed the uid to the operator.
-    @State private var pending: (losing: String, surviving: String)?
     /// Candidates the operator has explicitly set aside this session.
     @State private var dismissed: Set<String> = []
 
@@ -67,8 +66,11 @@ struct AliasSplitMergeView: View {
     @State private var assetsById: [UUID: Asset] = [:]
 
     /// The video whose stills are open, and the profile whose gallery is.
+    @State private var pending: (losingId: String, losingName: String, survivingId: String, survivingName: String)?
     @State private var enlargedVideo: Asset?
     @State private var enlargedPhotoId: String?
+
+    // 🚨 A set of IDs, not names. Names collide (which is the very reason
 
     private var visible: [AliasSplitCandidate] {
         candidates.filter { !dismissed.contains($0.id) }
@@ -102,14 +104,14 @@ struct AliasSplitMergeView: View {
                     Button("OK", role: .cancel) { }
                 } message: { Text(errorMessage ?? "") }
                 .confirmationDialog(
-                    pending.map { "Merge \($0.losing) into \($0.surviving)?" } ?? "",
+                    pending.map { "Merge \($0.losingName) into \($0.survivingName)?" } ?? "",
                     isPresented: Binding(get: { pending != nil },
                                          set: { if !$0 { pending = nil } }),
                     titleVisibility: .visible
                 ) {
                     if let pending {
                         Button("Merge", role: .destructive) {
-                            Task { await merge(losing: pending.losing, surviving: pending.surviving) }
+                            Task { await merge(losingId: pending.losingId, survivingId: pending.survivingId) }
                         }
                     }
                     Button("Cancel", role: .cancel) { pending = nil }
@@ -197,8 +199,10 @@ struct AliasSplitMergeView: View {
 
                 HStack {
                     Button("Keep \(claimant.displayName)") {
-                        pending = (losing: candidate.alias.displayName,
-                                   surviving: claimant.displayName)
+                        pending = (losingId: candidate.alias.id,
+                                   losingName: candidate.alias.displayName,
+                                   survivingId: claimant.id,
+                                   survivingName: claimant.displayName)
                     }
                     .disabled(isMerging)
                     Spacer()
@@ -206,8 +210,10 @@ struct AliasSplitMergeView: View {
                     // usually the fuller record, but not always — the operator
                     // may have enriched the other one by hand.
                     Button("Keep \(candidate.alias.displayName)") {
-                        pending = (losing: claimant.displayName,
-                                   surviving: candidate.alias.displayName)
+                        pending = (losingId: claimant.id,
+                                   losingName: claimant.displayName,
+                                   survivingId: candidate.alias.id,
+                                   survivingName: candidate.alias.displayName)
                     }
                     .disabled(isMerging)
                 }
@@ -439,12 +445,12 @@ struct AliasSplitMergeView: View {
     /// halves of it shipped broken inside this view: it passed profile ids to
     /// a function that matches tag strings, and then discarded the result, so
     /// a rename that matched nothing counted as a merge.
-    private func merge(losing: String, surviving: String) async {
+    private func merge(losingId: String, survivingId: String) async {
         pending = nil
         isMerging = true
         let url = libraryURL
         let outcome = await Task.detached(priority: .utility) {
-            AliasMerge.perform(losing: losing, surviving: surviving, in: url)
+            AliasMerge.perform(losingId: losingId, survivingId: survivingId, in: url)
         }.value
 
         if let message = outcome.message {

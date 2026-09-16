@@ -3,7 +3,7 @@
 
 ---
 spec: "iOS Performance & Battery Optimization"
-status: In Review
+status: Implemented
 kind: Epic
 priority: P1
 notion: https://app.notion.com/p/iOS-Performance-Battery-Optimization-3afadccaf42881f7bd59f1bee7f3a917
@@ -245,3 +245,17 @@ Of R6's six items: **#1 (F4 re-aimed) and #3 (F7) are closed as disproven**; F3 
 R2's recommended first step was: *"scroll one screenful repeatedly and watch Total Bytes; if it climbs on already-decoded content, the cache is missing on its own entries."* **No record of that probe being run has been found.** It matters independently of F8: with live heap at 28.59 MB against a 288 MB ceiling, the cache is nowhere near full, so if it is also missing on its own entries there is a second defect that a cheaper decode would mask rather than fix.
 ## Evidence
 Verified 2026-08-01 against `~/Development/ViLM/ViLM` at commit `34ba4a0`. Source of findings: the Auditor's engineering review, linked above. Verification commands and full inventories are reproducible by grep over the paths cited in each finding.
+---
+# ✅ CLOSED 2026-09-15 — Human Operator: the main issue is resolved
+**Status set to Implemented.** Final disposition of the six original findings plus the one this spec's own measurement added:
+| Finding | Disposition |
+| --- | --- |
+| F1 · unthrottled decode | ✅ Shipped |
+| F2 · `.userInitiated` QoS sites | ✅ Shipped |
+| F3 · per-item fingerprint save | ✅ Closed by-design (R3) — resume granularity matters more than batching on this path |
+| F4 · uncapped bitmap caches | ❌ Closed — premise disproven twice by on-device measurement (R7); the actor-gallery cost was never the cache |
+| F5 · file attributes re-read | ✅ Shipped (schema-backed metadata, D4 Stage A) |
+| F6 · AVFoundation header re-parse | ✅ Shipped (schema-backed metadata, D4 Stage B) |
+| F7 · SwiftUI update churn | ❌ Closed — real cause named and folded into F8 (R8) |
+| F8 · profile photos decoded at full size per cell | ⚠️ **Not verified**, tracked independently — code complete on `feat/profile-thumbnail-derivatives` (issue #84, PR #85), never confirmed against the 19.47–20.68 GiB churn baseline because the Instruments capture was never taken |
+This specification is not blocking F8 — it has its own GitHub tracking and can be picked up or dropped on its own merits without reopening this epic. Closing this spec reflects the operator's call that the epic's main concern is resolved, not that every measurement was completed. A future reader who wants to finish F8 should start from R7–R9 above rather than from the original audit, which R7 and R8 each disproved a lever from.

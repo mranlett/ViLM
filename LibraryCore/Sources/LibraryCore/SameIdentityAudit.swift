@@ -107,7 +107,8 @@ public enum SameIdentityAudit {
                     return $0.id < $1.id
                 }
 
-            return SameIdentityFinding(sourceId: sourceId, members: ranked)
+            let paired = Array(ranked.prefix(2))
+            return SameIdentityFinding(sourceId: sourceId, members: paired)
         }
         // Unambiguous groups first: they can be cleared in one tap, where a
         // pair of named profiles needs the operator to choose a spelling.

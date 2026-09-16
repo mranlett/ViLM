@@ -45,7 +45,14 @@ public struct TagNormalizer {
     /// whitespace is dropped. Hyphens are word boundaries and survive, so
     /// "spider-man" becomes "Spider-Man" and "x--men" stays "X--Men".
     public static func titleCased(_ value: String) -> String {
-        value
+        // If the phrase contains any uppercase letters, the writer deliberately
+        // styled it. Honour exactly what they typed.
+        if value.contains(where: { $0.isUppercase }) {
+            return collapsingWhitespace(value)
+        }
+
+        // If completely unstyled, apply title case to every word.
+        return value
             .split(whereSeparator: { $0.isWhitespace })
             .map { word in
                 // Empty segments are preserved (omittingEmptySubsequences:

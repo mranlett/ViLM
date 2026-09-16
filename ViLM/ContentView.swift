@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingPhotoTopUp = false
+    @State private var isShowingMetadataHealth = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
     @State private var isShowingIdentityGaps = false
@@ -501,6 +502,11 @@ struct ContentView: View {
                     reloadUnionAssets()
                 }
             }
+            .sheet(isPresented: $isShowingMetadataHealth) {
+                if let url = selectedLibraryURL {
+                    metadataHealthSheet(for: url)
+                }
+            }
             .sheet(isPresented: $isShowingAliasSplits) {
                 if let url = selectedLibraryURL {
                     AliasSplitMergeView(libraryURL: url) {
@@ -554,6 +560,58 @@ struct ContentView: View {
                 }
             }
 #endif
+    }
+
+    // Pulled out of `body`'s modifier chain entirely, not just internally
+    // cleaned up: `body` chains ~50 modifiers (36 of them `.sheet`), and the
+    // type checker solves that whole chain as one expression. Even with this
+    // block's own five AnyView constructions broken into typed locals, its
+    // remaining complexity left in-line was still enough to make that one
+    // expression pathologically slow. As its own function, the checker solves
+    // it independently and `body` gains back a plain function-call reference.
+    @ViewBuilder
+    private func metadataHealthSheet(for url: URL) -> some View {
+        let duplicateView: AnyView = AnyView(AliasSplitMergeView(libraryURL: url) {
+            loadEntityProfiles(from: url)
+            reloadUnionAssets()
+        })
+        let orphanView: AnyView = AnyView(TagCleanupView(
+            libraryURL: url,
+            assets: assets,
+            onRefresh: {
+                reloadUnionAssets()
+                loadEntityProfiles(from: url)
+            }
+        ))
+        // `onRefreshVideos:` labeled explicitly — a bare trailing closure
+        // here binds to the LAST closure parameter (`onExplore`, for row-tap
+        // navigation), not this one, per the correctly-labeled call at the
+        // other IdentityGapView call site in rootNavigationView's sheets.
+        let identityGapsView: AnyView = AnyView(IdentityGapView(libraryURL: url, onRefreshVideos: {
+            loadEntityProfiles(from: url)
+        }))
+        let identityUpgradeView: AnyView = AnyView(IdentityUpgradeView(libraryURL: url))
+        // `onFix: (StudioFix) -> Void` is non-optional and takes the
+        // requested fix — unlike this dashboard's other four callbacks, it
+        // isn't a "work finished" signal. This pre-existing call ignored that
+        // argument entirely (a compile error once the type-checker hang that
+        // was masking it got fixed elsewhere); `_ in` makes the mismatch
+        // explicit rather than actually routing to a fix destination the way
+        // `studioAuditDidRequestFix(_:)` does for the other StudioAuditView
+        // call site above. Worth revisiting if tapping a fix from inside the
+        // Metadata Health Dashboard should navigate like it does there.
+        let studioConflictsView: AnyView = AnyView(StudioAuditView(libraryURL: url) { _ in
+            reloadUnionAssets()
+        })
+
+        MetadataHealthDashboardView(
+            libraryURL: url,
+            duplicateView: duplicateView,
+            orphanView: orphanView,
+            identityGapsView: identityGapsView,
+            identityUpgradeView: identityUpgradeView,
+            studioConflictsView: studioConflictsView
+        )
     }
 
     // MARK: - Navigation Layout
@@ -852,6 +910,7 @@ struct ContentView: View {
                 onAliasSplits: { isShowingAliasSplits = true },
                 onRefreshMatched: { isShowingVideoRefresh = true },
                 onIdentityGaps: { isShowingIdentityGaps = true },
+                onMetadataHealth: { isShowingMetadataHealth = true },
                 onIdentityUpgrade: { isShowingIdentityUpgrade = true },
                 onTagCaseCleanup: { isShowingTagCaseCleanup = true },
                 onReadFilenames: { isShowingReadFilenames = true },

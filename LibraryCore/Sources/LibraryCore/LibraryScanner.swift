@@ -81,7 +81,8 @@ public class LibraryScanner {
                 
                 var asset = Asset(
                     relativePath: relativePath,
-                    fileName: fileURL.lastPathComponent
+                    fileName: fileURL.lastPathComponent,
+                    contentKind: .scene
                 )
 
                 // 🚨 Only for a file with no record. A known file keeps what
