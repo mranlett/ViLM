@@ -12,7 +12,7 @@
 // on-disk layout is a MACHINE-FACING CONTRACT, not a browsing surface —
 // discovery and filtering are the app's job.
 //
-//   Film      Title - Cast (2019)/Title - Cast (2019).mkv        Kodi/Plex + D11b
+//   Film      Title - Studio - Cast (2019)/Title - Studio - Cast (2019).mkv Kodi/Plex + D11b
 //   Episodic  Series/Season 01/Series - S01E02 - Cast - Title.mkv Kodi/Plex + D11b
 //   Personal  <personal>/Event or Description - Cast (2019).mkv   Kodi movie shape + D11b
 //   Scene     Studio/Studio - Performers - Title - YYYY-MM-DD.ext ViLM-defined
@@ -149,34 +149,48 @@ public enum ContentNaming {
 
     // MARK: - The grammars
 
-    /// `Title - Cast (2019)/Title - Cast (2019).mkv`
+    /// `Title - Studio - Cast (2019)/Title - Studio - Cast (2019).mkv`
     private static func film(_ asset: Asset, _ c: NamingContext, _ ext: String) -> NamingOutcome {
         guard let rawTitle = usableTitle(asset) else { return .skipped(.noUsableName) }
         if isLegacyTitleWithPerformers(title: rawTitle, asset: asset, context: c) {
             return .skipped(.legacyTitleContainsPerformers)
         }
-        // D11b: fold the title's own " - " before adding the cast's, or the
-        // two are indistinguishable to `recoverFilmOrPersonalName` — the same
-        // reason `scene()` folds `recordedTitle` (D3's separator collapse).
+        // D11b: fold the title's own " - " before adding the studio's and the
+        // cast's, or the fields are indistinguishable to
+        // `recoverFilmOrPersonalName` — the same reason `scene()` folds
+        // `recordedTitle` (D3's separator collapse).
         let title = foldingSeparator(rawTitle)
 
         let cast = orderedPerformers(c.performers)
-        let castPart = cast.isEmpty ? nil : cast.joined(separator: ", ")
+        if let tooLong = cast.first(where: { $0.utf8.count > PathComponentName.maximumBytes }) {
+            return .skipped(.performerNameTooLong(tooLong))
+        }
 
-        let stem = truncateFilmOrPersonal(title: title, cast: castPart, year: year(asset))
+        // D11b (2026-09-15, field-set decision): film gains a studio segment
+        // — resolved the same way `scene()` resolves it, from the matched
+        // lexicon disposition (N1), never from the raw legacy `studio:` tag
+        // string. An unmatched or unprocessed studio has no name to write,
+        // so the segment is simply absent — it is never invented.
+        let studioName: String? = {
+            if case let .filed(name) = c.studio { return name.isEmpty ? nil : foldingSeparator(name) }
+            return nil
+        }()
+
+        let stem = truncateFilmOrPersonal(title: title, studio: studioName, cast: cast, year: year(asset))
         guard let component = PathComponentName.sanitised(stem) else {
             return .skipped(.noUsableName)
         }
         return .path("\(component)/\(component)\(dot(ext))")
     }
 
-    /// `<personal>/Event or Description (2019).mkv`
+    /// `<personal>/Event or Description - Cast (2019).mkv`
     ///
-    /// 🚨 Never under a studio, whatever the record says. A personal video may
-    /// carry a studio — mis-tagged, inherited from a filename, or matched in
-    /// error — and none of that may file it beside commercial content. Kind is
-    /// evaluated before placement, which is why this branch never reads
-    /// `context.studio` at all.
+    /// 🚨 Never under a studio, whatever the record says, and never CARRIES a
+    /// studio segment either — a personal video may carry one, mis-tagged,
+    /// inherited from a filename, or matched in error, and none of that may
+    /// file it beside commercial content or claim it as identity in the
+    /// name. Kind is evaluated before placement, which is why this branch
+    /// never reads `context.studio` at all — unlike `film()`, which does.
     private static func personal(_ asset: Asset, _ c: NamingContext, _ ext: String) -> NamingOutcome {
         guard let rawTitle = usableTitle(asset) else { return .skipped(.noUsableName) }
         if isLegacyTitleWithPerformers(title: rawTitle, asset: asset, context: c) {
@@ -186,9 +200,11 @@ public enum ContentNaming {
         let title = foldingSeparator(rawTitle)
 
         let cast = orderedPerformers(c.performers)
-        let castPart = cast.isEmpty ? nil : cast.joined(separator: ", ")
+        if let tooLong = cast.first(where: { $0.utf8.count > PathComponentName.maximumBytes }) {
+            return .skipped(.performerNameTooLong(tooLong))
+        }
 
-        let stem = truncateFilmOrPersonal(title: title, cast: castPart, year: year(asset))
+        let stem = truncateFilmOrPersonal(title: title, studio: nil, cast: cast, year: year(asset))
         guard let folder = PathComponentName.sanitised(c.personalFolder),
               let component = PathComponentName.sanitised(stem) else {
             return .skipped(.noUsableName)
@@ -245,36 +261,48 @@ public enum ContentNaming {
         let episodeTitle = (asset.episode?.trimmed).map(foldingSeparator)
 
         let cast = orderedPerformers(c.performers)
-        let castPart = cast.isEmpty ? nil : cast.joined(separator: ", ")
+        if let tooLong = cast.first(where: { $0.utf8.count > PathComponentName.maximumBytes }) {
+            return .skipped(.performerNameTooLong(tooLong))
+        }
+        let castPart = { (names: [String]) -> String? in
+            names.isEmpty ? nil : names.joined(separator: ", ")
+        }
+        // ⭐ D11b: at least one credited performer survives if any were
+        // credited at all — cast is no longer fully droppable in one step.
+        let minCast = cast.isEmpty ? 0 : 1
 
         // D11b adds cast as a fifth, droppable segment. Series and the S/E
         // marker are structural (never dropped — see the guard clauses
         // above); cast and title are not. Drop order is title first, then
-        // cast: the title is prose and the weaker identifier of the two once
-        // series + S/E already pin the episode, so it goes first. This order
-        // is also what makes `recoverEpisodicName` unambiguous when only one
-        // of the two survives — see its doc comment.
-        var stem = join([foldedSeries, marker, castPart, episodeTitle], with: " - ")
+        // cast from the end down to the guaranteed minimum: the title is
+        // prose and the weaker identifier of the two once series + S/E
+        // already pin the episode, so it goes first. This order is also
+        // what makes `recoverEpisodicName` unambiguous when only one of the
+        // two survives — see its doc comment.
+        var stem = join([foldedSeries, marker, castPart(cast), episodeTitle], with: " - ")
 
         guard let seriesFolder = PathComponentName.sanitised(series),
               let seasonFolder = PathComponentName.sanitised(String(format: "Season %02d", season)) else {
             return .skipped(.noUsableName)
         }
-        
+
         var component = PathComponentName.sanitised(stem)
-        
+
         if component == nil || component!.utf8.count >= PathComponentName.maximumBytes {
             // Drop episode title
-            stem = join([foldedSeries, marker, castPart], with: " - ")
+            stem = join([foldedSeries, marker, castPart(cast)], with: " - ")
             component = PathComponentName.sanitised(stem)
         }
 
-        if component == nil || component!.utf8.count >= PathComponentName.maximumBytes {
-            // Drop cast as well
-            stem = join([foldedSeries, marker], with: " - ")
+        // Drop performers from the end, down to the guaranteed minimum
+        var remaining = cast
+        while (component == nil || component!.utf8.count >= PathComponentName.maximumBytes)
+                && remaining.count > minCast {
+            remaining.removeLast()
+            stem = join([foldedSeries, marker, castPart(remaining)], with: " - ")
             component = PathComponentName.sanitised(stem)
         }
-        
+
         guard let finalComponent = component else {
             return .skipped(.noUsableName)
         }
@@ -393,6 +421,11 @@ public enum ContentNaming {
         let castPart = { (names: [String]) -> String? in
             names.isEmpty ? nil : names.joined(separator: ", ")
         }
+        // ⭐ D11b: cast is canonical, filename-carried metadata now, so at
+        // least one credited performer survives truncation if any were
+        // credited at all — it is no longer fully droppable the way it was
+        // before D11b.
+        let minCast = cast.isEmpty ? 0 : 1
 
         // 1 · without the studio
         var candidate = join([castPart(cast), title, date], with: " - ")
@@ -410,7 +443,8 @@ public enum ContentNaming {
         // word, or nothing if there was never a title.
         let shortestTitle = words.isEmpty ? nil : words.joined(separator: " ")
 
-        // 3 · performers from the end, whole names only — CARRYING the title.
+        // 3 · performers from the end, down to the guaranteed minimum,
+        // whole names only — CARRYING the title.
         //
         // 🚨 This step used to join cast and date alone, silently dropping the
         // title it had just spent step 2 preserving. A scene with three long
@@ -420,32 +454,32 @@ public enum ContentNaming {
         // cast. Found by the auditor, and it is the same shape as adding a case
         // to an enum and not revisiting every branch that reads it.
         var remaining = cast
-        while !remaining.isEmpty {
+        while remaining.count > minCast {
             remaining.removeLast()
             candidate = join([castPart(remaining), shortestTitle, date], with: " - ")
             if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         }
 
-        // Nothing but the title and the date left. The date is never dropped;
-        // the title goes only if even that will not fit.
-        candidate = join([shortestTitle, date], with: " - ")
+        // 4a · title + the guaranteed cast + date, one more time — only
+        // reachable when cast was always empty (minCast == 0), since a
+        // non-empty cast's final combination was already tried as step 3's
+        // last iteration above.
+        candidate = join([castPart(remaining), shortestTitle, date], with: " - ")
         if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
             return candidate
         }
-        // ⚠️ A title that cannot be shortened below the ceiling — one very long
-        // word — made step 3 drop the entire cast for no benefit, and the name
-        // came out as a bare date. The title is preferred over the cast, but
-        // not at the cost of BOTH: if it cannot fit at all, drop it and keep
-        // the performers, who at least identify the scene.
-        candidate = join([castPart(cast), date], with: " - ")
+        // 4b · drop the title too, keeping the guaranteed cast (if any) and
+        // the date, which is never dropped.
+        candidate = join([castPart(remaining), date], with: " - ")
         if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
             return candidate
         }
-        // ⚠️ Nothing structured left. A scene with no studio, cast, title or
-        // date is named from its filename stem (decision 6), and rebuilding
-        // from the empty parts produces "" — which fits the ceiling trivially
-        // and then sanitises to nothing, reporting a perfectly nameable file as
-        // having no usable name. Truncate what we were given instead.
+        // ⚠️ Nothing structured left that fits, even the guaranteed minimum.
+        // `performerNameTooLong` in `scene()` already rejects any SINGLE
+        // oversized name before this runs, so reaching here means combined
+        // overflow, not one name alone. A scene with nothing usable is named
+        // from its filename stem (decision 6); this is the same last resort
+        // for the truly-impossible case.
         return date ?? PathComponentName.truncated(stem)
     }
 
@@ -469,43 +503,71 @@ public enum ContentNaming {
         return false
     }
 
-    /// Truncates a film or personal title at a word boundary, while guaranteeing the year is never dropped.
-    private static func truncateFilmOrPersonal(title: String, cast: String?, year: String?) -> String {
+    /// Truncates a film or personal name, least-identifying first:
+    ///
+    /// 1. the **studio** (film only — `nil` for personal, dropped first as
+    ///    the newest and least essential field)
+    /// 2. the **title**, shortened at a word boundary
+    /// 3. **performers** from the end, down to a guaranteed minimum of one
+    ///    — see the note below
+    /// 4. the **year** is never dropped
+    ///
+    /// ⭐ D11b: cast is canonical, filename-carried metadata now (same as the
+    /// studio), so unlike the pre-D11b version of this function it no longer
+    /// drops the whole cast to nothing — at least one credited performer
+    /// survives if any were credited at all. `performerNameTooLong`, checked
+    /// by the callers before this runs, keeps the impossible case (even one
+    /// guaranteed name plus the year won't fit) effectively unreachable.
+    private static func truncateFilmOrPersonal(title: String, studio: String?,
+                                                cast: [String], year: String?) -> String {
         let yearPart = year.map { "(\($0))" }
-        var candidate = join([join([title, cast], with: " - "), yearPart], with: " ")
+        let castPart = { (names: [String]) -> String? in
+            names.isEmpty ? nil : names.joined(separator: ", ")
+        }
+        let minCast = cast.isEmpty ? 0 : 1
+
+        // 1 · everything
+        var candidate = join([join([title, studio, castPart(cast)], with: " - "), yearPart], with: " ")
         if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
-        
+
+        // 2 · without the studio
+        candidate = join([join([title, castPart(cast)], with: " - "), yearPart], with: " ")
+        if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
+
+        // 3 · shorten the title at a word boundary
         var words = title.split(separator: " ").map(String.init)
         while words.count > 1 {
             words.removeLast()
-            candidate = join([join([words.joined(separator: " "), cast], with: " - "), yearPart], with: " ")
+            candidate = join([join([words.joined(separator: " "), castPart(cast)], with: " - "), yearPart],
+                             with: " ")
             if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
         }
-        
         let shortestTitle = words.isEmpty ? nil : words.joined(separator: " ")
-        candidate = join([join([shortestTitle, cast], with: " - "), yearPart], with: " ")
+
+        // 4 · performers from the end, down to the guaranteed minimum
+        var remaining = cast
+        while remaining.count > minCast {
+            remaining.removeLast()
+            candidate = join([join([shortestTitle, castPart(remaining)], with: " - "), yearPart], with: " ")
+            if candidate.utf8.count <= PathComponentName.maximumBytes { return candidate }
+        }
+
+        // 5 · drop the title too, keeping the guaranteed cast (if any) and the year
+        candidate = join([castPart(remaining), yearPart], with: " ")
         if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
             return candidate
         }
-        
-        // Try dropping cast if it still doesn't fit
-        if cast != nil {
-            candidate = join([shortestTitle, yearPart], with: " ")
-            if candidate.utf8.count <= PathComponentName.maximumBytes, !candidate.isEmpty {
-                return candidate
-            }
-        }
-        
-        // If even a single word + year doesn't fit (without cast), we must character-truncate the word,
-        // because we can never drop the year.
-        if let shortestTitle = shortestTitle {
+
+        // 6 · last resort, effectively unreachable given the per-name length
+        // guard in film()/personal(): character-truncate whatever we have
+        // rather than split a performer's name, which is never truncated
+        // mid-name (the same rule `scene()`'s truncation follows).
+        if let shortestTitle = shortestTitle, minCast == 0 {
             let budget = PathComponentName.maximumBytes - (yearPart.map { $0.utf8.count + 1 } ?? 0)
             let truncatedTitle = PathComponentName.truncated(shortestTitle, toBytes: budget)
             return join([truncatedTitle, yearPart], with: " ")
         }
-        
-        // No title at all, just return the year part if we have it
-        return join([title, yearPart], with: " ")
+        return PathComponentName.truncated(candidate.isEmpty ? title : candidate)
     }
 
     // MARK: - Recovery (D11b) — reading canonical metadata back out of a
@@ -520,19 +582,44 @@ public enum ContentNaming {
     /// but the string itself — so it parses SYNTACTICALLY, the same way the
     /// writer builds the string, never by matching against known names.
     ///
-    /// ⚠️ Only recovers what the writer actually persisted. Cast dropped by
-    /// truncation is gone from the string and comes back empty here — that
-    /// is the truthful answer, not a bug in this function.
+    /// ⚠️ Only recovers what the writer actually persisted. A field dropped
+    /// by truncation is gone from the string and comes back empty/nil here —
+    /// that is the truthful answer, not a bug in this function.
+    ///
+    /// 🚨 D11b's field-set decision (2026-09-15) gave film a second optional,
+    /// droppable segment — studio, alongside cast. That creates the same
+    /// ambiguity `recoverEpisodicName` already has: when exactly ONE optional
+    /// segment survives truncation, it could be the studio or the cast, and
+    /// the write side's drop order (studio first — see
+    /// `truncateFilmOrPersonal`) does not by itself say which, because a
+    /// film with a dropped studio and a guaranteed one-performer cast
+    /// produces the same shape as a film with a studio and no credited
+    /// performers. `personal()` never writes a studio, so this ambiguity
+    /// never actually arises for a personal-produced name, but this function
+    /// serves both and cannot tell which grammar wrote a given string.
     public struct RecoveredFilmOrPersonalName: Equatable, Sendable {
         public let title: String
+        public let studio: String?
         public let cast: [String]
         public let year: String?
+        /// Set only when exactly one optional segment survived and neither
+        /// `knownStudioNames` nor `knownPerformerNames` could resolve it.
+        public let ambiguousSegment: String?
     }
 
-    /// - Parameter component: the extensionless stem `film()`/`personal()`
-    ///   produced — the folder name, or the filename with its extension
-    ///   removed; both are identical by construction.
-    public static func recoverFilmOrPersonalName(_ component: String) -> RecoveredFilmOrPersonalName {
+    /// - Parameters:
+    ///   - component: the extensionless stem `film()`/`personal()` produced
+    ///     — the folder name, or the filename with its extension removed;
+    ///     both are identical by construction.
+    ///   - knownStudioNames: the library's current studio lexicon, used only
+    ///     to disambiguate a single surviving segment. Leave empty for a
+    ///     true blind parse — e.g. recovering a library from files alone,
+    ///     D11b's actual worst case — and the segment comes back in
+    ///     `ambiguousSegment` instead of being guessed into the wrong field.
+    ///   - knownPerformerNames: same, for the performer roster.
+    public static func recoverFilmOrPersonalName(_ component: String,
+                                                  knownStudioNames: [String] = [],
+                                                  knownPerformerNames: [String] = []) -> RecoveredFilmOrPersonalName {
         var remainder = component
         var year: String?
 
@@ -543,16 +630,46 @@ public enum ContentNaming {
             remainder.removeSubrange(match)
         }
 
-        // What remains is "{title}" or "{title} - {cast}" — exactly one
-        // field separator can appear, because `foldingSeparator` folded every
-        // OTHER " - " the title itself contained before this name was ever
-        // written (see `film(_:_:_:)`).
+        // What remains is "{title}", "{title} - {studio-or-cast}", or
+        // "{title} - {studio} - {cast}" — never more fields than that,
+        // because `foldingSeparator` folded every OTHER " - " the title (and
+        // the studio name) contained before this name was ever written (see
+        // `film(_:_:_:)`).
         let parts = remainder.components(separatedBy: " - ")
         let title = parts[0]
-        let cast = parts.count > 1
-            ? parts[1].components(separatedBy: ", ").map { $0.trimmed }.filter { !$0.isEmpty }
-            : []
-        return RecoveredFilmOrPersonalName(title: title, cast: cast, year: year)
+        let trailing = Array(parts.dropFirst())
+
+        switch trailing.count {
+        case 0:
+            return RecoveredFilmOrPersonalName(title: title, studio: nil, cast: [], year: year,
+                                                ambiguousSegment: nil)
+        case 1:
+            let segment = trailing[0]
+            if !knownStudioNames.isEmpty,
+               knownStudioNames.contains(where: { $0.caseInsensitiveCompare(segment) == .orderedSame }) {
+                return RecoveredFilmOrPersonalName(title: title, studio: segment, cast: [], year: year,
+                                                    ambiguousSegment: nil)
+            }
+            let candidateNames = segment.components(separatedBy: ", ").map { $0.trimmed }
+            let looksLikeCast = !knownPerformerNames.isEmpty && candidateNames.allSatisfy { name in
+                knownPerformerNames.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+            }
+            if looksLikeCast {
+                return RecoveredFilmOrPersonalName(title: title, studio: nil, cast: candidateNames, year: year,
+                                                    ambiguousSegment: nil)
+            }
+            return RecoveredFilmOrPersonalName(title: title, studio: nil, cast: [], year: year,
+                                                ambiguousSegment: segment)
+        default:
+            // Fixed write-side order: studio is dropped BEFORE cast (see
+            // `truncateFilmOrPersonal`), so two segments surviving means
+            // nothing was dropped at all — both are present in full, written
+            // "{title} - {studio} - {cast}".
+            let studio = trailing[0]
+            let cast = trailing[1].components(separatedBy: ", ").map { $0.trimmed }.filter { !$0.isEmpty }
+            return RecoveredFilmOrPersonalName(title: title, studio: studio, cast: cast, year: year,
+                                                ambiguousSegment: nil)
+        }
     }
 
     /// What `episodic()` wrote, read back out — the inverse of its

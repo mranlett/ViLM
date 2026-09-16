@@ -447,21 +447,98 @@ final class ContentNamingTests: XCTestCase {
                        "Before – After - Alice Example (2020)/Before – After - Alice Example (2020).mkv")
     }
 
+    // MARK: - D11b (field set) — film gains a studio segment
+
+    func testAFilmWithAMatchedStudioIncludesItBetweenTitleAndCast() {
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "The Long Weekend",
+                       released: "2019-04-12"),
+            in: context(.filed("Example Pictures"), [("Alice Example", "Female")]))
+        XCTAssertEqual(
+            path(outcome),
+            "The Long Weekend - Example Pictures - Alice Example (2019)/"
+                + "The Long Weekend - Example Pictures - Alice Example (2019).mkv")
+    }
+
+    /// An unmatched studio has no name to write — `.unfiled` and
+    /// `.unprocessed` both omit the segment rather than inventing one.
+    func testAFilmWithNoMatchedStudioOmitsTheSegment() {
+        for placement: StudioPlacement in [.unfiled, .unprocessed] {
+            let outcome = ContentNaming.path(
+                for: asset(kind: .film, file: "x.mkv", episode: "The Long Weekend",
+                           released: "2019-04-12"),
+                in: context(placement, [("Alice Example", "Female")]))
+            XCTAssertEqual(
+                path(outcome),
+                "The Long Weekend - Alice Example (2019)/The Long Weekend - Alice Example (2019).mkv",
+                "placement \(placement) should not add a studio segment")
+        }
+    }
+
     // MARK: - D11b round trip — recovering what the grammars wrote
 
+    /// A single surviving segment is ambiguous once film has two optional
+    /// fields (studio, cast) — this string needs a known roster to resolve,
+    /// which `testAFilmWithAMatchedStudioIncludesItBetweenTitleAndCast`'s
+    /// generated form (two segments) does not.
     func testRecoveringAFilmNameReturnsTitleCastAndYear() {
         let recovered = ContentNaming.recoverFilmOrPersonalName(
-            "The Long Weekend - Alice Example, Bea Example (2019)")
+            "The Long Weekend - Alice Example, Bea Example (2019)",
+            knownPerformerNames: ["Alice Example", "Bea Example"])
         XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertNil(recovered.studio)
         XCTAssertEqual(recovered.cast, ["Alice Example", "Bea Example"])
         XCTAssertEqual(recovered.year, "2019")
+        XCTAssertNil(recovered.ambiguousSegment)
     }
 
     func testRecoveringAFilmNameWithNoCastReturnsAnEmptyCast() {
         let recovered = ContentNaming.recoverFilmOrPersonalName("The Long Weekend (2019)")
         XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertNil(recovered.studio)
         XCTAssertEqual(recovered.cast, [])
         XCTAssertEqual(recovered.year, "2019")
+        XCTAssertNil(recovered.ambiguousSegment)
+    }
+
+    func testRecoveringAFilmNameWithStudioAndCastRecoversBoth() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            "The Long Weekend - Example Pictures - Alice Example, Bea Example (2019)")
+        XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertEqual(recovered.studio, "Example Pictures")
+        XCTAssertEqual(recovered.cast, ["Alice Example", "Bea Example"])
+        XCTAssertEqual(recovered.year, "2019")
+        XCTAssertNil(recovered.ambiguousSegment)
+    }
+
+    /// 🚨 The one genuine ambiguity D11b's film grammar now has, the same
+    /// shape as episodic's: a single surviving optional segment could be the
+    /// studio or the cast, and nothing in the string itself says which.
+    func testRecoveringAFilmNameWithOneSurvivingSegmentIsAmbiguousWithoutKnownNames() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            "The Long Weekend - Example Pictures (2019)")
+        XCTAssertEqual(recovered.title, "The Long Weekend")
+        XCTAssertNil(recovered.studio)
+        XCTAssertTrue(recovered.cast.isEmpty)
+        XCTAssertEqual(recovered.ambiguousSegment, "Example Pictures")
+    }
+
+    func testRecoveringAFilmNameWithOneSurvivingSegmentResolvesAgainstAKnownStudioRoster() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            "The Long Weekend - Example Pictures (2019)",
+            knownStudioNames: ["Example Pictures"])
+        XCTAssertEqual(recovered.studio, "Example Pictures")
+        XCTAssertTrue(recovered.cast.isEmpty)
+        XCTAssertNil(recovered.ambiguousSegment)
+    }
+
+    func testRecoveringAFilmNameWithOneSurvivingSegmentResolvesAgainstAKnownPerformerRoster() {
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            "The Long Weekend - Alice Example (2019)",
+            knownPerformerNames: ["Alice Example"])
+        XCTAssertNil(recovered.studio)
+        XCTAssertEqual(recovered.cast, ["Alice Example"])
+        XCTAssertNil(recovered.ambiguousSegment)
     }
 
     /// The write side folds a title's own " - " to " – " precisely so this
@@ -473,14 +550,15 @@ final class ContentNamingTests: XCTestCase {
             for: asset(kind: .film, file: "x.mkv", episode: "Before - After", released: "2020-01-01"),
             in: context(.unprocessed, [("Alice Example", "Female")]))))
         let stem = String(generated.split(separator: "/").first!)
-        let recovered = ContentNaming.recoverFilmOrPersonalName(stem)
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            stem, knownPerformerNames: ["Alice Example"])
         XCTAssertEqual(recovered.title, "Before – After")
         XCTAssertEqual(recovered.cast, ["Alice Example"])
         XCTAssertEqual(recovered.year, "2020")
     }
 
-    /// `truncateFilmOrPersonal` drops the whole cast, never part of it, when
-    /// even a one-word title can't fit alongside it — recovery reports
+    /// `truncateFilmOrPersonal` drops performers from the end, but — per
+    /// D11b's guaranteed minimum — never all of them: recovery reports
     /// exactly what survived, not what was true before the ceiling was hit.
     func testRecoveringATruncatedFilmNameReturnsWhateverSurvivedTruncation() {
         let longName1 = String(repeating: "A", count: 130)
@@ -489,12 +567,44 @@ final class ContentNamingTests: XCTestCase {
             for: asset(kind: .film, file: "x.mkv", episode: "Weekend", released: "2019-01-01"),
             in: context(.unprocessed, [(longName1, "Female"), (longName2, "Female")]))
         let stem = String(try! XCTUnwrap(path(outcome)).split(separator: "/").first!)
-        XCTAssertEqual(stem, "Weekend (2019)",
-                       "cast that cannot fit is dropped whole, keeping the title and year")
-        let recovered = ContentNaming.recoverFilmOrPersonalName(stem)
-        XCTAssertTrue(recovered.cast.isEmpty)
+        XCTAssertEqual(stem, "Weekend - \(longName1) (2019)",
+                       "one performer, dropped from the end, survives alongside the title and year")
+        let recovered = ContentNaming.recoverFilmOrPersonalName(
+            stem, knownPerformerNames: [longName1, longName2])
+        XCTAssertEqual(recovered.cast, [longName1])
         XCTAssertEqual(recovered.title, "Weekend")
         XCTAssertEqual(recovered.year, "2019")
+    }
+
+    /// ⭐ D11b: unlike pre-D11b, `truncateFilmOrPersonal` no longer drops the
+    /// whole cast to nothing once a one-word title still doesn't fit
+    /// alongside it — at least one credited performer survives.
+    func testAnOverlongFilmCastKeepsOnePerformerRatherThanDroppingAllOfThem() {
+        let longName1 = String(repeating: "A", count: 130)
+        let longName2 = String(repeating: "B", count: 130)
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: "Weekend", released: "2019-01-01"),
+            in: context(.unprocessed, [(longName1, "Female"), (longName2, "Female")]))
+        let stem = String(try! XCTUnwrap(path(outcome)).split(separator: "/").first!)
+        XCTAssertTrue(stem.contains(longName1), "at least one performer survives the truncation")
+        XCTAssertFalse(stem.contains(longName2), "the second, dropped from the end, does not")
+        XCTAssertTrue(stem.hasSuffix("(2019)"), "the year is never dropped")
+    }
+
+    /// Truncation drops the studio first — the newest, least essential field
+    /// — before touching the title or the cast.
+    func testAnOverlongFilmNameDropsTheStudioBeforeTheTitleOrCast() {
+        let longTitle = String(repeating: "Verylongword ", count: 15).trimmingCharacters(in: .whitespaces)
+        let outcome = ContentNaming.path(
+            for: asset(kind: .film, file: "x.mkv", episode: longTitle, released: "2019-04-12"),
+            in: context(.filed("A Very Long Studio Name Indeed Pictures"),
+                        [("Alice Example", "Female")]))
+        guard let name = path(outcome) else { return XCTFail("no path") }
+        let stem = (name as NSString).lastPathComponent
+        XCTAssertLessThanOrEqual(stem.utf8.count, PathComponentName.maximumBytes)
+        XCTAssertFalse(stem.contains("A Very Long Studio Name"), "the studio drops first")
+        XCTAssertTrue(stem.contains("Alice Example"), "the cast survives the studio drop")
+        XCTAssertTrue(stem.contains("(2019)"), "the year is never dropped")
     }
 
     func testRecoveringAnEpisodicNameWithCastAndTitleRecoversBoth() {
