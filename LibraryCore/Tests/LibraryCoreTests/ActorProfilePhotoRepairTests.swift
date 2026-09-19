@@ -131,4 +131,71 @@ final class ActorProfilePhotoRepairTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: profilesDir.appendingPathComponent(ProfileImageNaming.primaryFileName(for: "actor:a")).path))
     }
+
+    // MARK: - 🚨 The cost fix: existence, not hashes
+
+    /// The mapping this function used to get from `ActorPhotoScanner.measure`,
+    /// asserted directly now that it is expressed here: a gallery entry that
+    /// IS the `photoUrl` resolves to the primary file, which has already been
+    /// ruled absent — so it is never probed again under a hashed gallery name,
+    /// and a later gallery entry is what gets promoted.
+    func testAGalleryEntryEqualToThePhotoUrlIsNotProbedAsAGalleryFile() throws {
+        let primary = "https://example.com/a.jpg"
+        let other = "https://example.com/b.jpg"
+        // Only the SECOND entry has bytes. If the first were probed under its
+        // hashed gallery name it would still miss, so the discriminating fact
+        // is which paths get looked at — recorded below.
+        try write("b bytes", fileName: ProfileImageNaming.galleryFileName(for: "actor:a", token: other))
+        let p = profile(photoUrl: primary, gallery: [primary, other])
+
+        var probed: [String] = []
+        let work = ActorProfilePhotoRepair.worklist([p], profilesDir: profilesDir) { url in
+            probed.append(url.lastPathComponent)
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+
+        XCTAssertEqual(work.map(\.promote), [other])
+        XCTAssertFalse(
+            probed.contains(ProfileImageNaming.galleryFileName(for: "actor:a", token: primary)),
+            "the photoUrl token maps to the primary file and must not be probed twice")
+    }
+
+    /// ⚠️ An empty `photoUrl` equals no token, so the primary file is never
+    /// consulted — matching what `measure` did, where `isPrimary` was
+    /// `photoUrl == token` and an empty string matched nothing.
+    func testAnEmptyPhotoUrlNeverConsultsThePrimaryFile() throws {
+        let token = "https://example.com/g.jpg"
+        try write("g bytes", fileName: ProfileImageNaming.galleryFileName(for: "actor:a", token: token))
+        let p = profile(photoUrl: "", gallery: [token])
+
+        var probed: [String] = []
+        _ = ActorProfilePhotoRepair.worklist([p], profilesDir: profilesDir) { url in
+            probed.append(url.lastPathComponent)
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+
+        XCTAssertFalse(probed.contains(ProfileImageNaming.primaryFileName(for: "actor:a")))
+    }
+
+    /// ⭐ The performance claim, stated as a fact a test can hold: deciding
+    /// consults each candidate file AT MOST once and never reads its contents.
+    /// The previous implementation read every byte of every photo and hashed
+    /// it twice to answer this same question.
+    func testDecidingProbesEachFileAtMostOnce() throws {
+        let tokens = (0..<5).map { "https://example.com/\($0).jpg" }
+        for token in tokens.dropFirst(4) {
+            try write("bytes", fileName: ProfileImageNaming.galleryFileName(for: "actor:a", token: token))
+        }
+        let p = profile(photoUrl: "https://example.com/primary.jpg", gallery: tokens)
+
+        var probed: [String] = []
+        _ = ActorProfilePhotoRepair.worklist([p], profilesDir: profilesDir) { url in
+            probed.append(url.lastPathComponent)
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+
+        XCTAssertEqual(probed.count, Set(probed).count, "no file is looked at twice")
+        XCTAssertLessThanOrEqual(probed.count, tokens.count + 1, "primary plus each gallery entry once")
+    }
+
 }

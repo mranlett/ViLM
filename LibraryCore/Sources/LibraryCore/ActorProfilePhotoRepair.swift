@@ -41,32 +41,59 @@ public enum ActorProfilePhotoRepair {
     /// Who needs their primary repaired, and what already-downloaded photo
     /// would fix it.
     ///
-    /// ⭐ Built on `ActorPhotoScanner.measure`, the same reconciliation the
-    /// duplicate-photo scanner already trusts, rather than a second
-    /// expression of "does this token's file exist". That function already
-    /// skips a token with no file on disk (a gallery URL never downloaded is
-    /// absent, not broken) and already knows which measured token is the
-    /// primary (`isPrimary`) by filename, not by comparing strings.
+    /// 🚨 ONE QUESTION PER FILE: does it exist? This was built on
+    /// `ActorPhotoScanner.measure` — the duplicate-photo scanner's
+    /// reconciliation — on the reasoning that reusing it beat a second
+    /// expression of "does this token's file exist". The reasoning was right
+    /// and the choice was wrong: `measure` answers a far more expensive
+    /// question than this one asks. Per photo it reads the entire file into
+    /// memory, opens it twice through `CGImageSource`, renders a thumbnail and
+    /// takes a SHA-256 of the full bytes — all to compute content and
+    /// perceptual hashes that decide DUPLICATION, which this function does not
+    /// ask about and immediately discards. Over a library of ~1,400 performers
+    /// with several photos each that is thousands of image decodes, and this
+    /// worklist runs on every open of the Get More Photos screen. The screen
+    /// looked frozen, and it was: it was hashing the photo library to find out
+    /// which files were there.
+    ///
+    /// ⚠️ The token→filename mapping below mirrors `measure`'s EXACTLY, so this
+    /// stays a change of cost and not of meaning:
+    ///   - the primary filename is probed only when `photoUrl` is non-empty,
+    ///     because `measure` marks a token primary by `photoUrl == token` and
+    ///     an empty `photoUrl` equals nothing;
+    ///   - a gallery entry equal to `photoUrl` maps to the primary file, which
+    ///     has already been ruled absent, so it is skipped rather than probed
+    ///     again under a hashed name.
     ///
     /// ⚠️ A profile whose ONLY gallery entry is the `local://primary`
     /// sentinel, with no other photo downloaded, correctly produces no
     /// candidate here even when broken: that sentinel is a placeholder for
-    /// the primary file itself, and `measure` can never find real bytes at
-    /// the hashed gallery filename its literal string would produce. That is
-    /// the honest answer — there is nothing local left to recover — not a
-    /// bug in this function.
-    public static func worklist(_ profiles: [EntityProfile], profilesDir: URL) -> [Candidate] {
+    /// the primary file itself, and there are no real bytes at the hashed
+    /// gallery filename its literal string produces. That is the honest
+    /// answer — nothing local is left to recover — not a bug in this function.
+    ///
+    /// - Parameter fileExists: test seam, in the style of `RelocationMover`'s.
+    public static func worklist(
+        _ profiles: [EntityProfile], profilesDir: URL,
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> [Candidate] {
         profiles.compactMap { profile in
-            let measured = ActorPhotoScanner.measure(profile: profile, profilesDir: profilesDir)
+            let primaryToken = profile.photoUrl ?? ""
+            let primaryFile = profilesDir.appendingPathComponent(
+                ProfileImageNaming.primaryFileName(for: profile.id))
             // The primary already resolves to a file on disk — nothing broken.
-            guard !measured.contains(where: \.isPrimary) else { return nil }
-            // `measure` walks primary-then-gallery in `galleryUrls` order, and
-            // the primary slot is absent here, so the first surviving entry is
-            // the first gallery photo that was actually downloaded.
-            guard let promote = measured.first(where: { !$0.isPrimary })?.token else {
-                return nil // nothing local to promote — cannot repair without going online
+            if !primaryToken.isEmpty, fileExists(primaryFile) { return nil }
+
+            // The first gallery photo that was actually downloaded, in
+            // `galleryUrls` order — the same one `measure` would have surfaced
+            // first, for the same reason.
+            for token in profile.galleryUrls where token != primaryToken {
+                let file = profilesDir.appendingPathComponent(
+                    ProfileImageNaming.galleryFileName(for: profile.id, token: token))
+                if fileExists(file) { return Candidate(profile: profile, promote: token) }
             }
-            return Candidate(profile: profile, promote: promote)
+            // Nothing local to promote — cannot repair without going online.
+            return nil
         }
     }
 

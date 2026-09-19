@@ -60,8 +60,37 @@ struct ActorPhotoTopUpView: View {
     /// downloaded gallery photo. Set on every `load()`, not just after a
     /// fetch run, since repair is unattended and unconditioned by selection.
     @State private var profilePhotosRepaired = 0
+    /// 🚨 Repairs that were ATTEMPTED and did not stick. Counted and shown
+    /// because every failure path in this loop is a silent `continue`: a run
+    /// that repaired nothing and a run that failed at all 460 looked
+    /// identical, which is exactly how "I opened the screen and nothing
+    /// happened" became unanswerable.
+    @State private var profilePhotoRepairsFailed = 0
+    /// Separate from `task` (the fetch): repair is unattended and must not be
+    /// cancelled by, or cancel, an operator-initiated fetch.
+    @State private var repairTask: Task<Void, Never>?
     @State private var message: String?
     @State private var task: Task<Void, Never>?
+
+    /// What the footer says about #97's repair.
+    ///
+    /// ⚠️ Assembled here rather than inline in the `Text`: as one `+` chain of
+    /// five operands inside a `ViewBuilder` it exceeded the type checker's
+    /// budget outright ("unable to type-check this expression in reasonable
+    /// time"), which is a compile error rather than a slow build.
+    private var profilePhotoFooter: String {
+        var sentence = "Adds to each performer's gallery. Your chosen profile picture is never "
+        sentence += "changed — it is reset only when it no longer points at a downloaded photo, "
+        sentence += "using one already in the gallery."
+        if profilePhotosRepaired > 0 {
+            sentence += " \(profilePhotosRepaired) reset this way just now."
+        }
+        if profilePhotoRepairsFailed > 0 {
+            sentence += " \(profilePhotoRepairsFailed) could not be reset — the gallery photo, or "
+            sentence += "the library it belongs to, could not be written."
+        }
+        return sentence
+    }
 
     private var provider: (any ActorMetadataProvider)? {
         PluginEnvironment.registry.installedActorProviders().first
@@ -90,7 +119,7 @@ struct ActorPhotoTopUpView: View {
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { task?.cancel(); dismiss() }
+                        Button("Done") { task?.cancel(); repairTask?.cancel(); dismiss() }
                     }
                 }
                 .task(id: threshold) { load() }
@@ -133,11 +162,7 @@ struct ActorPhotoTopUpView: View {
                     .onChange(of: showsExhausted) { _, _ in load() }
                 }
             } footer: {
-                Text("Adds to each performer's gallery. Your chosen profile picture is never changed — "
-                     + "it is reset only when it no longer points at a downloaded photo, using one "
-                     + "already in the gallery."
-                     + (profilePhotosRepaired > 0
-                        ? " \(profilePhotosRepaired) reset this way just now." : ""))
+                Text(profilePhotoFooter)
             }
 
             Section {
@@ -260,35 +285,91 @@ struct ActorPhotoTopUpView: View {
         totalActors = actors.count
         pooledCount = eligible.count
 
-        // #97 — repair a lost profile-photo assignment before anything else,
-        // from an already-downloaded gallery photo only (never online — the
-        // operator's rule). Runs over the whole pool, NOT the thin-gallery
-        // threshold below: a broken primary can belong to a performer with
-        // plenty of photos, who would never appear as a topup candidate.
-        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
-        var repaired: [String: EntityProfile] = [:]
-        for candidate in ActorProfilePhotoRepair.worklist(eligible, profilesDir: profilesDir) {
-            guard let fixed = try? ActorProfilePhotoRepair.repair(candidate, profilesDir: profilesDir)
-            else { continue }
-            // Same staleness-safety `topUp` uses: save through the profile's
-            // OWNING library rather than assuming it is this one.
-            guard let profileStore = try? LibrarySession.shared.store(forProfile: candidate.profile.id)
-            else { continue }
-            try? profileStore.saveEntityProfile(fixed)
-            repaired[fixed.id] = fixed
-        }
-        profilePhotosRepaired = repaired.count
-        // Reflects what was just fixed rather than the stale pre-repair
-        // snapshot — a repaired profile's photo count does not actually
-        // change (the token was already counted via `galleryUrls`), but its
-        // `photoUrl` does, and later screens reading `candidates` should see it.
-        let refreshedEligible = eligible.map { repaired[$0.id] ?? $0 }
+        show(eligible)
 
-        candidates = ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold,
+        // 🚨 #97 repair runs AFTER the screen is on screen, not before it.
+        // It used to run inline here, and the screen could not draw its first
+        // frame until every performer's photos had been read off disk and
+        // hashed — which is what "Get More Photos takes a long time to load"
+        // was. The list is now built from the pre-repair snapshot immediately
+        // and rebuilt when the repair lands; a repaired profile's photo COUNT
+        // is unchanged (the token was already in `galleryUrls`), so the list
+        // the operator sees first is not wrong, only missing a `photoUrl`
+        // correction that no clause on this screen reads.
+        repairTask?.cancel()
+        repairTask = Task { await repairProfilePhotos(among: eligible) }
+    }
+
+    /// Applies #97's profile-photo repair without holding up the screen.
+    ///
+    /// ⚠️ Three hops on purpose. Deciding is file I/O over the whole pool and
+    /// applying is file copies plus a database write each, so both belong off
+    /// the main actor — but `LibrarySession` is `@MainActor`, so the owning
+    /// library of each profile has to be resolved here, in between. Resolving
+    /// it up front also means the apply hop never touches the session.
+    @MainActor
+    private func repairProfilePhotos(among eligible: [EntityProfile]) async {
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+
+        let candidates = await Task.detached(priority: .utility) {
+            ActorProfilePhotoRepair.worklist(eligible, profilesDir: profilesDir)
+        }.value
+        guard !Task.isCancelled else { return }
+        guard !candidates.isEmpty else {
+            profilePhotosRepaired = 0
+            profilePhotoRepairsFailed = 0
+            return
+        }
+
+        // Same staleness-safety `topUp` uses: save through the profile's
+        // OWNING library rather than assuming it is this one.
+        var owners: [String: URL] = [:]
+        for candidate in candidates {
+            owners[candidate.profile.id] = LibrarySession.shared.url(forProfile: candidate.profile.id)
+        }
+
+        let outcome = await Task.detached(priority: .utility) { () -> ([String: EntityProfile], Int) in
+            var repaired: [String: EntityProfile] = [:]
+            var failed = 0
+            for candidate in candidates {
+                guard !Task.isCancelled else { break }
+                // ⚠️ Counted rather than silently skipped, at every step: a
+                // missing gallery file, an unreachable library and an
+                // unwritable row are different problems, but all three used to
+                // produce the same silence.
+                guard let owner = owners[candidate.profile.id] else { failed += 1; continue }
+                do {
+                    let fixed = try ActorProfilePhotoRepair.repair(candidate, profilesDir: profilesDir)
+                    try LibraryStore(at: owner).saveEntityProfile(fixed)
+                    repaired[fixed.id] = fixed
+                } catch {
+                    failed += 1
+                }
+            }
+            return (repaired, failed)
+        }.value
+        guard !Task.isCancelled else { return }
+
+        profilePhotosRepaired = outcome.0.count
+        profilePhotoRepairsFailed = outcome.1
+        show(eligible.map { outcome.0[$0.id] ?? $0 })
+    }
+
+    /// ⚠️ Fallback only. `LibrarySession` knows which library owns a profile;
+    /// this is for the case where it cannot say, where writing into the library
+    /// currently open is better than not storing the photo at all.
+    private func owningProfilesDir(for profileId: String) -> URL {
+        libraryURL.appendingPathComponent(".catalog/profiles")
+    }
+
+    /// Rebuilds what the list shows from a set of eligible performers.
+    /// ⭐ One place, so the pre-repair and post-repair passes cannot drift.
+    private func show(_ eligible: [EntityProfile]) {
+        candidates = ActorPhotoTopUp.worklist(eligible, threshold: threshold,
                                               includingExhausted: showsExhausted)
-        exhaustedCount = ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold,
+        exhaustedCount = ActorPhotoTopUp.worklist(eligible, threshold: threshold,
                                                   includingExhausted: true).count
-            - ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold).count
+            - ActorPhotoTopUp.worklist(eligible, threshold: threshold).count
         selected = selected.filter { id in candidates.contains { $0.id == id } }
     }
 
@@ -362,7 +443,36 @@ struct ActorPhotoTopUpView: View {
                                          source: provider.displayName, sourceId: sourceId,
                                          isVideo: false)
 
-            guard let updated = ActorPhotoTopUp.applying(fetched, to: current) else {
+            // 🚨 DOWNLOADED BEFORE RECORDED. A URL only becomes a gallery
+            // entry once its bytes are on this device, because the alternative
+            // is the third state: an entry that claims a photo exists while
+            // nothing on disk backs it. That state is what left 475 performers
+            // with recorded galleries and no files, invisibly, because every
+            // deletion path in the app left the URLs behind looking fine.
+            //
+            // ⚠️ A URL that cannot be fetched is simply not added. It is not an
+            // error and it is not recorded for later — "later" is the thing
+            // being removed. The source will offer it again on the next run if
+            // it still exists, which is a cheaper way to be right than keeping
+            // a claim nobody can check.
+            let profilesDir = LibrarySession.shared.profilesDir(forProfile: current.id)
+                ?? owningProfilesDir(for: current.id)
+            var stored: [URL] = []
+            for url in fetched {
+                if Task.isCancelled { break }
+                let fileName = ProfileImageNaming.galleryFileName(
+                    for: current.id, token: url.absoluteString)
+                let destination = profilesDir.appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    stored.append(url)
+                    continue
+                }
+                if await ActorPhotoFetch.download(url.absoluteString, to: destination) == .downloaded {
+                    stored.append(url)
+                }
+            }
+
+            guard let updated = ActorPhotoTopUp.applying(stored, to: current) else {
                 // 🚨 Recorded, so the list can be worked to the end. The source
                 // has nothing we do not hold — and for a performer it only has
                 // one picture of, that stays true no matter how many times we
