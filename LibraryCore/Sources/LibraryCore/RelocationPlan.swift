@@ -270,6 +270,40 @@ public extension LibraryStore {
             collisions: collisions)
     }
 
+    /// N1 for callers that are NOT naming a file — the studio the filename
+    /// grammar would resolve, for anything that records a studio elsewhere.
+    ///
+    /// 🚨 Exists so the sidecar and the filename cannot disagree (#95). The
+    /// sidecar used to carry `asset.studios.first`: the raw `studio:` tag,
+    /// which may never have been matched to a lexicon entry at all. The
+    /// filename correctly omitted such a studio while the document beside it
+    /// wrote the unmatched tag down as though it were authoritative — and if
+    /// the `video_studio` edge and the tag ever diverged, the document kept
+    /// writing the stale one.
+    ///
+    /// ⚠️ Deliberately the SAME `placement` the planner calls, not a second
+    /// reading of N1 — for the reason `generatedFileName` already records: two
+    /// expressions of one rule is how the two drift with only one of them
+    /// audited. This is the third caller, so the rule is asked, never restated.
+    ///
+    /// ⭐ Batched — one profile fetch and one edge pass for the whole set,
+    /// because both callers work over a library rather than a video. A video
+    /// with no answer is `.unprocessed`, the same absence the planner reports.
+    func studioPlacements(for assets: some Sequence<Asset>) throws -> [UUID: StudioPlacement] {
+        let profiles = try fetchAllEntityProfiles()
+        var byId: [String: EntityProfile] = [:]
+        for p in profiles { byId[p.id] = p }
+        let resolver = NodeResolver(profiles: profiles)
+        let (_, studioByVideo) = try edgeMemberships()
+
+        var placements: [UUID: StudioPlacement] = [:]
+        for asset in assets {
+            placements[asset.id] = placement(for: asset, edges: studioByVideo,
+                                             byId: byId, resolver: resolver)
+        }
+        return placements
+    }
+
     // MARK: - Resolving what the grammar needs
 
     /// N1 — a studio earns a folder only by being matched to a source id.

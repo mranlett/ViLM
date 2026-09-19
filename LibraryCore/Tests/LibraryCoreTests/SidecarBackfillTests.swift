@@ -16,17 +16,50 @@ final class SidecarBackfillTests: XCTestCase {
 
     /// Runs the pass over a fake disk, returning what it did and what landed.
     private func backfill(_ assets: [Asset], existing: Set<String> = [],
-                          failing: Set<String> = [])
+                          failing: Set<String> = [],
+                          studios: [UUID: StudioPlacement] = [:])
         -> (SidecarBackfillSummary, [String: String]) {
         var wrote: [String: String] = [:]
         let summary = SidecarBackfill.run(
             assets: assets,
+            studios: studios,
             fileExists: { existing.contains($0) || wrote[$0] != nil },
             write: { path, document in
                 if failing.contains(path) { throw CocoaError(.fileWriteNoPermission) }
                 wrote[path] = document
             })
         return (summary, wrote)
+    }
+
+    // MARK: - 🚨 #95 — the studio is the resolved one, or none
+
+    /// The backfill had the mover's defect over the WHOLE library: it wrote
+    /// `asset.studios.first` into every document it created. Fixing one writer
+    /// and not the other would have left a library whose sidecars disagreed
+    /// about the studio depending on which pass happened to write them.
+    func testAResolvedStudioIsWrittenAndAnUnresolvedOneIsNot() {
+        let matched = asset("Example Pictures/A Scene.mp4", tags: ["studio:Example Pictures"])
+        let unmatched = asset("Unverified Pictures/Another.mp4",
+                              tags: ["studio:Unverified Pictures"])
+        let (summary, wrote) = backfill([matched, unmatched],
+                                        studios: [matched.id: .filed("Example Pictures"),
+                                                  unmatched.id: .unprocessed])
+
+        XCTAssertEqual(summary.written, 2, "both still get a document")
+        XCTAssertTrue(wrote["Example Pictures/A Scene.nfo"]?
+            .contains("<studio>Example Pictures</studio>") == true)
+        XCTAssertFalse(wrote["Unverified Pictures/Another.nfo"]?
+            .contains("<studio>") == true,
+            "an unmatched tag must not be recorded as this video's studio")
+    }
+
+    /// ⚠️ `.unfiled` is a DECISION — someone looked and ruled the studio out —
+    /// and it still names no studio. A document that wrote the ruled-out tag
+    /// would contradict the very finding that produced the state.
+    func testARuledOutStudioNamesNoStudioEither() {
+        let a = asset("Unfiled/A Scene.mp4", tags: ["studio:Ruled Out Pictures"])
+        let (_, wrote) = backfill([a], studios: [a.id: .unfiled])
+        XCTAssertFalse(wrote["Unfiled/A Scene.nfo"]?.contains("<studio>") == true)
     }
 
     // MARK: - B1 — a relocated video with no sidecar gains one
@@ -95,6 +128,7 @@ final class SidecarBackfillTests: XCTestCase {
         var wrote: [String: String] = [:]
         func pass() -> SidecarBackfillSummary {
             SidecarBackfill.run(assets: assets,
+                                studios: [:],
                                 fileExists: { wrote[$0] != nil },
                                 write: { wrote[$0] = $1 })
         }

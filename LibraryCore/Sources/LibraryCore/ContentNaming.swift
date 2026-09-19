@@ -39,6 +39,23 @@ public enum StudioPlacement: Equatable, Sendable {
     case unfiled
     /// Not yet processed. The file stays where it is.
     case unprocessed
+
+    /// The matched lexicon name, and nothing else.
+    ///
+    /// ⭐ The one answer to "what studio may be recorded as authoritative"
+    /// (N1). `.unfiled` and `.unprocessed` are absences rather than names: a
+    /// video whose `studio:` tag has never been matched has no studio this
+    /// library will vouch for, and the filename says so by omitting the
+    /// segment. Anything that writes a studio down OUTSIDE the filename — the
+    /// `.nfo` sidecar — has to omit it for the same reason, or the two
+    /// disagree about which studio a video belongs to (#95).
+    ///
+    /// ⚠️ An empty matched name reads as no name, exactly as the grammar
+    /// already treats one when building the Scene and Film segments.
+    public var matchedName: String? {
+        guard case let .filed(name) = self, !name.isEmpty else { return nil }
+        return name
+    }
 }
 
 /// A credited performer, with the one attribute the ordering reads.

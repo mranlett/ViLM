@@ -515,10 +515,17 @@ struct RelocationPlanView: View {
         defer { isBackfilling = false }
         let url = libraryURL
         backfill = await Task.detached(priority: .utility) { () -> SidecarBackfillSummary? in
+            // 🚨 The studio placements join the guard rather than falling back
+            // to an empty map (#95). A backfill that could not resolve N1 would
+            // otherwise write two hundred documents with no studio at all and
+            // report them as written — a silent loss, on the one field this
+            // library carries for 88% of its videos.
             guard let store = try? LibraryStore(at: url),
-                  let assets = try? store.fetchAllAssets() else { return nil }
+                  let assets = try? store.fetchAllAssets(),
+                  let studios = try? store.studioPlacements(for: assets) else { return nil }
             let profiles = (try? store.fetchAllEntityProfiles()).map(EntityProfileIndex.init)
-            return SidecarBackfill.run(libraryURL: url, assets: assets, profiles: profiles)
+            return SidecarBackfill.run(libraryURL: url, assets: assets,
+                                       profiles: profiles, studios: studios)
         }.value
     }
 
