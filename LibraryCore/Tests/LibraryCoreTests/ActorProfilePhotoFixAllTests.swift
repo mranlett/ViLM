@@ -258,4 +258,101 @@ final class ActorProfilePhotoFixAllTests: XCTestCase {
                           gallery: ["https://example.com/a.jpg"])))
     }
 
+
+    // MARK: - reconcile — the unit of the invariant
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reconcile-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    func testReconcileDownloadsEveryMissingPhoto() async {
+        let a = "https://example.com/a.jpg"
+        let b = "https://example.com/b.jpg"
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile(photoUrl: a, gallery: [a, b]),
+            existingFiles: [], profilesDir: tempDir(),
+            download: { _, _ in .downloaded })
+
+        XCTAssertEqual(outcome.downloaded, 2)
+        XCTAssertNil(outcome.updatedProfile, "nothing gone means nothing to write")
+        XCTAssertEqual(outcome.filesAdded.count, 2)
+    }
+
+    /// ⭐ The face-first pass: one photo is enough, and because the primary is
+    /// offered first it is the RIGHT one.
+    func testReconcileStopsAfterTheFirstDownloadWhenAsked() async {
+        let primary = "https://example.com/primary.jpg"
+        let other = "https://example.com/other.jpg"
+        let attempts = Counter()
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile(photoUrl: primary, gallery: [other]),
+            existingFiles: [], profilesDir: tempDir(),
+            stopAfterFirstDownload: true,
+            download: { token, _ in
+                attempts.record(token)
+                return .downloaded
+            })
+
+        XCTAssertEqual(outcome.downloaded, 1)
+        XCTAssertEqual(attempts.tokens, [primary], "the primary, and then it stops")
+    }
+
+    /// ⚠️ A failure does NOT stop the face-first pass — the next photo is the
+    /// whole point of having more than one.
+    func testAFailureDoesNotEndTheFaceFirstPass() async {
+        let dead = "https://example.com/dead.jpg"
+        let good = "https://example.com/good.jpg"
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile(photoUrl: dead, gallery: [good]),
+            existingFiles: [], profilesDir: tempDir(),
+            stopAfterFirstDownload: true,
+            download: { token, _ in
+                token == dead ? .gone : .downloaded
+            })
+
+        XCTAssertEqual(outcome.downloaded, 1)
+        XCTAssertEqual(outcome.dropped, 1)
+        XCTAssertNil(outcome.updatedProfile?.photoUrl, "the dead primary is cleared")
+        XCTAssertEqual(outcome.updatedProfile?.galleryUrls, [good])
+    }
+
+    /// 🚨 The data-loss boundary, at the level callers actually use.
+    func testAnUnreachableSourceChangesNothingAboutTheProfile() async {
+        let a = "https://example.com/a.jpg"
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile(photoUrl: a, gallery: [a]),
+            existingFiles: [], profilesDir: tempDir(),
+            download: { _, _ in .unavailable })
+
+        XCTAssertEqual(outcome.unavailable, 1)
+        XCTAssertEqual(outcome.downloaded, 0)
+        XCTAssertNil(outcome.updatedProfile, "a bad connection must never rewrite a profile")
+    }
+
+    func testPhotosAlreadyLocalAreNeverFetched() async {
+        let a = "https://example.com/a.jpg"
+        let attempts = Counter()
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile(photoUrl: nil, gallery: [a]),
+            existingFiles: [gallery(a)], profilesDir: tempDir(),
+            download: { token, _ in
+                attempts.record(token)
+                return .downloaded
+            })
+
+        XCTAssertEqual(outcome.downloaded, 0)
+        XCTAssertTrue(attempts.tokens.isEmpty, "re-running must not re-download the library")
+    }
+
+    /// ⚠️ A `@Sendable` downloader cannot mutate a captured var under Swift 6.
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [String] = []
+        func record(_ token: String) { lock.lock(); seen.append(token); lock.unlock() }
+        var tokens: [String] { lock.lock(); defer { lock.unlock() }; return seen }
+    }
+
 }

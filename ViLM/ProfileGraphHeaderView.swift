@@ -1036,6 +1036,30 @@ struct ProfileGraphHeaderView: View {
         }
     }
 
+    /// Downloads any photo this profile records but does not have, and stops
+    /// it recording any whose photo is definitively gone.
+    ///
+    /// ⭐ The same `reconcile` the Fix All Actor Profile Photos tool runs, on
+    /// one performer — deliberately not a second expression of it, because the
+    /// rule it encodes decides when an entry gets DELETED.
+    @MainActor
+    private func ensurePhotosAreStored(for profile: EntityProfile) async {
+        guard let profilesDir = LibrarySession.shared.profilesDir(forProfile: profile.id)
+        else { return }
+        let existing = ActorProfilePhotoFixAll.existingFileNames(in: profilesDir)
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile, existingFiles: existing, profilesDir: profilesDir)
+
+        if let pruned = outcome.updatedProfile,
+           let store = try? LibrarySession.shared.store(forProfile: profile.id) {
+            try? store.saveEntityProfile(pruned)
+            self.entityProfile = pruned
+        }
+        if outcome.downloaded > 0 || outcome.updatedProfile != nil {
+            NotificationCenter.default.post(name: NSNotification.Name("ReloadAssets"), object: nil)
+        }
+    }
+
     private func saveProfile(_ profile: EntityProfile) {
         guard libraryURL != nil else { return }
         do {
@@ -1043,6 +1067,16 @@ struct ProfileGraphHeaderView: View {
             let store = try LibrarySession.shared.store(forProfile: profile.id)
             try store.saveEntityProfile(profile)
             self.entityProfile = profile
+            // 🚨 A photo URL that was just written has no file behind it yet.
+            // Accepting a match, choosing photos from a source, or pasting a
+            // URL by hand all record an address; this is what turns the address
+            // into a stored photo, so the profile never sits in the third state
+            // that left 475 performers with recorded galleries and no files.
+            //
+            // ⚠️ Fire-and-forget on purpose: saving must not wait on a network,
+            // and a download that fails changes nothing except that the entry
+            // stays recorded for the next attempt.
+            Task { await ensurePhotosAreStored(for: profile) }
             // "ReloadAssets" is this app's general "library data changed"
             // signal — every view sharing the centralized profile cache
             // listens for it, not just asset lists.

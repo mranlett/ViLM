@@ -37,6 +37,12 @@ struct ActorProfilePhotoFixAllView: View {
     @State private var progress = 0
     @State private var total = 0
     @State private var summary: ActorProfilePhotoFixAll.Summary?
+    /// 🚨 The tally AS IT HAPPENS. The first version only reported at the end,
+    /// so the only way to find out what a long run was doing was to stop it —
+    /// which is the one action that guarantees it stops doing it.
+    @State private var live = ActorProfilePhotoFixAll.Summary()
+    /// Which of the four phases is running, in the operator's words.
+    @State private var phase = ""
     @State private var errorMessage: String?
     @State private var task: Task<Void, Never>?
 
@@ -89,17 +95,27 @@ struct ActorProfilePhotoFixAllView: View {
 
             if isRunning {
                 Section {
-                    // ⭐ Determinate: the number of performers is known before
-                    // the first one is examined, so there is no reason to show
-                    // a spinner and no excuse for one.
+                    // ⭐ Determinate, and re-based per phase: one bar spanning
+                    // four phases of different lengths tells the operator less
+                    // than a bar per phase plus the phase's name.
                     ProgressView(value: Double(progress), total: Double(max(total, 1))) {
-                        Text("Checking \(progress) of \(total)…")
+                        Text(phase.isEmpty ? "Working…" : phase)
                     }
+                    Text(total > 0 ? "\(progress) of \(total) performers" : "…")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     Button("Stop", role: .destructive) { task?.cancel() }
+                } header: {
+                    Text("Progress")
                 }
-            } else if let summary {
+            }
+
+            // 🚨 Shown WHILE running as well as after. These numbers are the
+            // answer to "what is it doing", and they were previously locked
+            // behind finishing or cancelling.
+            if isRunning || summary != nil {
+                let summary = summary ?? live
                 Section {
-                    row("Already had a photo", summary.alreadyFine)
+                    if !isRunning { row("Already had a photo", summary.alreadyFine) }
                     row("Photo restored", summary.repaired)
                     row("Photos downloaded", summary.photosDownloaded)
                     if summary.entriesDropped > 0 {
@@ -108,12 +124,12 @@ struct ActorProfilePhotoFixAllView: View {
                     if summary.entriesUnavailable > 0 {
                         row("Could not be reached today", summary.entriesUnavailable)
                     }
-                    row("Still without a photo", summary.noLocalSource)
+                    if !isRunning { row("Still without a photo", summary.noLocalSource) }
                     if summary.failed > 0 { row("Could not be written", summary.failed) }
                 } header: {
-                    Text("Result")
+                    Text(isRunning ? "So far" : "Result")
                 } footer: {
-                    Text(verdict(summary)).font(.caption)
+                    if !isRunning { Text(verdict(summary)).font(.caption) }
                 }
             }
 
@@ -163,17 +179,26 @@ struct ActorProfilePhotoFixAllView: View {
     /// ⚠️ Three hops, for the reason `ActorPhotoTopUpView` records: reading and
     /// writing are disk work and belong off the main actor, but `LibrarySession`
     /// is `@MainActor`, so each profile's owning library is resolved in between.
+    ///
+    /// 🚨 FOUR PHASES, ORDERED BY WHAT AN OPERATOR LOSES BY STOPPING. The first
+    /// version ordered them by what was convenient to compute, and it showed:
+    /// a run left going for a long while downloaded 214 photos and gave back
+    /// three faces, because it was filling the galleries of performers who
+    /// already had a picture while 472 still had none. Restoring a face is the
+    /// whole point; the rest of someone's gallery can wait for a later pass.
     @MainActor
     private func run() async {
         isRunning = true
         summary = nil
+        live = ActorProfilePhotoFixAll.Summary()
         progress = 0
-        defer { isRunning = false }
+        total = 0
+        defer { isRunning = false; phase = "" }
 
         let libraryURL = self.libraryURL
         let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
 
-        // 1 — read the catalogue and the directory, once each.
+        phase = "Reading the library"
         let prepared = await Task.detached(priority: .utility) {
             () -> (actors: [EntityProfile], files: Set<String>)? in
             guard let store = try? LibraryStore(at: libraryURL),
@@ -187,132 +212,127 @@ struct ActorProfilePhotoFixAllView: View {
             return
         }
 
-        total = prepared.actors.count
-
-        // 2 — decide. Pure and in memory, so it costs nothing to do here.
-        var result = ActorProfilePhotoFixAll.Summary()
-        var work: [(profile: EntityProfile, promotion: ActorProfilePhotoFixAll.Promotion)] = []
-        for actor in prepared.actors {
-            switch ActorProfilePhotoFixAll.plan(for: actor, existingFiles: prepared.files) {
-            case .alreadyFine:      result.alreadyFine += 1
-            case .noLocalSource:    result.noLocalSource += 1
-            case let .promote(p):   work.append((actor, p))
-            }
-        }
-        // ⚠️ Provisional: `noLocalSource` is recomputed in step 7 against the
-        // files that exist once downloading has run. Counting it here would
-        // report as hopeless every performer this run is about to fix.
-        progress = result.alreadyFine + result.noLocalSource
-        result.noLocalSource = 0
-
-        // 3 — the owning library of each profile, while we are on the main actor.
-        //     ⚠️ Resolved for EVERY actor, not just the ones needing a
-        //     promotion: the download phase writes profiles too.
+        // Owning libraries, while we are on the main actor.
         var owners: [String: URL] = [:]
         for actor in prepared.actors { owners[actor.id] = LibrarySession.shared.url(forProfile: actor.id) }
 
-        // 4 — promote what is already here. Free, and it settles the easy
-        //     cases before a single byte crosses the network.
         var files = prepared.files
-        for start in stride(from: 0, to: work.count, by: batchSize) {
-            guard !Task.isCancelled else { summary = result; return }
-            let batch = Array(work[start..<min(start + batchSize, work.count)])
-            let applied = await Task.detached(priority: .utility) { () -> (Int, Int, [String]) in
-                var repaired = 0
-                var failed = 0
-                var landed: [String] = []
-                for item in batch {
-                    guard let owner = owners[item.profile.id] else { failed += 1; continue }
-                    do {
-                        let fixed = try ActorProfilePhotoFixAll.apply(
-                            item.promotion, to: item.profile, profilesDir: profilesDir)
-                        try LibraryStore(at: owner).saveEntityProfile(fixed)
-                        repaired += 1
-                        landed.append(ProfileImageNaming.primaryFileName(for: item.profile.id))
-                    } catch {
-                        failed += 1
-                    }
-                }
-                return (repaired, failed, landed)
-            }.value
-            result.repaired += applied.0
-            result.failed += applied.1
-            files.formUnion(applied.2)
-            progress += batch.count
+        var result = ActorProfilePhotoFixAll.Summary()
+
+        func primaryExists(_ actor: EntityProfile) -> Bool {
+            files.contains(ProfileImageNaming.primaryFileName(for: actor.id))
         }
 
-        // 5 — download what is recorded and missing, and drop what is gone.
-        //
-        //     🚨 This is the phase that collapses the third state. A recorded
-        //     URL with no file is a claim the library cannot support; after
-        //     this it is either a file or it is not recorded.
-        //
-        //     ⚠️ Sequential, one photo at a time, for the reason the top-up
-        //     gives: several hundred concurrent requests is how a rate limit
-        //     gets discovered the hard way.
-        var stillBroken = 0
+        /// Writes a profile through its owning library. Returns false on a
+        /// failure the summary should count.
+        func save(_ profile: EntityProfile) async -> Bool {
+            guard let owner = owners[profile.id] else { return false }
+            return await Task.detached(priority: .utility) {
+                ((try? LibraryStore(at: owner).saveEntityProfile(profile)) != nil)
+            }.value
+        }
+
+        // ── Phase 1: promote what is already on disk. Free, no network.
+        phase = "Checking photos already on this device"
+        total = prepared.actors.count
+        progress = 0
         for actor in prepared.actors {
-            guard !Task.isCancelled else { break }
-            let missing = ActorProfilePhotoFixAll.missingPhotos(for: actor, existingFiles: files)
-            guard !missing.isEmpty else { continue }
-
-            var gone: Set<String> = []
-            for photo in missing {
-                guard !Task.isCancelled else { break }
-                let destination = profilesDir.appendingPathComponent(photo.fileName)
-                switch await ActorPhotoFetch.download(photo.token, to: destination) {
-                case .downloaded:
-                    result.photosDownloaded += 1
-                    files.insert(photo.fileName)
-                case .gone:
-                    gone.insert(photo.token)
-                case .unavailable:
-                    result.entriesUnavailable += 1
-                }
-            }
-
-            // The profile stops claiming photos that exist nowhere.
-            if let owner = owners[actor.id],
-               let pruned = ActorProfilePhotoFixAll.dropping(gone, from: actor) {
-                do {
-                    try LibraryStore(at: owner).saveEntityProfile(pruned)
-                    result.entriesDropped += gone.count
-                } catch {
+            guard !Task.isCancelled else { return finish(result) }
+            progress += 1
+            switch ActorProfilePhotoFixAll.plan(for: actor, existingFiles: files) {
+            case .alreadyFine:
+                result.alreadyFine += 1
+            case .noLocalSource:
+                break // decided in phase 2, which may well fix them
+            case let .promote(promotion):
+                let applied = await Task.detached(priority: .utility) { () -> EntityProfile? in
+                    try? ActorProfilePhotoFixAll.apply(promotion, to: actor, profilesDir: profilesDir)
+                }.value
+                if let applied, await save(applied) {
+                    result.repaired += 1
+                    files.insert(ProfileImageNaming.primaryFileName(for: actor.id))
+                } else {
                     result.failed += 1
                 }
             }
+            live = result
         }
 
-        // 6 — anything that now has photos but still no primary. ⭐ Reuses the
-        //     same `plan`, against the files that exist NOW: a performer whose
-        //     `photoUrl` was empty gained gallery files above and needs one of
-        //     them promoted, which only this pass can know.
-        for actor in prepared.actors {
-            guard !Task.isCancelled else { break }
-            guard case let .promote(promotion) = ActorProfilePhotoFixAll.plan(
-                    for: actor, existingFiles: files) else { continue }
-            guard let owner = owners[actor.id] else { result.failed += 1; continue }
-            do {
-                let fixed = try ActorProfilePhotoFixAll.apply(
-                    promotion, to: actor, profilesDir: profilesDir)
-                try LibraryStore(at: owner).saveEntityProfile(fixed)
-                result.repaired += 1
-                files.insert(ProfileImageNaming.primaryFileName(for: actor.id))
-            } catch {
-                result.failed += 1
+        // ── Phase 2: 🚨 FACES FIRST. Only performers with no picture at all,
+        //    and only until ONE photo lands for each. The rest of their gallery
+        //    is phase 3's job — stopping here should mean everyone has a face.
+        let faceless = prepared.actors.filter { !primaryExists($0) }
+        phase = "Restoring missing profile photos"
+        total = faceless.count
+        progress = 0
+        for actor in faceless {
+            guard !Task.isCancelled else { return finish(result) }
+            progress += 1
+            // ⭐ One photo is enough here — `reconcile` stops at the first that
+            // lands, and `missingPhotos` offers the primary first, so the one
+            // it takes is the right one.
+            let outcome = await ActorProfilePhotoFixAll.reconcile(
+                actor, existingFiles: files, profilesDir: profilesDir,
+                stopAfterFirstDownload: true, isCancelled: { Task.isCancelled })
+            result.photosDownloaded += outcome.downloaded
+            result.entriesUnavailable += outcome.unavailable
+            files.formUnion(outcome.filesAdded)
+            if let pruned = outcome.updatedProfile {
+                if await save(pruned) { result.entriesDropped += outcome.dropped } else { result.failed += 1 }
             }
+            live = result
+
+            // A gallery photo landed but the primary slot is still empty.
+            if !primaryExists(actor),
+               case let .promote(promotion) = ActorProfilePhotoFixAll.plan(
+                    for: actor, existingFiles: files) {
+                let applied = await Task.detached(priority: .utility) { () -> EntityProfile? in
+                    try? ActorProfilePhotoFixAll.apply(promotion, to: actor, profilesDir: profilesDir)
+                }.value
+                if let applied, await save(applied) {
+                    result.repaired += 1
+                    files.insert(ProfileImageNaming.primaryFileName(for: actor.id))
+                }
+            }
+            live = result
         }
 
-        // 7 — who is STILL without a photo, counted against the final state
-        //     rather than the one this run started from. ⚠️ `noLocalSource`
-        //     was provisional until now: most of it was about to be downloaded.
-        for actor in prepared.actors
-        where !files.contains(ProfileImageNaming.primaryFileName(for: actor.id)) {
-            stillBroken += 1
+        // ── Phase 3: everything else recorded but missing. ⚠️ Last on purpose:
+        //    this is the long one, and nobody is faceless while it runs.
+        let remaining = prepared.actors.filter {
+            !ActorProfilePhotoFixAll.missingPhotos(for: $0, existingFiles: files).isEmpty
         }
-        result.noLocalSource = stillBroken
+        phase = "Storing the rest of each gallery"
+        total = remaining.count
+        progress = 0
+        for actor in remaining {
+            guard !Task.isCancelled else { return finish(result) }
+            progress += 1
+            let outcome = await ActorProfilePhotoFixAll.reconcile(
+                actor, existingFiles: files, profilesDir: profilesDir,
+                isCancelled: { Task.isCancelled })
+            result.photosDownloaded += outcome.downloaded
+            result.entriesUnavailable += outcome.unavailable
+            files.formUnion(outcome.filesAdded)
+            if let pruned = outcome.updatedProfile {
+                if await save(pruned) { result.entriesDropped += outcome.dropped } else { result.failed += 1 }
+            }
+            live = result
+        }
 
-        summary = result
-        if result.repaired > 0 || result.photosDownloaded > 0 { onCompleted() }
+        finish(result)
+
+        /// ⚠️ `noLocalSource` is counted against the FINAL state, never the one
+        /// the run started from — most of it is what this run just fixed.
+        func finish(_ partial: ActorProfilePhotoFixAll.Summary) {
+            var final = partial
+            final.noLocalSource = prepared.actors.filter { !primaryExists($0) }.count
+            // Recomputed too, for the same reason: a performer repaired in
+            // phase 2 was not "already fine" when phase 1 counted them.
+            final.alreadyFine = prepared.actors.count - final.noLocalSource - final.repaired
+            summary = final
+            live = final
+            if final.repaired > 0 || final.photosDownloaded > 0 { onCompleted() }
+        }
     }
 }
