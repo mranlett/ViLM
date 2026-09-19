@@ -251,3 +251,80 @@ public extension ActorProfilePhotoFixAll {
         return updated
     }
 }
+
+// MARK: - One performer, made true
+
+public extension ActorProfilePhotoFixAll {
+
+    /// What reconciling one performer's photos did.
+    struct ReconcileOutcome: Equatable, Sendable {
+        public var downloaded = 0
+        /// Entries removed because the photo is definitively gone.
+        public var dropped = 0
+        /// Entries kept despite failing — the source could not be reached.
+        public var unavailable = 0
+        /// ⭐ nil when nothing needs writing. A pass over a library where
+        /// nothing is gone must not rewrite every row it read.
+        public var updatedProfile: EntityProfile?
+        /// Files that exist because this call fetched them, so a caller
+        /// reconciling many performers can keep its listing current without
+        /// re-reading the directory.
+        public var filesAdded: Set<String> = []
+
+        public init() {}
+    }
+
+    /// Fetches one photo to one path. Injected so every rule above stays
+    /// testable without a network.
+    typealias PhotoDownloader = @Sendable (String, URL) async -> ActorPhotoFetch.Outcome
+
+    /// Makes one performer's recorded photos TRUE: downloads what is missing,
+    /// and reports what is definitively gone so the caller can stop recording it.
+    ///
+    /// 🚨 The unit of the invariant, in one place. It had been written twice
+    /// inline — once for the profile-photo phase and once for the gallery
+    /// phase — differing only in when they stopped, which is exactly how two
+    /// copies of a data-loss rule start disagreeing about what "gone" means.
+    ///
+    /// - Parameter stopAfterFirstDownload: for the pass that only needs a FACE.
+    ///   ⭐ `missingPhotos` puts the primary first, so the first success is the
+    ///   best one available — and a second download buys nothing that a run
+    ///   stopped moments later would keep.
+    static func reconcile(_ profile: EntityProfile,
+                          existingFiles: Set<String>,
+                          profilesDir: URL,
+                          stopAfterFirstDownload: Bool = false,
+                          isCancelled: () -> Bool = { false },
+                          download: PhotoDownloader = { token, destination in
+                              await ActorPhotoFetch.download(token, to: destination)
+                          }) async -> ReconcileOutcome {
+        var outcome = ReconcileOutcome()
+        var gone: Set<String> = []
+
+        for photo in missingPhotos(for: profile, existingFiles: existingFiles) {
+            if isCancelled() { break }
+            let destination = profilesDir.appendingPathComponent(photo.fileName)
+            switch await download(photo.token, destination) {
+            case .downloaded:
+                outcome.downloaded += 1
+                outcome.filesAdded.insert(photo.fileName)
+                if stopAfterFirstDownload { return finished(outcome, gone: gone, profile: profile) }
+            case .gone:
+                gone.insert(photo.token)
+            case .unavailable:
+                outcome.unavailable += 1
+            }
+        }
+        return finished(outcome, gone: gone, profile: profile)
+    }
+
+    private static func finished(_ outcome: ReconcileOutcome, gone: Set<String>,
+                                 profile: EntityProfile) -> ReconcileOutcome {
+        var result = outcome
+        if let pruned = dropping(gone, from: profile) {
+            result.updatedProfile = pruned
+            result.dropped = gone.count
+        }
+        return result
+    }
+}

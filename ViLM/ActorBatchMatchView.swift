@@ -194,6 +194,20 @@ struct ActorBatchMatchView: View {
     /// one" — the video side learned that writing into a database with no such
     /// row throws, gets swallowed, and returns the record to the queue looking
     /// as though nothing happened.
+    /// The same `reconcile` the Fix All tool runs, for one just-matched
+    /// performer. ⚠️ Best-effort: a failed download leaves the entry recorded
+    /// for the next attempt and costs the match nothing.
+    private func storePhotos(for profile: EntityProfile, in libraryURL: URL) async {
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        let existing = ActorProfilePhotoFixAll.existingFileNames(in: profilesDir)
+        let outcome = await ActorProfilePhotoFixAll.reconcile(
+            profile, existingFiles: existing, profilesDir: profilesDir)
+        if let pruned = outcome.updatedProfile,
+           let store = try? LibraryStore(at: libraryURL) {
+            try? store.saveEntityProfile(pruned)
+        }
+    }
+
     private func applyReviewed(_ merged: EntityProfile, renameTo: String?,
                                for queued: ActorBatchMatchModel.QueuedActor) {
         guard let store = try? LibraryStore(at: queued.libraryURL) else { return }
@@ -203,6 +217,13 @@ struct ActorBatchMatchView: View {
         // records the edge — the one entry point, so this screen cannot be the
         // fourth to forget it.
         try? store.saveEntityProfile(merged)
+
+        // 🚨 Same invariant as the single-actor path: a match records photo
+        // addresses, and an address is not a photo until its bytes are here.
+        // ⚠️ After the save and off the critical path — a slow source must not
+        // hold up a batch the operator is working through.
+        let libraryURL = queued.libraryURL
+        Task { await storePhotos(for: merged, in: libraryURL) }
 
         var finalId = merged.id
         if let renameTo, !renameTo.isEmpty, renameTo != name(queued) {

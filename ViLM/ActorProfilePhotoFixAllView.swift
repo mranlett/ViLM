@@ -268,30 +268,19 @@ struct ActorProfilePhotoFixAllView: View {
         for actor in faceless {
             guard !Task.isCancelled else { return finish(result) }
             progress += 1
-            var gone: Set<String> = []
-
-            for photo in ActorProfilePhotoFixAll.missingPhotos(for: actor, existingFiles: files) {
-                guard !Task.isCancelled else { break }
-                let destination = profilesDir.appendingPathComponent(photo.fileName)
-                switch await ActorPhotoFetch.download(photo.token, to: destination) {
-                case .downloaded:
-                    result.photosDownloaded += 1
-                    files.insert(photo.fileName)
-                case .gone:
-                    gone.insert(photo.token)
-                case .unavailable:
-                    result.entriesUnavailable += 1
-                }
-                live = result
-                // ⭐ One is enough here. A second download for this performer
-                // buys nothing a stopped run would keep.
-                if files.contains(photo.fileName) { break }
+            // ⭐ One photo is enough here — `reconcile` stops at the first that
+            // lands, and `missingPhotos` offers the primary first, so the one
+            // it takes is the right one.
+            let outcome = await ActorProfilePhotoFixAll.reconcile(
+                actor, existingFiles: files, profilesDir: profilesDir,
+                stopAfterFirstDownload: true, isCancelled: { Task.isCancelled })
+            result.photosDownloaded += outcome.downloaded
+            result.entriesUnavailable += outcome.unavailable
+            files.formUnion(outcome.filesAdded)
+            if let pruned = outcome.updatedProfile {
+                if await save(pruned) { result.entriesDropped += outcome.dropped } else { result.failed += 1 }
             }
-
-            if !gone.isEmpty,
-               let pruned = ActorProfilePhotoFixAll.dropping(gone, from: actor) {
-                if await save(pruned) { result.entriesDropped += gone.count } else { result.failed += 1 }
-            }
+            live = result
 
             // A gallery photo landed but the primary slot is still empty.
             if !primaryExists(actor),
@@ -319,24 +308,14 @@ struct ActorProfilePhotoFixAllView: View {
         for actor in remaining {
             guard !Task.isCancelled else { return finish(result) }
             progress += 1
-            var gone: Set<String> = []
-            for photo in ActorProfilePhotoFixAll.missingPhotos(for: actor, existingFiles: files) {
-                guard !Task.isCancelled else { break }
-                let destination = profilesDir.appendingPathComponent(photo.fileName)
-                switch await ActorPhotoFetch.download(photo.token, to: destination) {
-                case .downloaded:
-                    result.photosDownloaded += 1
-                    files.insert(photo.fileName)
-                case .gone:
-                    gone.insert(photo.token)
-                case .unavailable:
-                    result.entriesUnavailable += 1
-                }
-                live = result
-            }
-            if !gone.isEmpty,
-               let pruned = ActorProfilePhotoFixAll.dropping(gone, from: actor) {
-                if await save(pruned) { result.entriesDropped += gone.count } else { result.failed += 1 }
+            let outcome = await ActorProfilePhotoFixAll.reconcile(
+                actor, existingFiles: files, profilesDir: profilesDir,
+                isCancelled: { Task.isCancelled })
+            result.photosDownloaded += outcome.downloaded
+            result.entriesUnavailable += outcome.unavailable
+            files.formUnion(outcome.filesAdded)
+            if let pruned = outcome.updatedProfile {
+                if await save(pruned) { result.entriesDropped += outcome.dropped } else { result.failed += 1 }
             }
             live = result
         }
