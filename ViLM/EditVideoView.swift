@@ -36,6 +36,10 @@ struct EditVideoView: View {
 
     @State private var isWorking = false
     @State private var workingLabel = ""
+    /// How far the re-encode has got (#98). `.preparing` until the export
+    /// session reports a real number, which is what keeps the spinner up
+    /// instead of drawing a bar at 0%.
+    @State private var editProgress: VideoEditProgress = .preparing
     @State private var didComplete = false
     @State private var errorMessage: String?
     @State private var showTrimConfirm = false
@@ -45,6 +49,32 @@ struct EditVideoView: View {
     private var owningLibraryURL: URL { LibrarySession.shared.url(for: asset.id) ?? libraryURL }
     private var videoURL: URL { owningLibraryURL.appendingPathComponent(asset.relativePath) }
 
+    /// A real bar while the encoder is giving real numbers, the original
+    /// indeterminate spinner while it is not (#98).
+    ///
+    /// ⚠️ The label is unchanged in both arms — "Trimming…" / "Flipping…" still
+    /// names the operation, whichever indicator is showing.
+    @ViewBuilder private var workingIndicator: some View {
+        let label = workingLabel.isEmpty ? "Working…" : workingLabel
+        if let fraction = editProgress.determinateFraction {
+            ProgressView(value: fraction, total: 1) { Text(label) }
+                .progressViewStyle(.linear)
+                .frame(maxWidth: 280)
+        } else {
+            ProgressView(label)
+        }
+    }
+
+    /// ⭐ The caption carries the phase the bar cannot: once the re-encode is
+    /// done the bar is full, and without this the remaining seconds of preview
+    /// rebuilding look like a hang at 100%.
+    private var workingCaption: String {
+        if case .finishing = editProgress {
+            return "Re-encode complete. Replacing the original and rebuilding previews."
+        }
+        return "Re-encoding and replacing the video. This can take a while for long clips."
+    }
+
     private var droppedMarkerCount: Int {
         VideoEditingService.adjustMarkersForTrim(sceneMarkers, keepStart: keepStart, keepEnd: keepEnd).dropped.count
     }
@@ -53,8 +83,8 @@ struct EditVideoView: View {
         NavigationStack {
             Group {
                 if isWorking {
-                    centered { ProgressView(workingLabel.isEmpty ? "Working…" : workingLabel)
-                        Text("Re-encoding and replacing the video. This can take a while for long clips.")
+                    centered { workingIndicator
+                        Text(workingCaption)
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32) }
                 } else if didComplete {
                     centered {
@@ -215,9 +245,11 @@ struct EditVideoView: View {
 
     private func applyTrim() async {
         player?.pause()
-        isWorking = true; workingLabel = "Trimming…"
+        isWorking = true; workingLabel = "Trimming…"; editProgress = .preparing
         do {
-            try await VideoEditingService().trim(asset, in: owningLibraryURL, keepStart: keepStart, keepEnd: keepEnd)
+            try await VideoEditingService().trim(
+                asset, in: owningLibraryURL, keepStart: keepStart, keepEnd: keepEnd,
+                onProgress: { p in Task { @MainActor in editProgress = p } })
             await MainActor.run { isWorking = false; didComplete = true; onCompleted() }
         } catch {
             await MainActor.run { isWorking = false; errorMessage = "Trim failed: \(error.localizedDescription)" }
@@ -239,9 +271,11 @@ struct EditVideoView: View {
 
     private func applyFlip() async {
         player?.pause()
-        isWorking = true; workingLabel = "Flipping…"
+        isWorking = true; workingLabel = "Flipping…"; editProgress = .preparing
         do {
-            try await VideoEditingService().flip(asset, in: owningLibraryURL)
+            try await VideoEditingService().flip(
+                asset, in: owningLibraryURL,
+                onProgress: { p in Task { @MainActor in editProgress = p } })
             await MainActor.run { isWorking = false; didComplete = true; onCompleted() }
         } catch {
             await MainActor.run { isWorking = false; errorMessage = "Flip failed: \(error.localizedDescription)" }
