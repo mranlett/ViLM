@@ -114,6 +114,7 @@ struct ContentView: View {
     @State private var isShowingTagClassification = false
     @State private var isShowingActorPhotoCleanup = false
     @State private var isShowingPhotoTopUp = false
+    @State private var isShowingPhotoFixAll = false
     @State private var isShowingMetadataHealth = false
     @State private var isShowingAliasSplits = false
     @State private var isShowingVideoRefresh = false
@@ -540,6 +541,13 @@ struct ContentView: View {
                                         profileImageFileNames: profileImageFileNames)
                 }
             }
+            .sheet(isPresented: $isShowingPhotoFixAll) {
+                if let url = selectedLibraryURL {
+                    ActorProfilePhotoFixAllView(libraryURL: url) {
+                        loadEntityProfiles(from: url)
+                    }
+                }
+            }
             .sheet(isPresented: $isShowingTagCleanup) {
                 if let url = selectedLibraryURL {
                     TagCleanupView(
@@ -907,6 +915,7 @@ struct ContentView: View {
                 onClassifyTags: { isShowingTagClassification = true },
                 onActorPhotoCleanup: { isShowingActorPhotoCleanup = true },
                 onPhotoTopUp: { isShowingPhotoTopUp = true },
+                onFixProfilePhotos: { isShowingPhotoFixAll = true },
                 onAliasSplits: { isShowingAliasSplits = true },
                 onRefreshMatched: { isShowingVideoRefresh = true },
                 onIdentityGaps: { isShowingIdentityGaps = true },

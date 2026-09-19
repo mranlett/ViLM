@@ -19,6 +19,7 @@ struct SettingsView: View {
     var onClassifyTags: (() -> Void)?
     var onActorPhotoCleanup: (() -> Void)?
     var onPhotoTopUp: (() -> Void)?
+    var onFixProfilePhotos: (() -> Void)?
     var onAliasSplits: (() -> Void)?
     var onRefreshMatched: (() -> Void)?
     var onIdentityGaps: (() -> Void)?
@@ -186,6 +187,14 @@ struct SettingsView: View {
                         .disabled(session.isFederated)
                     toolButton("Get More Photos",
                                icon: "photo.badge.plus", action: onPhotoTopUp)
+                    // ⭐ Beside "Get More Photos" because operators reach for
+                    // the two for the same reason — a performer with no
+                    // picture — but they do opposite things: that one asks a
+                    // source for more URLs, this one restores a photo already
+                    // on the device and never goes online.
+                    toolButton("Fix All Actor Profile Photos",
+                               icon: "person.crop.circle.badge.checkmark",
+                               action: onFixProfilePhotos)
                     toolButton("Remove Duplicate Actor Photos",
                                icon: "photo.stack", action: onActorPhotoCleanup)
                     toolButton("Remove Orphaned Profiles", icon: "trash.slash", action: onTagCleanup)
