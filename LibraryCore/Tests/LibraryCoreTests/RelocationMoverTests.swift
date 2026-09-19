@@ -50,10 +50,20 @@ final class RelocationMoverTests: XCTestCase {
         return a
     }
 
-    private func addStudio(_ name: String) throws {
+    /// ⚠️ The STATE is a parameter, because N1 turns on it: only `.matched`
+    /// earns a studio a place in a name or a document. A fixture that could
+    /// only build matched studios cannot express the case #95 is about.
+    @discardableResult
+    private func addStudio(_ name: String,
+                           state: EnrichmentState = .matched) throws -> String {
         var p = try store.newEntityProfile(named: name, type: "studio")
-        p.enrichmentState = .matched
+        p.enrichmentState = state
         try store.saveEntityProfile(p)
+        return p.id
+    }
+
+    private func sidecar(_ path: String) throws -> String {
+        try String(contentsOf: dir.appendingPathComponent(path), encoding: .utf8)
     }
 
     private func exists(_ path: String) -> Bool {
@@ -734,6 +744,71 @@ final class RelocationMoverTests: XCTestCase {
 
         XCTAssertTrue(exists("first.nfo"), "the sidecar comes home too")
         XCTAssertFalse(exists("Filed/a.nfo"))
+    }
+
+    // MARK: - 🚨 #95 — the sidecar's studio is the MATCHED one
+
+    /// The baseline the two tests below are measured against: a studio the
+    /// lexicon has matched belongs in the document, and still is.
+    func testAMatchedStudioIsWrittenIntoTheSidecar() throws {
+        try addStudio("Example Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Example Pictures"], released: "2019-04-12")
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Filed/new name.mp4")]), libraryURL: dir, runId: "run-1")
+
+        XCTAssertTrue(try sidecar("Filed/new name.nfo")
+            .contains("<studio>Example Pictures</studio>"))
+    }
+
+    /// 🚨 THE BUG. A `studio:` tag the lexicon has never matched is not a
+    /// studio this library will vouch for — N1 omits it from the filename, and
+    /// the document beside that filename must omit it too. Writing the raw tag
+    /// put an unvouched-for studio into the one file that leaves with the
+    /// video, stated as authoritatively as a matched one.
+    ///
+    /// ⚠️ Asserted together with the document still being WRITTEN: "no studio"
+    /// must not quietly become "no sidecar".
+    func testAnUnmatchedStudioTagIsOmittedRatherThanWrittenAsAuthoritative() throws {
+        try addStudio("Unverified Pictures", state: .noMatch)
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Unverified Pictures"], released: "2019-04-12")
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Filed/new name.mp4")]), libraryURL: dir, runId: "run-1")
+
+        let doc = try sidecar("Filed/new name.nfo")
+        XCTAssertTrue(doc.contains("<movie>"), "the sidecar is still written")
+        XCTAssertFalse(doc.contains("<studio>"),
+                       "an unmatched tag must not be recorded as this video's studio")
+        XCTAssertFalse(doc.contains("Unverified Pictures"))
+    }
+
+    /// The other half of the same disagreement: when the `video_studio` edge
+    /// and the legacy tag differ, the edge is the answer — it is what the
+    /// filename is built from, and a correction made through the matching
+    /// workflow never rewrites the old tag string.
+    func testTheSidecarFollowsTheEdgeWhenTheLegacyTagDisagrees() throws {
+        try addStudio("Stale Pictures")
+        let current = try addStudio("Current Pictures")
+        let asset = try addFile("old name.mp4", kind: .scene,
+                                tags: ["studio:Stale Pictures"], released: "2019-04-12")
+        try store.dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_studio (video_id, studio_id, source, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [asset.id.uuidString, current,
+                                 EdgeProvenance.download.rawValue, Date()])
+        }
+
+        _ = try RelocationMover(store: store).run(
+            plan([move(asset, to: "Filed/new name.mp4")]), libraryURL: dir, runId: "run-1")
+
+        let doc = try sidecar("Filed/new name.nfo")
+        XCTAssertTrue(doc.contains("<studio>Current Pictures</studio>"))
+        XCTAssertFalse(doc.contains("Stale Pictures"),
+                       "the document must not keep asserting the superseded studio")
     }
 
     // MARK: - Refusals

@@ -65,10 +65,19 @@ public enum SidecarBackfill {
     ///     sidecar beside a file still in the library root is just as portable
     ///     as one beside a filed video, and the point is that a file leaving
     ///     ViLM still means something.
+    ///   - studios: N1 already resolved, from `LibraryStore.studioPlacements`.
+    ///     🚨 REQUIRED, and deliberately has no default (#95). This pass used
+    ///     to write `asset.studios.first` — a raw `studio:` tag the lexicon may
+    ///     never have matched — into a document that looks authoritative,
+    ///     while the filename beside it omitted exactly that studio. A default
+    ///     would let a caller reintroduce the disagreement by omission, so
+    ///     every caller states where its answer came from. A video absent from
+    ///     the map is `.unprocessed`: no studio, rather than a guessed one.
     ///   - fileExists: does a sidecar already sit at this library-relative path
     ///   - write: place this document at this library-relative path
     public static func run(assets: [Asset],
                            profiles: EntityProfileIndex? = nil,
+                           studios: [UUID: StudioPlacement],
                            fileExists: (String) -> Bool,
                            write: (String, String) throws -> Void) -> SidecarBackfillSummary {
         var summary = SidecarBackfillSummary()
@@ -86,7 +95,8 @@ public enum SidecarBackfill {
             // `alreadyPresent`. Checking existence first would report the more
             // comfortable number and hide the one worth knowing.
             guard let document = MetadataSidecar.document(
-                for: asset, cast: cast, studio: asset.studios.first, fallbackTitle: stem)
+                for: asset, cast: cast, studio: studios[asset.id]?.matchedName,
+                fallbackTitle: stem)
             else {
                 summary.refused += 1
                 if fileExists(path) { summary.refusedButPresent += 1 }
@@ -115,11 +125,13 @@ public enum SidecarBackfill {
     /// unwritable path must not stop the other two hundred. A failure is
     /// counted, not thrown.
     public static func run(libraryURL: URL, assets: [Asset],
-                           profiles: EntityProfileIndex? = nil) -> SidecarBackfillSummary {
+                           profiles: EntityProfileIndex? = nil,
+                           studios: [UUID: StudioPlacement]) -> SidecarBackfillSummary {
         let manager = FileManager.default
         return run(
             assets: assets,
             profiles: profiles,
+            studios: studios,
             fileExists: { manager.fileExists(atPath: libraryURL.appendingPathComponent($0).path) },
             write: { path, document in
                 let target = libraryURL.appendingPathComponent(path)

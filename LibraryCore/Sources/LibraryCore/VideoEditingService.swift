@@ -19,6 +19,48 @@ public enum VideoEditError: Error {
     case verificationFailed
 }
 
+/// What a trim or flip is doing right now, for a UI that wants to show more
+/// than a spinner (#98).
+///
+/// 🚨 The distinction that earns this a type is `preparing` versus
+/// `exporting(0)`. Both mean "nothing has happened yet", but only the second is
+/// a NUMBER, and a determinate bar drawn from it sits visibly at zero — which
+/// reads as stuck rather than as starting. A bare `Double` cannot express the
+/// difference, so the view would have to guess at it.
+public enum VideoEditProgress: Equatable, Sendable {
+    /// The export session has been started and has reported nothing yet.
+    case preparing
+    /// Fractional completion of the re-encode, 0...1 — the long part.
+    case exporting(Double)
+    /// The re-encode is done: verifying the copy, swapping it in for the
+    /// original, rebasing markers and rebuilding the cached visuals.
+    ///
+    /// ⚠️ A phase of its own because it is NOT instant — regenerating visuals
+    /// and refreshing the duplicate-scan fingerprint take seconds on a long
+    /// video. Folded into `exporting(1)` it would leave a full bar sitting
+    /// there with nothing to say why.
+    case finishing
+
+    /// The value a determinate bar should show, or nil when the UI must keep
+    /// showing an indeterminate spinner.
+    ///
+    /// ⭐ This is #98's "degrade to the spinner rather than a bar stuck at 0%",
+    /// expressed ONCE and here, where a test can reach it — rather than as an
+    /// `if` in the view, where it cannot.
+    public var determinateFraction: Double? {
+        switch self {
+        case .preparing:        return nil
+        case let .exporting(f): return f > 0 ? min(f, 1) : nil
+        case .finishing:        return 1
+        }
+    }
+}
+
+/// Called with each change as an edit runs. ⚠️ Not on any particular actor —
+/// it is invoked from whichever task is driving the export, so a UI caller
+/// hops to the main actor itself.
+public typealias VideoEditProgressHandler = @Sendable (VideoEditProgress) -> Void
+
 public struct VideoEditingService {
     public init() {}
 
@@ -54,7 +96,8 @@ public struct VideoEditingService {
 
     /// Keeps only `[keepStart, keepEnd]` of the video (frame-accurate re-encode),
     /// replaces the original in place, and rebases/drops scene markers.
-    public func trim(_ asset: Asset, in libraryURL: URL, keepStart: Double, keepEnd: Double) async throws {
+    public func trim(_ asset: Asset, in libraryURL: URL, keepStart: Double, keepEnd: Double,
+                     onProgress: VideoEditProgressHandler? = nil) async throws {
         let sourceURL = libraryURL.appendingPathComponent(asset.relativePath)
         guard FileManager.default.fileExists(atPath: sourceURL.path) else { throw VideoEditError.sourceMissing }
 
@@ -63,8 +106,9 @@ public struct VideoEditingService {
             start: CMTime(seconds: keepStart, preferredTimescale: 600),
             end: CMTime(seconds: keepEnd, preferredTimescale: 600))
         let working = try await export(avAsset, in: libraryURL, sourceExt: sourceURL.pathExtension,
-                                       timeRange: range, videoComposition: nil)
-        try await finalize(working: working, replacing: sourceURL, asset: asset, in: libraryURL) { store in
+                                       timeRange: range, videoComposition: nil, onProgress: onProgress)
+        try await finalize(working: working, replacing: sourceURL, asset: asset, in: libraryURL,
+                           onProgress: onProgress) { store in
             try Self.rebaseMarkers(for: asset, keepStart: keepStart, keepEnd: keepEnd,
                                    store: store, libraryURL: libraryURL)
         }
@@ -105,7 +149,8 @@ public struct VideoEditingService {
     /// Mirrors the video left-right (baking the flip into the pixels) so
     /// backwards-rendering text reads correctly everywhere, then replaces the
     /// original in place. Markers are unaffected (timestamps don't change).
-    public func flip(_ asset: Asset, in libraryURL: URL) async throws {
+    public func flip(_ asset: Asset, in libraryURL: URL,
+                     onProgress: VideoEditProgressHandler? = nil) async throws {
         let sourceURL = libraryURL.appendingPathComponent(asset.relativePath)
         guard FileManager.default.fileExists(atPath: sourceURL.path) else { throw VideoEditError.sourceMissing }
 
@@ -139,15 +184,54 @@ public struct VideoEditingService {
         videoComposition.instructions = [instruction]
 
         let working = try await export(avAsset, in: libraryURL, sourceExt: sourceURL.pathExtension,
-                                       timeRange: nil, videoComposition: videoComposition)
-        try await finalize(working: working, replacing: sourceURL, asset: asset, in: libraryURL, markerWork: nil)
+                                       timeRange: nil, videoComposition: videoComposition,
+                                       onProgress: onProgress)
+        try await finalize(working: working, replacing: sourceURL, asset: asset, in: libraryURL,
+                           onProgress: onProgress, markerWork: nil)
     }
 
     // MARK: - Shared export / finalize
 
+    /// How often `AVAssetExportSession.progress` is sampled.
+    ///
+    /// ⚠️ 10 Hz: often enough that the bar moves continuously on a short clip,
+    /// rare enough that a two-hour re-encode is not spent waking up to report a
+    /// number that has not changed.
+    static let progressPollInterval = Duration.milliseconds(100)
+
+    /// The next fraction to report, given the last one — never smaller.
+    ///
+    /// 🚨 Pure and `static` so #98's two awkward cases are TESTABLE without an
+    /// encoder: `progress` can jitter downwards between samples, and a bar that
+    /// retreats reads as a bug in the app rather than as noise in AVFoundation;
+    /// and a session that reports nothing usable (NaN before it starts, or a
+    /// format that never updates) must leave the fraction where it was rather
+    /// than throwing the bar to an arbitrary place.
+    static func monotonicFraction(_ sampled: Float, notBelow previous: Double) -> Double {
+        let value = Double(sampled)
+        guard value.isFinite, value > previous else { return previous }
+        return min(value, 1)
+    }
+
+    /// Whether an export session has stopped, one way or another.
+    ///
+    /// ⚠️ `.unknown` is NOT terminal. The session has been started but may not
+    /// have transitioned yet, and calling that finished would leave the polling
+    /// loop immediately and report a failure before the export began.
+    private static func isTerminal(_ status: AVAssetExportSession.Status) -> Bool {
+        switch status {
+        case .completed, .failed, .cancelled:   return true
+        case .unknown, .waiting, .exporting:    return false
+        // A status this build does not know is treated as stopped rather than
+        // looped on forever — the guard that follows then reports it.
+        @unknown default:                       return true
+        }
+    }
+
     private func export(
         _ avAsset: AVURLAsset, in libraryURL: URL, sourceExt: String,
-        timeRange: CMTimeRange?, videoComposition: AVMutableVideoComposition?
+        timeRange: CMTimeRange?, videoComposition: AVMutableVideoComposition?,
+        onProgress: VideoEditProgressHandler?
     ) async throws -> URL {
         let workingDir = libraryURL.appendingPathComponent(".catalog/editing", isDirectory: true)
         try? FileManager.default.createDirectory(at: workingDir, withIntermediateDirectories: true)
@@ -166,9 +250,30 @@ public struct VideoEditingService {
         if let timeRange { session.timeRange = timeRange }
         if let videoComposition { session.videoComposition = videoComposition }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            session.exportAsynchronously { continuation.resume() }
+        // 🚨 Polled from THIS task rather than from a second one watching the
+        // session. `AVAssetExportSession` is not Sendable, so a polling `Task`
+        // capturing it would not compile under this package's Swift 6 language
+        // mode — and no second signal is needed anyway: `status` reaching a
+        // terminal value is the same fact the completion handler announces, and
+        // is already what the guard below tests.
+        onProgress?(.preparing)
+        var fraction = 0.0
+        session.exportAsynchronously {}
+        while !Self.isTerminal(session.status) {
+            fraction = Self.monotonicFraction(session.progress, notBelow: fraction)
+            onProgress?(.exporting(fraction))
+            do {
+                try await Task.sleep(for: Self.progressPollInterval)
+            } catch {
+                // ⚠️ The enclosing task was cancelled. Stop the encode rather
+                // than spinning on a sleep that will keep throwing — the status
+                // then settles as `.cancelled` and the guard below cleans up
+                // the working file, which is what a failed export already does.
+                session.cancelExport()
+                break
+            }
         }
+
         guard session.status == .completed else {
             try? FileManager.default.removeItem(at: workingURL)
             throw VideoEditError.exportFailed
@@ -178,8 +283,14 @@ public struct VideoEditingService {
 
     private func finalize(
         working: URL, replacing sourceURL: URL, asset: Asset, in libraryURL: URL,
+        onProgress: VideoEditProgressHandler?,
         markerWork: ((LibraryStore) throws -> Void)?
     ) async throws {
+        // ⭐ Announced here rather than at the end of the export, because this
+        // is the work the phase actually names — and it is the slow tail a full
+        // bar would otherwise sit through unexplained.
+        onProgress?(.finishing)
+
         // Verify the export is a playable, non-empty video before touching the
         // original — a bad export must never destroy the source.
         let check = AVURLAsset(url: working)

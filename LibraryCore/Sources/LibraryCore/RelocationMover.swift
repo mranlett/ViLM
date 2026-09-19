@@ -232,8 +232,19 @@ public struct RelocationMover {
             SidecarPerformer(name: name, thumbURL: profiles?[actor: name]?.photoUrl)
         }
         let stem = (asset.fileName as NSString).deletingPathExtension
+
+        // 🚨 The MATCHED studio, never the raw `studio:` tag (#95). An
+        // unmatched tag is omitted from the filename by N1, so writing it into
+        // the sidecar would send a studio this library has not vouched for out
+        // on the one file that travels with the video — and the name and the
+        // document would then disagree about where it came from.
+        //
+        // ⚠️ Best-effort like everything else here: a store that cannot answer
+        // yields no studio rather than falling back to the tag, because the
+        // fallback IS the defect.
+        let studio = (try? store.studioPlacements(for: [asset]))?[asset.id]?.matchedName
         guard let document = MetadataSidecar.document(
-            for: asset, cast: cast, studio: asset.studios.first, fallbackTitle: stem)
+            for: asset, cast: cast, studio: studio, fallbackTitle: stem)
         else { return }
 
         let target = libraryURL.appendingPathComponent(MetadataSidecar.path(forVideo: newPath))

@@ -3,9 +3,12 @@
 //
 // TRACKED and PUBLIC. Names no source.
 //
-// 🚨 Adds to the gallery and never touches `photoUrl`. The rule and the reason
-// live in `ActorPhotoTopUp`; this screen must not quietly acquire an exception
-// to it.
+// 🚨 The fetch adds to the gallery and never touches `photoUrl` — that rule
+// and its reason live in `ActorPhotoTopUp`. `ActorProfilePhotoRepair` (#97)
+// is the one deliberate, narrow exception this screen also runs: it resets
+// `photoUrl` ONLY when it no longer resolves to a locally downloaded file,
+// promoting an already-downloaded gallery photo in its place — never a
+// working primary, and never by going online.
 //
 // ⚠️ Sequential and cancellable. Three hundred requests fired at once is how a
 // rate limit gets discovered the hard way, and what has already been applied
@@ -53,6 +56,10 @@ struct ActorPhotoTopUpView: View {
     @State private var toppedUp = 0
     @State private var nothingNew = 0
     @State private var failed = 0
+    /// #97 — profiles whose broken `photoUrl` was reset from an already
+    /// downloaded gallery photo. Set on every `load()`, not just after a
+    /// fetch run, since repair is unattended and unconditioned by selection.
+    @State private var profilePhotosRepaired = 0
     @State private var message: String?
     @State private var task: Task<Void, Never>?
 
@@ -126,7 +133,11 @@ struct ActorPhotoTopUpView: View {
                     .onChange(of: showsExhausted) { _, _ in load() }
                 }
             } footer: {
-                Text("Adds to each performer's gallery. Your chosen profile picture is never changed.")
+                Text("Adds to each performer's gallery. Your chosen profile picture is never changed — "
+                     + "it is reset only when it no longer points at a downloaded photo, using one "
+                     + "already in the gallery."
+                     + (profilePhotosRepaired > 0
+                        ? " \(profilePhotosRepaired) reset this way just now." : ""))
             }
 
             Section {
@@ -248,11 +259,36 @@ struct ActorPhotoTopUpView: View {
         let eligible = pooled(actors)
         totalActors = actors.count
         pooledCount = eligible.count
-        candidates = ActorPhotoTopUp.worklist(eligible, threshold: threshold,
+
+        // #97 — repair a lost profile-photo assignment before anything else,
+        // from an already-downloaded gallery photo only (never online — the
+        // operator's rule). Runs over the whole pool, NOT the thin-gallery
+        // threshold below: a broken primary can belong to a performer with
+        // plenty of photos, who would never appear as a topup candidate.
+        let profilesDir = libraryURL.appendingPathComponent(".catalog/profiles")
+        var repaired: [String: EntityProfile] = [:]
+        for candidate in ActorProfilePhotoRepair.worklist(eligible, profilesDir: profilesDir) {
+            guard let fixed = try? ActorProfilePhotoRepair.repair(candidate, profilesDir: profilesDir)
+            else { continue }
+            // Same staleness-safety `topUp` uses: save through the profile's
+            // OWNING library rather than assuming it is this one.
+            guard let profileStore = try? LibrarySession.shared.store(forProfile: candidate.profile.id)
+            else { continue }
+            try? profileStore.saveEntityProfile(fixed)
+            repaired[fixed.id] = fixed
+        }
+        profilePhotosRepaired = repaired.count
+        // Reflects what was just fixed rather than the stale pre-repair
+        // snapshot — a repaired profile's photo count does not actually
+        // change (the token was already counted via `galleryUrls`), but its
+        // `photoUrl` does, and later screens reading `candidates` should see it.
+        let refreshedEligible = eligible.map { repaired[$0.id] ?? $0 }
+
+        candidates = ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold,
                                               includingExhausted: showsExhausted)
-        exhaustedCount = ActorPhotoTopUp.worklist(eligible, threshold: threshold,
+        exhaustedCount = ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold,
                                                   includingExhausted: true).count
-            - ActorPhotoTopUp.worklist(eligible, threshold: threshold).count
+            - ActorPhotoTopUp.worklist(refreshedEligible, threshold: threshold).count
         selected = selected.filter { id in candidates.contains { $0.id == id } }
     }
 
