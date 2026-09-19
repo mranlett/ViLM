@@ -355,6 +355,13 @@ struct ActorPhotoTopUpView: View {
         show(eligible.map { outcome.0[$0.id] ?? $0 })
     }
 
+    /// ⚠️ Fallback only. `LibrarySession` knows which library owns a profile;
+    /// this is for the case where it cannot say, where writing into the library
+    /// currently open is better than not storing the photo at all.
+    private func owningProfilesDir(for profileId: String) -> URL {
+        libraryURL.appendingPathComponent(".catalog/profiles")
+    }
+
     /// Rebuilds what the list shows from a set of eligible performers.
     /// ⭐ One place, so the pre-repair and post-repair passes cannot drift.
     private func show(_ eligible: [EntityProfile]) {
@@ -436,7 +443,36 @@ struct ActorPhotoTopUpView: View {
                                          source: provider.displayName, sourceId: sourceId,
                                          isVideo: false)
 
-            guard let updated = ActorPhotoTopUp.applying(fetched, to: current) else {
+            // 🚨 DOWNLOADED BEFORE RECORDED. A URL only becomes a gallery
+            // entry once its bytes are on this device, because the alternative
+            // is the third state: an entry that claims a photo exists while
+            // nothing on disk backs it. That state is what left 475 performers
+            // with recorded galleries and no files, invisibly, because every
+            // deletion path in the app left the URLs behind looking fine.
+            //
+            // ⚠️ A URL that cannot be fetched is simply not added. It is not an
+            // error and it is not recorded for later — "later" is the thing
+            // being removed. The source will offer it again on the next run if
+            // it still exists, which is a cheaper way to be right than keeping
+            // a claim nobody can check.
+            let profilesDir = LibrarySession.shared.profilesDir(forProfile: current.id)
+                ?? owningProfilesDir(for: current.id)
+            var stored: [URL] = []
+            for url in fetched {
+                if Task.isCancelled { break }
+                let fileName = ProfileImageNaming.galleryFileName(
+                    for: current.id, token: url.absoluteString)
+                let destination = profilesDir.appendingPathComponent(fileName)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    stored.append(url)
+                    continue
+                }
+                if await ActorPhotoFetch.download(url.absoluteString, to: destination) == .downloaded {
+                    stored.append(url)
+                }
+            }
+
+            guard let updated = ActorPhotoTopUp.applying(stored, to: current) else {
                 // 🚨 Recorded, so the list can be worked to the end. The source
                 // has nothing we do not hold — and for a performer it only has
                 // one picture of, that stays true no matter how many times we

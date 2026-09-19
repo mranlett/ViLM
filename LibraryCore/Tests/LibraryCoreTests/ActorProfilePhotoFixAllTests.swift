@@ -181,4 +181,81 @@ final class ActorProfilePhotoFixAllTests: XCTestCase {
         summary.failed = 3
         XCTAssertEqual(summary.considered, 1375)
     }
+
+    // MARK: - 🚨 Enumerating the third state
+
+    /// Every recorded photo with no file — the claims the library cannot
+    /// currently support, which is exactly the state being eliminated.
+    func testMissingPhotosListsEveryRecordedUrlWithNoFile() {
+        let a = "https://example.com/a.jpg"
+        let b = "https://example.com/b.jpg"
+        let missing = ActorProfilePhotoFixAll.missingPhotos(
+            for: profile(photoUrl: a, gallery: [a, b]), existingFiles: [])
+        XCTAssertEqual(missing.map(\.token), [a, b])
+    }
+
+    /// ⭐ The primary is FIRST: a run cancelled half way should have restored
+    /// faces, not filled galleries behind them.
+    func testThePrimaryIsOfferedBeforeTheGallery() {
+        let primary = "https://example.com/primary.jpg"
+        let other = "https://example.com/other.jpg"
+        let missing = ActorProfilePhotoFixAll.missingPhotos(
+            for: profile(photoUrl: primary, gallery: [other, primary]), existingFiles: [])
+        XCTAssertEqual(missing.first?.token, primary)
+        XCTAssertTrue(missing.first?.isPrimary == true)
+        XCTAssertEqual(missing.first?.fileName, "\(safeId).jpg")
+        XCTAssertEqual(missing.count, 2, "and the primary is not offered twice")
+    }
+
+    func testPhotosAlreadyOnDiskAreNotListed() {
+        let a = "https://example.com/a.jpg"
+        let b = "https://example.com/b.jpg"
+        let missing = ActorProfilePhotoFixAll.missingPhotos(
+            for: profile(photoUrl: nil, gallery: [a, b]), existingFiles: [gallery(a)])
+        XCTAssertEqual(missing.map(\.token), [b])
+    }
+
+    func testTheSentinelIsNeverOfferedForDownload() {
+        let missing = ActorProfilePhotoFixAll.missingPhotos(
+            for: profile(photoUrl: ProfileImageNaming.localPrimaryToken,
+                         gallery: [ProfileImageNaming.localPrimaryToken]),
+            existingFiles: [])
+        XCTAssertTrue(missing.isEmpty, "the sentinel names the primary file, not a remote photo")
+    }
+
+    // MARK: - 🚨 Dropping only what is definitively gone
+
+    func testAGoneTokenIsRemovedFromTheGallery() {
+        let dead = "https://example.com/dead.jpg"
+        let alive = "https://example.com/alive.jpg"
+        let updated = ActorProfilePhotoFixAll.dropping(
+            [dead], from: profile(photoUrl: alive, gallery: [dead, alive]))
+        XCTAssertEqual(updated?.galleryUrls, [alive])
+        XCTAssertEqual(updated?.photoUrl, alive, "a living primary is untouched")
+    }
+
+    /// ⚠️ A gone primary is CLEARED, never repointed here. Choosing a
+    /// replacement would be a second, hidden expression of "which photo is the
+    /// primary" — `plan(for:existingFiles:)` owns that, against the files that
+    /// then exist.
+    func testAGonePrimaryIsClearedRatherThanRepointed() {
+        let dead = "https://example.com/dead.jpg"
+        let other = "https://example.com/other.jpg"
+        let updated = ActorProfilePhotoFixAll.dropping(
+            [dead], from: profile(photoUrl: dead, gallery: [dead, other]))
+        XCTAssertNil(updated?.photoUrl)
+        XCTAssertEqual(updated?.galleryUrls, [other])
+    }
+
+    /// ⭐ No change means no write. A pass over a library where nothing is gone
+    /// must not rewrite every profile row it read.
+    func testNothingGoneMeansNoUpdate() {
+        XCTAssertNil(ActorProfilePhotoFixAll.dropping(
+            [], from: profile(photoUrl: "https://example.com/a.jpg")))
+        XCTAssertNil(ActorProfilePhotoFixAll.dropping(
+            ["https://example.com/not-in-this-profile.jpg"],
+            from: profile(photoUrl: "https://example.com/a.jpg",
+                          gallery: ["https://example.com/a.jpg"])))
+    }
+
 }

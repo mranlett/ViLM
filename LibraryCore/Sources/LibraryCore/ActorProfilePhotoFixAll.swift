@@ -115,6 +115,20 @@ public enum ActorProfilePhotoFixAll {
         /// through. ⚠️ Distinct from `noLocalSource`, which is not a failure.
         public var failed = 0
 
+        /// Photos fetched because they were recorded but had no file.
+        ///
+        /// ⚠️ Counted in PHOTOS, not performers, and deliberately outside
+        /// `considered`: one performer can contribute a dozen. Mixing the two
+        /// units into one total is how a summary stops adding up.
+        public var photosDownloaded = 0
+        /// Entries removed because the photo is definitively gone (404/410).
+        public var entriesDropped = 0
+        /// 🚨 Entries KEPT despite failing to download — the source was
+        /// unreachable, rate-limiting, or erroring. Reported so a run against a
+        /// bad connection is visible as such rather than looking like a library
+        /// full of dead links.
+        public var entriesUnavailable = 0
+
         public init() {}
 
         public var considered: Int { alreadyFine + repaired + noLocalSource + failed }
@@ -153,5 +167,87 @@ public enum ActorProfilePhotoFixAll {
         let contents = (try? FileManager.default.contentsOfDirectory(
             atPath: profilesDir.path)) ?? []
         return Set(contents)
+    }
+}
+
+// MARK: - Making "local or absent" true
+
+public extension ActorProfilePhotoFixAll {
+
+    /// One recorded URL that has no file, and where its file belongs.
+    struct MissingPhoto: Equatable, Sendable {
+        public let token: String
+        public let fileName: String
+        /// Whether this token is the profile's `photoUrl` — which lands at the
+        /// primary filename and is what a card actually shows.
+        public let isPrimary: Bool
+
+        public init(token: String, fileName: String, isPrimary: Bool) {
+            self.token = token
+            self.fileName = fileName
+            self.isPrimary = isPrimary
+        }
+    }
+
+    /// Every recorded photo for this performer that has no file on disk.
+    ///
+    /// 🚨 This is the third state enumerated. A gallery entry is a CLAIM that a
+    /// photo exists; a file is the photo. Everything returned here is a claim
+    /// the library cannot currently support, and the caller's job is to make it
+    /// true (download it) or remove it (it is definitively gone).
+    ///
+    /// ⭐ The primary comes FIRST, because it is the one a card actually shows:
+    /// a run that is cancelled half way should have restored faces, not filled
+    /// galleries behind them.
+    ///
+    /// ⚠️ The `local://primary` sentinel is skipped — it names the primary file
+    /// rather than a remote photo, so there is nothing to fetch for it.
+    static func missingPhotos(for profile: EntityProfile,
+                              existingFiles: Set<String>) -> [MissingPhoto] {
+        var out: [MissingPhoto] = []
+        var seen = Set<String>()
+
+        let primaryToken = profile.photoUrl ?? ""
+        if !primaryToken.isEmpty, primaryToken != ProfileImageNaming.localPrimaryToken {
+            let fileName = ProfileImageNaming.primaryFileName(for: profile.id)
+            if !existingFiles.contains(fileName) {
+                out.append(MissingPhoto(token: primaryToken, fileName: fileName, isPrimary: true))
+            }
+            seen.insert(primaryToken)
+        }
+
+        for token in profile.galleryUrls
+        where token != ProfileImageNaming.localPrimaryToken && seen.insert(token).inserted {
+            let fileName = ProfileImageNaming.galleryFileName(for: profile.id, token: token)
+            if !existingFiles.contains(fileName) {
+                out.append(MissingPhoto(token: token, fileName: fileName, isPrimary: false))
+            }
+        }
+        return out
+    }
+
+    /// Removes tokens whose photos are definitively gone, so the profile stops
+    /// claiming photos that do not exist anywhere.
+    ///
+    /// 🚨 ONLY `.gone` tokens. An `.unavailable` one is kept — see
+    /// `ActorPhotoFetch.classify` for why the bar is that high.
+    ///
+    /// ⚠️ If `photoUrl` was among them it is cleared rather than repointed at
+    /// another entry. Choosing a replacement here would be a second, hidden
+    /// expression of "which photo is the primary" — `plan(for:existingFiles:)`
+    /// owns that decision, and it runs against the files that then exist.
+    /// Returns nil when nothing changed, so callers write only real changes.
+    static func dropping(_ goneTokens: Set<String>,
+                         from profile: EntityProfile) -> EntityProfile? {
+        guard !goneTokens.isEmpty else { return nil }
+
+        let remaining = profile.galleryUrls.filter { !goneTokens.contains($0) }
+        let primaryIsGone = (profile.photoUrl).map { goneTokens.contains($0) } ?? false
+        guard remaining.count != profile.galleryUrls.count || primaryIsGone else { return nil }
+
+        var updated = profile
+        updated.galleryUrls = remaining
+        if primaryIsGone { updated.photoUrl = nil }
+        return updated
     }
 }
